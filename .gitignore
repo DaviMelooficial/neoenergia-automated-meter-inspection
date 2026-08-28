@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Projeto 4 Neoenergia: dados do cliente e artefatos de runtime
+# ---------------------------------------------------------------------------
+
+# Dados brutos do cliente. 311 MB de fotos de medidores e leituras.
+# NUNCA versionar: contem dado operacional de cliente.
+Base cliente/
+
+# Runtime local: storage de fotos gerenciadas e lotes em staging
+data/
+
+# Modelos treinados (binarios grandes). Os reports em ml/reports/ SAO versionados.
+ml/artifacts/
+
+# Frontend
+node_modules/
+app/frontend/dist/
+
+# Ferramentas de agente e sistema
+.omc/
+.omo/
+.DS_Store

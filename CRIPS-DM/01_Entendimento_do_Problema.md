@@ -137,3 +137,4 @@ O desafio já aponta a direção: automação com IA/Visão Computacional, valid
 - Documento de Desafio — Projeto 4 DADOS (Neoenergia Pernambuco)
 - Apresentação da Disciplina — Projeto 4 (CESAR School, Prof. Erick Simões)
 - Entrevista preliminar com profissional da Neoenergia (roteiro estruturado)
+- Índice do vault: [[00_Indice]]

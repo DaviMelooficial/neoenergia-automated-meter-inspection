@@ -240,3 +240,12 @@ app/frontend/dist/
 .omc/
 .omo/
 .DS_Store
+
+# Obsidian: a config do vault e versionada, mas o estado local de cada
+# maquina (layout de janelas, cache, plugins baixados) nao.
+CRIPS-DM/.obsidian/workspace.json
+CRIPS-DM/.obsidian/workspace-mobile.json
+CRIPS-DM/.obsidian/cache
+CRIPS-DM/.obsidian/plugins/
+CRIPS-DM/.obsidian/themes/
+CRIPS-DM/.trash/

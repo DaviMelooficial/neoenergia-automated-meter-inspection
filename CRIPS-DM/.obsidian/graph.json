@@ -1,0 +1,34 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": true,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "path:04_Plano_Desenvolvimento",
+      "color": { "a": 1, "rgb": 5431378 }
+    },
+    {
+      "query": "tag:#crisp-dm",
+      "color": { "a": 1, "rgb": 42405 }
+    },
+    {
+      "query": "tag:#bloqueado",
+      "color": { "a": 1, "rgb": 14701138 }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": -0.3,
+  "nodeSizeMultiplier": 1.4,
+  "lineSizeMultiplier": 1.2,
+  "collapse-forces": false,
+  "centerStrength": 0.5,
+  "repelStrength": 11,
+  "linkStrength": 1,
+  "linkDistance": 180,
+  "scale": 1
+}

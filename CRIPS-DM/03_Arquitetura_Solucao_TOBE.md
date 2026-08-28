@@ -9,7 +9,7 @@ tags: [projeto4, neoenergia, crisp-dm, arquitetura-solucao, to-be]
 
 # Arquitetura da Solução (TO-BE): Verificação Automatizada de Fotos de Leitura
 
-> Documento de uso interno do time. Detalha a arquitetura de ponta a ponta prevista em `01_Entendimento_do_Problema.md` (seção 7, "documento específico de solução TO-BE") e incorpora os achados de `02_Entendimento_dos_Dados.md`. Antes de fechar as decisões, o time simulou um debate técnico entre quatro perspectivas especialistas (ML/Visão Computacional, Backend/Plataforma, Produto/MVP, Qualidade de Dados/LGPD) para evitar pontos cegos e over-engineering. A seção 2 registra esse debate e as decisões resultantes; as seções seguintes detalham a arquitetura final.
+> Documento de uso interno do time. Detalha a arquitetura de ponta a ponta prevista em [[01_Entendimento_do_Problema]] (seção 7, "documento específico de solução TO-BE") e incorpora os achados de [[02_Entendimento_dos_Dados]]. Antes de fechar as decisões, o time simulou um debate técnico entre quatro perspectivas especialistas (ML/Visão Computacional, Backend/Plataforma, Produto/MVP, Qualidade de Dados/LGPD) para evitar pontos cegos e over-engineering. A seção 2 registra esse debate e as decisões resultantes; as seções seguintes detalham a arquitetura final.
 
 ---
 
@@ -110,7 +110,7 @@ flowchart TD
   - Nitidez: variância do Laplaciano (abaixo de um limiar → "fora de foco").
   - Exposição/glare: análise de histograma (picos de saturação → "reflexo").
   - Ausência de display: detector genérico pré-treinado (ex.: modelo de detecção de objeto zero-shot) para checar se há uma região retangular de display no quadro.
-- **V1 (Fase 2+)**: classificador multi-label (CNN leve, ex. MobileNetV3, transfer learning) para as classes já mapeadas em `02_Entendimento_dos_Dados.md` (glare, fora de foco, tampa suja/embaçada, enquadramento incorreto, display apagado), treinado com:
+- **V1 (Fase 2+)**: classificador multi-label (CNN leve, ex. MobileNetV3, transfer learning) para as classes já mapeadas em [[02_Entendimento_dos_Dados]] (glare, fora de foco, tampa suja/embaçada, enquadramento incorreto, display apagado), treinado com:
   - Dataset sintético (degradação artificial das ~9k fotos reais: blur gaussiano, overlay de glare, downscale); não depende de rótulo manual.
   - Rótulos de produção (decisões humanas da Fase 1) via active learning (seção 8.2).
 
@@ -409,7 +409,8 @@ A ausência de dados sensíveis na amostra analisada (doc 02, seção 5.4) não 
 
 ## Referências
 
-- `01_Entendimento_do_Problema.md`
-- `02_Entendimento_dos_Dados.md`
+- [[01_Entendimento_do_Problema]]
+- [[02_Entendimento_dos_Dados]]
 - Debate técnico entre personas (Dra. Camila Souza, Eng. Rafael Tanaka, Beatriz Lins, Dr. Marcos Vieira): síntese na seção 2
 - Base fornecida pelo cliente (`Base cliente/`, 4 pastas + planilha de notas × foto)
+- Índice do vault: [[00_Indice]]

@@ -1,0 +1,14 @@
+{
+  "useMarkdownLinks": false,
+  "newLinkFormat": "shortest",
+  "alwaysUpdateLinks": true,
+  "showUnsupportedFiles": false,
+  "attachmentFolderPath": "_anexos",
+  "newFileLocation": "current",
+  "defaultViewMode": "preview",
+  "livePreview": true,
+  "readableLineLength": true,
+  "strictLineBreaks": false,
+  "showFrontmatter": true,
+  "promptDelete": true
+}

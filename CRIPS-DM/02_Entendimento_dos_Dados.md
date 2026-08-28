@@ -9,13 +9,13 @@ tags: [projeto4, neoenergia, crisp-dm, entendimento-dos-dados]
 
 # Entendimento dos Dados — Verificação de Fotos de Leitura
 
-> Documento de uso interno do time. Consolida o entendimento dos dados fornecidos pela Neoenergia Pernambuco referentes a todo o dataset do projeto (~9.000 fotos distribuídas em 4 pastas, com seus respectivos CSVs de extração), e do refinamento feito com o time. Complementa o `01_Entendimento_do_Problema.md` e serve de base para o Kickoff (12/09) e para a fase de Preparação dos Dados.
+> Documento de uso interno do time. Consolida o entendimento dos dados fornecidos pela Neoenergia Pernambuco referentes a todo o dataset do projeto (~9.000 fotos distribuídas em 4 pastas, com seus respectivos CSVs de extração), e do refinamento feito com o time. Complementa o [[01_Entendimento_do_Problema]] e serve de base para o Kickoff (12/09) e para a fase de Preparação dos Dados.
 
 ---
 
 ## 1. Contexto desta Etapa
 
-O `01_Entendimento_do_Problema.md` mapeou o gargalo central: auditoria manual de 30-50 mil fotos/dia, com defasagem D+1 e falta de triagem na origem. Esta etapa examina os **dados reais** que sustentam (ou não) esse diagnóstico e que servirão de insumo para a Preparação dos Dados e Modelagem: a base de leituras, a tabela de regras de negócio (nota × exigência de foto) e uma amostra das fotos em si.
+O [[01_Entendimento_do_Problema]] mapeou o gargalo central: auditoria manual de 30-50 mil fotos/dia, com defasagem D+1 e falta de triagem na origem. Esta etapa examina os **dados reais** que sustentam (ou não) esse diagnóstico e que servirão de insumo para a Preparação dos Dados e Modelagem: a base de leituras, a tabela de regras de negócio (nota × exigência de foto) e uma amostra das fotos em si.
 
 ## 2. Fontes de Dados e Coleta Inicial
 
@@ -165,7 +165,7 @@ flowchart TD
 | Display apagado | Nenhum dígito visível, medidor aparentemente sem energia no momento da foto | Leitura impossível |
 | Objeto estranho no quadro | Ex.: inseto sobre os fios (não necessariamente impede a leitura) | Ruído visual |
 
-> **Observação**: segundo o cliente, esses problemas já são conhecidos empiricamente e associados ao retrabalho mapeado no `01_Entendimento_do_Problema.md` (Gargalo 3 — falta de triagem na origem), mas **ainda não foram quantificados ou metrificados formalmente**. Não existe hoje uma taxa histórica de "fotos inutilizáveis" que sirva de baseline — isso é uma lacuna que o próprio projeto passa a preencher.
+> **Observação**: segundo o cliente, esses problemas já são conhecidos empiricamente e associados ao retrabalho mapeado no [[01_Entendimento_do_Problema]] (Gargalo 3 — falta de triagem na origem), mas **ainda não foram quantificados ou metrificados formalmente**. Não existe hoje uma taxa histórica de "fotos inutilizáveis" que sirva de baseline — isso é uma lacuna que o próprio projeto passa a preencher.
 
 ### 5.3 Ausência de rótulos (ground truth)
 
@@ -198,7 +198,7 @@ Na amostra analisada não foram identificados dados pessoais sensíveis (rostos,
 - Roteiro de entrevista estruturado (7 blocos temáticos), agora complementado com as 8 pendências desta etapa;
 - Base fornecida pelo cliente (4 pastas, ~9.000 imagens + CSVs de extração);
 - Planilha de notas × exigência de foto (61 códigos);
-- Logs/exportações do app de terceiros (a confirmar acesso, ver `01_Entendimento_do_Problema.md`, seção 8).
+- Logs/exportações do app de terceiros (a confirmar acesso, ver [[01_Entendimento_do_Problema]], seção 8).
 
 ## 9. Próximos Passos
 
@@ -209,6 +209,7 @@ Na amostra analisada não foram identificados dados pessoais sensíveis (rostos,
 ## Referências
 
 - Documento de Desafio — Projeto 4 DADOS (Neoenergia Pernambuco)
-- `01_Entendimento_do_Problema.md`
+- [[01_Entendimento_do_Problema]]
 - Base de extração diária (CSV) e planilha de notas × foto fornecidas pelo cliente
 - Amostra de 19 fotos de leitura (3 dos 4 lotes disponíveis)
+- Índice do vault: [[00_Indice]]

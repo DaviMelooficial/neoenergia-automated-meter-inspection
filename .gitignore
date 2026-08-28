@@ -234,6 +234,7 @@ ml/artifacts/
 # Frontend
 node_modules/
 app/frontend/dist/
+*.tsbuildinfo
 
 # Ferramentas de agente e sistema
 .omc/

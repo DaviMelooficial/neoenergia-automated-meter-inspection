@@ -1,0 +1,102 @@
+.DEFAULT_GOAL := help
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest \
+        api-dev worker-dev front-dev test lint up down logs reset health
+
+help:  ## lista os alvos disponiveis
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	 | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
+env:  ## cria .env a partir do exemplo, se ainda nao existir
+	@test -f .env || (cp .env.example .env && echo "criado .env a partir de .env.example")
+
+setup: env  ## instala toda a toolchain e as dependencias
+	uv python install 3.12
+	cd app/backend && uv sync
+	cd ml && uv sync
+	cd app/frontend && npm install
+
+# ---------------------------------------------------------------------------
+# Banco
+# ---------------------------------------------------------------------------
+
+db-up:  ## sobe apenas o postgres
+	docker compose up -d postgres
+	@printf "aguardando o postgres"
+	@until docker compose exec -T postgres pg_isready -q 2>/dev/null; do printf "."; sleep 1; done
+	@echo " pronto"
+
+db-down:  ## para o postgres
+	docker compose stop postgres
+
+migrate:  ## aplica as migracoes
+	cd app/backend && uv run alembic upgrade head
+
+revision:  ## cria migracao (uso: make revision M="descricao")
+	@test -n "$(M)" || (echo 'uso: make revision M="descricao"'; exit 1)
+	cd app/backend && uv run alembic revision --autogenerate -m "$(M)"
+
+# ---------------------------------------------------------------------------
+# Dados
+# ---------------------------------------------------------------------------
+
+seed-staging:  ## copia um lote de "Base cliente" para data/staging (uso: make seed-staging LOTE=...)
+	@test -n "$(LOTE)" || (echo 'uso: make seed-staging LOTE=PSP_EXTRATLEITIMPL_200526_0352'; exit 1)
+	@mkdir -p data/staging
+	cp -R "Base cliente/$(LOTE)" data/staging/
+	@echo "lote $(LOTE) pronto em data/staging"
+
+ingest:  ## ingere um lote de data/staging (uso: make ingest LOTE=...)
+	@test -n "$(LOTE)" || (echo 'uso: make ingest LOTE=PSP_EXTRATLEITIMPL_200526_0352'; exit 1)
+	cd app/backend && uv run python -m inspecao.ingest.batch --lote $(LOTE)
+
+# ---------------------------------------------------------------------------
+# Desenvolvimento (processos no host, com hot reload)
+# ---------------------------------------------------------------------------
+
+api-dev:  ## sobe a api no host com reload
+	cd app/backend && uv run uvicorn inspecao.main:app --reload --port 8000
+
+worker-dev:  ## sobe o worker no host
+	cd app/backend && uv run python -m inspecao.jobs.worker
+
+front-dev:  ## sobe o vite dev server
+	cd app/frontend && npm run dev
+
+# ---------------------------------------------------------------------------
+# Qualidade
+# ---------------------------------------------------------------------------
+
+test:  ## roda os testes de backend e frontend
+	cd app/backend && uv run pytest -q
+	cd app/frontend && npm run test -- --run
+
+lint:  ## roda os linters
+	cd app/backend && uv run ruff check src tests
+	cd ml && uv run ruff check src
+	cd app/frontend && npm run lint
+
+# ---------------------------------------------------------------------------
+# Stack completa
+# ---------------------------------------------------------------------------
+
+up: env  ## sobe a stack completa em container
+	docker compose up -d --build
+
+down:  ## derruba a stack
+	docker compose down
+
+logs:  ## acompanha os logs
+	docker compose logs -f
+
+health:  ## consulta o /health da api
+	@curl -fsS http://localhost:8000/api/health | python3 -m json.tool
+
+reset:  ## APAGA banco, storage e staging. Recomeca do zero
+	docker compose down -v
+	rm -rf data/storage data/staging
+	mkdir -p data/storage data/staging
+	@echo "estado local zerado"

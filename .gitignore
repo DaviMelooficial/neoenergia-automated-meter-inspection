@@ -225,6 +225,10 @@ __marimo__/
 # NUNCA versionar: contem dado operacional de cliente.
 Base cliente/
 
+# Plano de desenvolvimento: documento interno de execucao do time, nao
+# versionado. Continua em disco e dentro do vault do Obsidian.
+CRIPS-DM/04_Plano_Desenvolvimento/
+
 # Runtime local: storage de fotos gerenciadas e lotes em staging
 data/
 

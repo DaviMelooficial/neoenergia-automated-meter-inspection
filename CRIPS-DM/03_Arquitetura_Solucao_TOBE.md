@@ -24,6 +24,7 @@ tags: [projeto4, neoenergia, crisp-dm, arquitetura-solucao, to-be]
 3. **Faseamento com gate de métrica**: cada fase só avança se a fase anterior atingiu o critério de sucesso definido (seção 9), não por calendário.
 4. **Humano como fonte de rótulo, não só como usuário final**: a decisão dos 6 auditores é o combustível do aprendizado contínuo (active learning), com salvaguardas contra viés (seção 8.2).
 5. **Não prometer o que depende de terceiro**: intervenção em tempo real na captura em campo (Gargalo 4 do doc 01) é tratada como Fase 3, condicionada a negociação comercial/API, nunca como entrega do MVP.
+6. **Instrumentação como entrega**: cada etapa do processo gera registro auditável, e as métricas da seção 9 são subproduto da operação, não projeto paralelo. O AS-IS não mede nada sobre si mesmo; o TO-BE precisa medir tudo desde o primeiro lote, antes de qualquer modelo.
 
 ---
 
@@ -86,7 +87,7 @@ flowchart TD
     O -.->|"retreino (gate manual)"| I
 ```
 
-**Leitura do fluxo**: o que muda estruturalmente do AS-IS (doc 01, seção 3.2) é que a foto passa por dois filtros automáticos (qualidade e consistência) **antes** de chegar aos 6 auditores. Só a zona de incerteza real chega a humano, e a decisão humana retroalimenta o próprio modelo.
+**Leitura do fluxo**: o que muda estruturalmente do AS-IS (doc 01, seção 3.2) é que a foto passa por dois filtros automáticos (qualidade e consistência) **antes** de chegar aos 6 auditores. Só a zona de incerteza real chega a humano, e a decisão humana retroalimenta o próprio modelo. Há uma segunda mudança, menos visível no diagrama: cada seta é um evento registrado, o que torna o fluxo mensurável de ponta a ponta pela primeira vez (seção 9).
 
 ---
 
@@ -256,7 +257,8 @@ Toda transição grava uma linha em `historico_status` (append-only); nunca um `
 | `GET /fila-humana` | Lista paginada/filtrável (por motivo, nota, lote) para o dashboard. Requer papel `auditor` ou superior |
 | `POST /fila-humana/{id}/decisao` | Registra decisão do auditor (aprova/reprova + motivo). Requer papel `auditor` ou superior |
 | `GET /quarentena` | Lista inconsistências de dados pendentes (seção 8.1). Requer papel `supervisor` ou `admin` |
-| `GET /metricas/qualidade` | Taxa de auto-decisão, falso-negativo estimado, drift (seção 8.3); preenche a lacuna de baseline citada no doc 02. Requer papel `supervisor` ou `admin` |
+| `GET /metricas/qualidade` | Funil por status, taxa de auto-decisão, quarentena por tipo, distribuição de defeitos, latências e produtividade da auditoria (catálogo da seção 9.3, grupos A a D e F); preenche a lacuna de baseline citada no doc 02. Requer papel `supervisor` ou `admin` |
+| `GET /metricas/drift` | Série por lote dos sinais de drift e confiabilidade do modelo (seção 8.3 e catálogo da seção 9.3, grupo E). Requer papel `supervisor` ou `admin` |
 
 ---
 
@@ -351,16 +353,203 @@ A ausência de dados sensíveis na amostra analisada (doc 02, seção 5.4) não 
 
 ---
 
-## 9. Métricas de Sucesso
+## 9. Perspectiva Analítica: O que a Arquitetura Passa a Medir
 
-| Métrica | Definição | Meta inicial (Fase 1-2) |
+> As seções 3 a 8 descrevem a solução como **sistema**. Esta seção a descreve como **instrumento de medição**. O AS-IS (doc 01, seção 3.2) não gera dado nenhum sobre si mesmo: a decisão do auditor não fica registrada, não existe taxa histórica de foto inutilizável (doc 02, seção 5.2), e ninguém sabe quanto tempo uma foto leva entre a captura e o veredito. Cada componente da arquitetura foi desenhado para que o simples ato de operar o processo produza esses números como subproduto. É isso que transforma o projeto de "um modelo que olha fotos" em "a primeira visão quantitativa que a Neoenergia terá desse fluxo".
+
+### 9.1 Princípio: todo evento vira linha
+
+Nenhuma métrica desta seção é estimativa ou pesquisa de opinião. Todas são consultas sobre tabelas que a própria operação preenche (seção 6.4). A tabela abaixo é o mapa entre o que acontece no processo e o que passa a ser mensurável.
+
+| Evento do processo | Onde é registrado | O que passa a ser mensurável |
 | --- | --- | --- |
-| % de fotos auto-decididas | Fração do volume diário que não chega à fila humana | 30-40% já é vitória: não precisa resolver 100% no MVP |
-| Falso-negativo em auto-aprovação | Foto aprovada automaticamente que era, na verdade, inválida | Próximo de zero: é o número que trava ou libera expansão do auto-aprova (risco reputacional/fatura) |
-| Falso-positivo em auto-rejeição | Foto rejeitada automaticamente que era, na verdade, válida | Baixo, monitorado por amostragem humana |
-| Redução de defasagem | Tempo entre chegada da foto e decisão final | De D+1 para minutos/horas após ingestão |
-| Redução de retrabalho | Nº de revisitas de campo por reprovação evitáveis | Medido em ciclos, impacto de negócio real |
-| Concordância inter-anotador | Estabilidade do rótulo humano ao longo do tempo | Estável ou crescente: queda é sinal de alerta (seção 8.2) |
+| Um lote chega e é ingerido | `lotes` (data, totais, checksum, `ingerido_em`) | Volume diário, regularidade dos lotes, latência entre extração e ingestão |
+| Uma leitura muda de estado | `historico_status` (append-only, com ator, confiança e timestamp) | O funil completo, o tempo gasto em cada estágio, quem decidiu (modelo ou pessoa) e com que confiança |
+| Um registro fere uma regra de negócio | `quarentena` (tipo, severidade, resolução) | Conformidade do processo de campo e integridade do sistema de origem |
+| Um modelo avalia uma foto | `resultados_inferencia` (scores brutos por classe, latência) | Distribuição de defeitos de qualidade, confiança média, drift, custo computacional |
+| Um auditor decide | `revisoes_humanas` (decisão, motivo em lista fechada, tempo até decidir) | Produtividade por pessoa, taxa de reprovação por motivo, concordância entre auditores |
+| Uma foto é rotulada | `rotulos` (rodada, rotulador, classes) | Kappa de Cohen, tamanho do ground truth acumulado, prontidão para retreino |
+| Um usuário acessa o sistema | `log_acesso` | Trilha de auditoria de quem aprovou o quê, uso efetivo do painel |
+
+Duas regras estruturais sustentam isso. A primeira: tabelas de evento nunca sofrem `UPDATE` destrutivo (seção 6.3), então o histórico é sempre reconstituível. A segunda: o motivo de reprovação é **lista fechada** com as 5 classes da taxonomia de qualidade (doc 02, seção 5.2) mais `outro`. Sem isso, "reprovada" seria um número sem decomposição, inútil para agir. Com isso, cada decisão humana vira ao mesmo tempo métrica de negócio e rótulo de treino.
+
+As métricas são servidas ao painel do supervisor por `GET /metricas/qualidade` e `GET /metricas/drift` (seção 6.5), e podem ser exportadas para qualquer ferramenta de BI da Neoenergia por consulta direta ao PostgreSQL. Não há dependência de ferramenta de dashboard específica.
+
+### 9.2 Pontos de medição sobre o fluxo da empresa
+
+O fluxo abaixo é o mesmo AS-IS do doc 01, agora com os seis pontos onde a arquitetura instala um "sensor".
+
+```mermaid
+flowchart LR
+    A["Captura em campo<br/>leiturista + app de terceiros"] --> B["Lote de extracao<br/>CSV + fotos"]
+    B --> C["Ingestao e<br/>validacao de regras"]
+    C --> D["Triagem automatica<br/>qualidade + consistencia"]
+    D --> E["Fila humana<br/>6 auditores"]
+    D --> F["Veredito final"]
+    E --> F
+    F --> G["Faturamento"]
+    F --> H["Revisita em campo"]
+
+    P1(["P1 Qualidade da captura"]) -.-> A
+    P2(["P2 Conformidade de processo"]) -.-> C
+    P3(["P3 Latencia ponta a ponta"]) -.-> B
+    P3 -.-> F
+    P4(["P4 Eficiencia da auditoria"]) -.-> E
+    P5(["P5 Confiabilidade da automacao"]) -.-> D
+    P6(["P6 Retrabalho e risco de fatura"]) -.-> G
+    P6 -.-> H
+```
+
+| Ponto | Fluxo da empresa medido | Pergunta que passa a ter resposta | Quem usa a resposta | Alavanca de otimização que abre |
+| --- | --- | --- | --- | --- |
+| **P1** Qualidade da captura | Trabalho do leiturista em campo | Quantas fotos nascem inutilizáveis? Por qual defeito? Em que lote isso piora? | Gestão de leitura | Treinamento dirigido por tipo de defeito (ex.: orientação contra reflexo), ajuste de instrução de captura, pedido fundamentado de melhoria ao app do terceiro |
+| **P2** Conformidade de processo | Aderência à regra nota × foto e integridade do sistema de origem | O leiturista está cumprindo a exigência de foto? O sistema de origem entrega dados íntegros? A tabela de códigos está atualizada? | Gestão de leitura, TI | Correção de processo em campo, atualização da planilha de 61 códigos, cobrança objetiva ao terceiro pelas fotos órfãs |
+| **P3** Latência ponta a ponta | Ciclo extração → veredito | Quanto tempo uma foto leva até ter decisão? O SLA (pendência do doc 01) é cumprido? Onde o tempo se acumula? | Gestão de leitura, faturamento | Antecipar o corte de faturamento, eliminar o D+1 estrutural, reorientar o leiturista no mesmo dia |
+| **P4** Eficiência da auditoria | Trabalho dos 6 auditores | Quantas decisões por pessoa por hora? Qual o backlog e sua idade? Quanto do volume nem chega a humano? | Supervisor de auditoria | Dimensionamento da equipe com dado real, priorização da fila por risco, redistribuição de carga |
+| **P5** Confiabilidade da automação | Comportamento dos modelos em produção | O modelo está errando? Em que classe? Está degradando com o tempo? | Time de dados, supervisor | Gate objetivo para expandir ou recuar a auto-decisão, decisão de retreino baseada em evidência |
+| **P6** Retrabalho e risco de fatura | Saídas do processo: fatura e revisita | Quantas revisitas o processo gera e por qual motivo? Quantas leituras iriam para fatura sem evidência válida? | Faturamento, direção | Bloquear fatura sem evidência antes da emissão, reduzir revisita ao detectar o problema em minutos e não no dia seguinte |
+
+### 9.3 Catálogo de métricas
+
+Organizado pelos seis pontos de medição. A coluna "disponível a partir de" usa as fases do roadmap (seção 4). A coluna "baseline" traz o valor já medido nos 4 lotes reais quando a métrica é calculável sem modelo e sem decisão humana; "inexistente" significa que o número nunca foi medido pela Neoenergia e será produzido pela primeira vez pelo projeto.
+
+**A. Qualidade da captura (P1)**
+
+| Métrica | Definição | Fonte | Disponível a partir de | Baseline nos 4 lotes |
+| --- | --- | --- | --- | --- |
+| Taxa de foto inutilizável | Fotos reprovadas por defeito de qualidade / fotos avaliadas | `revisoes_humanas.motivo`, depois `resultados_inferencia` | Fase 0 (humano), Fase 1 (modelo) | Inexistente. Primeira medida sai da Fase 0 |
+| Distribuição por classe de defeito | Participação de glare, fora de foco, tampa suja, enquadramento incorreto e display apagado no total de reprovações | Idem | Fase 0 | Inexistente |
+| Taxa de defeito por lote e por código de nota | A métrica anterior recortada por `lote_id` e `nota_codigo` | Idem + `leituras` | Fase 0 | Inexistente |
+| Fotos adicionais por leitura | Fotos com sequência maior que zero. Hipótese a confirmar com o cliente: o leiturista fotografou mais de uma vez, o que sinalizaria dificuldade na captura | `fotos.sequencia` | Fase 0 (já medido) | **523** fotos com sequência 1 a 8 (4,2% das imagens) |
+| Taxa de defeito por leiturista, rota ou região | Idem, recortada por quem capturou e onde | Não disponível | **Bloqueada por dados** (seção 9.6) | O CSV não identifica leiturista nem localidade |
+
+**B. Conformidade de processo (P2)**
+
+| Métrica | Definição | Fonte | Disponível a partir de | Baseline nos 4 lotes |
+| --- | --- | --- | --- | --- |
+| Nota exige foto e não há foto | Leituras com código que exige evidência e sem imagem anexada. É o caso **bloqueante**: hoje segue para fatura sem barreira | `quarentena` tipo `nota_exige_sem_foto` | Fase 0 (já medido) | **296** (6,5% das 4.560 leituras com nota) |
+| Foto sem exigência | Leituras com código que não exige foto mas trazem imagem | `quarentena` tipo `foto_sem_exigencia` | Fase 0 (já medido) | **562** (12,3% das leituras com nota) |
+| Código de ocorrência não mapeado | Código presente nos dados e ausente da planilha de referência | `quarentena` tipo `codigo_nao_mapeado` | Fase 0 (já medido) | **6**, todos `V100` |
+| Fotos órfãs | Imagens entregues no lote que nenhuma linha do CSV referencia | `quarentena` tipo `foto_orfa` | Fase 0 (já medido) | **866** (7,0% das imagens) |
+| Leituras com múltiplos medidores | Linhas com mais de um identificador de medidor | `quarentena` tipo `medidor_multiplo` | Fase 0 (já medido) | **1.316** (9,6%), chegando a 8 medidores por linha |
+| Leituras sem nenhuma foto | Linhas do CSV sem imagem, com ou sem nota | `leituras` × `fotos` | Fase 0 (já medido) | **2.195** (16,1% das 13.669) |
+| Cobertura da tabela de códigos | Códigos da planilha que de fato aparecem nos dados | `notas_ocorrencia` × `leituras` | Fase 0 (já medido) | **19 de 61** códigos usados; T181 sozinho é 56,9% das notas |
+| Quebra de contrato do CSV | Lotes rejeitados por cabeçalho ou formato inesperado | Log de ingestão (o lote inteiro é rejeitado) | Fase 0 | 0 nos 4 lotes, mas monitorado |
+
+**C. Latência ponta a ponta (P3)**
+
+| Métrica | Definição | Fonte | Disponível a partir de | Baseline nos 4 lotes |
+| --- | --- | --- | --- | --- |
+| Extração → ingestão | Tempo entre a data do lote e `ingerido_em` | `lotes` | Fase 0 | Inexistente. Hoje o equivalente é o D+1 informal |
+| Ingestão → veredito automático | Tempo até `auto_aprovada`, `auto_rejeitada` ou `rejeitada_qualidade` | `historico_status` | Fase 1 | Inexistente. Alvo: minutos |
+| Ingestão → veredito humano | Tempo até `aprovada_humano` ou `reprovada_humano` | `historico_status` | Fase 0 | Inexistente |
+| Tempo por estágio | Permanência média em cada estado da máquina (seção 6.3) | `historico_status` | Fase 0 | Inexistente |
+| Aderência ao SLA | Percentual de leituras decididas dentro do prazo acordado | `historico_status` + SLA do cliente | Fase 0, **depende do SLA** (doc 01, seção 8) | Inexistente |
+| Captura → extração | Tempo entre a foto ser tirada e entrar no lote | Não disponível | **Bloqueada por dados** | Sem EXIF e sem timestamp real no CSV, o nome do arquivo identifica só o lote |
+
+**D. Eficiência da auditoria (P4)**
+
+| Métrica | Definição | Fonte | Disponível a partir de | Baseline nos 4 lotes |
+| --- | --- | --- | --- | --- |
+| Funil por status | Contagem de leituras em cada estado | `leituras.status_atual`, `historico_status` | Fase 0 | 100% em `recebida` até o M2 |
+| Percentual auto-decidido | Fração do volume que não chega à fila humana | `historico_status.ator` | Fase 1 | 0%. Alvo inicial 30 a 40% (seção 9.7) |
+| Fila pendente e idade da fila | Itens em `fila_humana` e há quanto tempo estão lá | `leituras`, `historico_status` | Fase 0 | Inexistente |
+| Decisões por auditor por hora | Throughput individual e da equipe | `revisoes_humanas` | Fase 0 | Inexistente. Hoje se sabe apenas "6 pessoas, 30 a 50 mil fotos por dia" |
+| Tempo médio por decisão | Intervalo entre reserva do item e registro da decisão | `revisoes_humanas` | Fase 0 | Inexistente. Meta de projeto: abaixo de 5 segundos por foto |
+| Taxa de pulo | Itens pulados pelo auditor em relação aos vistos: sinal de foto ambígua ou interface insuficiente | `revisoes_humanas` | Fase 0 | Inexistente |
+| Horas-pessoa liberadas | Itens auto-decididos × tempo médio de decisão humana | Derivada de C e D | Fase 1 | Inexistente. É o número que traduz automação em capacidade |
+
+**E. Confiabilidade da automação (P5)**
+
+| Métrica | Definição | Fonte | Disponível a partir de | Baseline nos 4 lotes |
+| --- | --- | --- | --- | --- |
+| Falso negativo em auto-aprovação | Auto-aprovada que a auditoria amostral reprova | `revisoes_humanas` com `redistribuida_para_auditoria` | Fase 2 | Não se aplica. A auto-aprovação nasce desligada até haver 600 rótulos (doc 00_Indice, seção 5.2) |
+| Falso positivo em auto-rejeição | Auto-rejeitada que a inspeção humana aprova | Idem | Fase 1 | Gate do M5: zero em 200 imagens inspecionadas |
+| Cobertura da auto-decisão | Fração do volume em que o modelo tem confiança suficiente para decidir | `resultados_inferencia` × política de limiar | Fase 1 | Inexistente |
+| Confiança média por classe | Média dos scores do modelo por classe de defeito e por lote | `resultados_inferencia` | Fase 1 | Inexistente |
+| Drift por lote | Desvio da distribuição de defeitos, da taxa de rejeição e da confiança em relação à baseline (seção 8.3) | `resultados_inferencia`, `historico_status` | Fase 1 | A baseline é construída nos primeiros lotes de operação |
+| Kappa de Cohen no bootstrap | Concordância entre os dois rotuladores cegos | `rotulos` | Fase 1 (M6) | Gate: igual ou acima de 0,6 |
+| Concordância inter-anotador contínua | Concordância entre auditor e segundo revisor nos 5 a 10% redistribuídos | `revisoes_humanas` | Fase 1 | Inexistente. Queda sinaliza automation bias (seção 8.2) |
+| Rótulos acumulados | Decisões humanas aproveitáveis como ground truth | `rotulos` | Fase 0 | 0. Alvo: 600 para liberar auto-aprovação |
+
+**F. Retrabalho e risco de fatura (P6)**
+
+| Métrica | Definição | Fonte | Disponível a partir de | Baseline nos 4 lotes |
+| --- | --- | --- | --- | --- |
+| Taxa de reprovação final | Leituras com veredito reprovado / leituras decididas. É o proxy direto de revisita | `historico_status` | Fase 0 | Inexistente |
+| Reprovação por motivo | A anterior decomposta pelas 5 classes mais `outro` | `revisoes_humanas.motivo` | Fase 0 | Inexistente. Diz **o que** treinar em campo |
+| Leituras sem evidência que iriam faturar | Casos `nota_exige_sem_foto` não resolvidos | `quarentena` | Fase 0 (já medido) | **296** por 4 lotes, sem nenhuma barreira hoje |
+| Tempo de detecção da reprovação | Intervalo entre extração e reprovação | `historico_status` | Fase 0 | Hoje D+1. Alvo: minutos, o que permite reorientar o leiturista no mesmo dia |
+| Revisitas evitáveis | Reprovações detectadas a tempo de correção sem nova visita | Derivada, **depende de definição com o cliente** | Fase 1 | Inexistente |
+| Custo evitado | Revisitas evitadas × custo unitário de revisita + horas liberadas × custo-hora | Derivada, **depende de custos do cliente** (seção 9.6) | Fase 1 | Inexistente |
+
+### 9.4 Baseline: a primeira fotografia quantitativa da operação
+
+Os números abaixo já foram medidos nos 4 lotes reais fornecidos e são entrega válida antes de qualquer modelo existir. Nenhum deles constava em documento da Neoenergia. Eles saem dos marcos M1 e M2 do plano de desenvolvimento e são também o teste de regressão da ingestão.
+
+| Indicador | Valor | Leitura para o negócio |
+| --- | --- | --- |
+| Leituras nos 4 lotes | 13.669 | Cerca de 3.400 por lote diário |
+| Imagens nos 4 lotes | 12.340 | Cerca de 3.100 por lote diário |
+| Leituras com foto / sem foto | 11.474 / 2.195 | 16,1% das linhas não trazem imagem |
+| Leituras com nota de ocorrência | 4.560 (33,4%) | Um terço do volume tem justificativa de campo |
+| Nota exige foto e não há foto | 296 | Risco direto de fatura sem evidência |
+| Foto sem exigência | 562 | Esforço de captura e de auditoria gasto sem regra que o peça |
+| Fotos órfãs | 866 (7,0%) | O sistema de origem entrega 7% de imagens que não se ligam a nada |
+| Fotos adicionais (sequência acima de 0) | 523 | Leiturista precisou repetir a foto |
+| Leituras com múltiplos medidores | 1.316 (9,6%) | Casos que a regra de consistência precisa tratar à parte |
+| Código não mapeado | `V100`, 6 casos | A tabela de referência está desatualizada |
+| Códigos de ocorrência em uso | 19 de 61 | 42 códigos nunca aparecem; T181 concentra 56,9% das notas |
+
+Dois desses números já mudaram o plano de modelagem (doc 00_Indice, seção 5.1) e dois viraram pendência formal com o cliente (órfãs e `V100`). Isso ilustra o ponto central desta seção: medir o processo tem valor próprio, independente do modelo.
+
+### 9.5 Onde a solução ajuda o contratante
+
+| Ator na Neoenergia | Dor hoje (doc 01) | O que passa a ter | Métrica que comprova |
+| --- | --- | --- | --- |
+| **Equipe de auditoria** (6 pessoas) | Download manual, 30 a 50 mil fotos por dia, sem priorização, sem registro do que decidiu | Fila única priorizada por risco, sem download, decisão por teclado, só a zona de incerteza chega a humano | Percentual auto-decidido, decisões por hora, idade da fila |
+| **Supervisão de leitura e campo** | Sabe empiricamente que existe foto ruim, mas não quantifica nem localiza | Taxa de inutilizável por defeito e por lote, conformidade nota × foto, base objetiva para treinar equipe | Taxa de foto inutilizável, reprovação por motivo, casos `nota_exige_sem_foto` |
+| **Faturamento e receita** | Leitura pode faturar sem evidência ou com evidência inválida, e o erro chega ao cliente final | Registro sem evidência bloqueado antes da fatura, veredito em minutos em vez de D+1 | Leituras bloqueadas por falta de evidência, latência extração → veredito |
+| **Gestão do contrato com o terceiro** | O app de campo é caixa-preta; a Neoenergia não tem argumento numérico para pedir mudanças | Evidência objetiva: fotos órfãs, latência de entrega dos lotes, resolução insuficiente demonstrada pelo spike de OCR | 866 órfãs, tempo extração → ingestão, veredito do gate de resolução (seção 5.2.1) |
+| **TI e dados** | Nenhum ground truth, nenhum histórico de decisão, nenhuma base para modelos futuros | Dataset rotulado com concordância medida, histórico append-only, pipeline reutilizável para outros fluxos de evidência fotográfica | Rótulos acumulados, kappa de Cohen, cobertura de auto-decisão |
+| **Cliente final e conformidade** | Fatura contestada por leitura incorreta, revisita que incomoda | Menos fatura sem evidência, menos revisita, trilha de auditoria de cada decisão | Taxa de reprovação final, revisitas evitáveis, `log_acesso` |
+
+**Ganhos que saem da Fase 0, sem nenhum modelo treinado:**
+
+1. Fim do download manual: a foto aparece na tela do auditor ao lado do dado declarado.
+2. Bloqueio dos 296 registros que hoje seguem para fatura sem evidência.
+3. A baseline da seção 9.4, que nunca existiu.
+4. Trilha de auditoria: quem aprovou o quê, quando, com qual motivo.
+
+Os ganhos das Fases 1 e 2 (auto-decisão, redução de horas-pessoa, detecção em minutos) se somam a esses, não os substituem.
+
+### 9.6 Lacunas de dados que limitam a análise
+
+Estas não são tarefas de engenharia. São pedidos ao cliente, e cada um destrava uma família de métricas da seção 9.3.
+
+| Lacuna | O que destrava | Prioridade |
+| --- | --- | --- |
+| **Identificação do leiturista, rota ou município no CSV** | Análise de qualidade por pessoa e por região. É a alavanca de otimização mais direta do P1: treinar quem precisa, onde precisa | Alta |
+| **Volumetria real** | Os lotes fornecidos têm cerca de 3.100 fotos por dia. O doc 01 registra 30 a 50 mil fotos críticas por dia. Ou a amostra é um recorte (uma regional, uma rota), ou a volumetria declarada inclui algo que o CSV não traz. Muda o dimensionamento e a métrica de horas liberadas | Alta |
+| **Custo unitário de revisita e custo-hora do auditor** | Converter as métricas de P4 e P6 em reais. Sem isso, o retorno do projeto fica em unidades operacionais | Alta |
+| **SLA formal entre captura e veredito** | A métrica de aderência ao SLA (P3) | Média |
+| **Timestamp real da captura** | Latência captura → extração. Hoje só se mede a partir do lote | Média |
+| **Fabricante e modelo do medidor no cadastro** | Análise de defeito por equipamento sem depender de um classificador visual | Média |
+| **Resultado de auditorias manuais passadas, se existir** | Comparar o processo novo com o antigo em vez de só medir o novo | Baixa |
+
+### 9.7 Metas de sucesso
+
+As metas abaixo são as que gateiam as fases (seção 4). Cada uma aponta para a métrica do catálogo que a mede.
+
+| Meta | Métrica do catálogo | Meta inicial (Fases 1 e 2) | Por que esse valor |
+| --- | --- | --- | --- |
+| Reduzir o volume que chega a humano | Percentual auto-decidido (D) | 30 a 40% | Já libera capacidade relevante sem exigir que o modelo resolva 100% |
+| Não aprovar automaticamente foto inválida | Falso negativo em auto-aprovação (E) | Próximo de zero, com 600 rótulos de sustentação | É o número que trava ou libera a expansão. Risco reputacional e de fatura |
+| Não rejeitar automaticamente foto válida | Falso positivo em auto-rejeição (E) | Zero em 200 imagens inspecionadas, depois monitorado por amostragem | Rejeitar foto boa gera revisita desnecessária, o oposto do objetivo |
+| Eliminar o D+1 | Ingestão → veredito (C) | Minutos para automático, horas para humano | Permite corrigir o leiturista no mesmo dia |
+| Reduzir retrabalho | Taxa de reprovação final e revisitas evitáveis (F) | Medido em ciclos mensais; alvo definido com o cliente após a baseline | Não há baseline hoje, então a primeira meta é medir |
+| Manter a qualidade do rótulo humano | Kappa de Cohen e concordância contínua (E) | Kappa igual ou acima de 0,6 no bootstrap; concordância estável em produção | Queda sinaliza automation bias ou classes mal definidas (seção 8.2) |
+| Produzir a baseline que não existe | Seção 9.4 completa e validada com o cliente | Antes do primeiro modelo | É a entrega que dá à Neoenergia visão do próprio processo |
 
 ---
 
@@ -404,6 +593,7 @@ A ausência de dados sensíveis na amostra analisada (doc 02, seção 5.4) não 
 3. Montar a Fase 0 (ingestão + banco + dashboard, sem modelo) usando as 4 pastas reais de `Base cliente/` como dados de desenvolvimento/teste.
 4. Executar o teste de viabilidade de OCR (seção 5.2.1) em paralelo, com baixo custo, para não bloquear a decisão de arquitetura da Fase 3 até mais tarde no projeto.
 5. Definir com o cliente a amostra estratificada de bootstrap (200-300 fotos) para a dupla rotulagem cega (seção 8.2).
+6. Apresentar ao cliente a baseline da seção 9.4 e validar o catálogo de métricas da seção 9.3: quais indicadores a gestão de leitura, a auditoria e o faturamento querem acompanhar, e em que periodicidade. Aproveitar a conversa para formalizar os pedidos de dados da seção 9.6 (identificação do leiturista, volumetria real, custos unitários).
 
 ---
 

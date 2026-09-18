@@ -27,9 +27,19 @@ class TipoInconsistencia(StrEnum):
     FOTO_ORFA = "foto_orfa"
     MEDIDOR_MULTIPLO = "medidor_multiplo"
     POSICAO_INVALIDA = "posicao_invalida"
+    POSICAO_AUSENTE = "posicao_ausente"
     FOTO_REFERENCIADA_AUSENTE = "foto_referenciada_ausente"
 
 
 class Severidade(StrEnum):
     BLOQUEANTE = "bloqueante"
     INFORMATIVO = "informativo"
+
+
+class Ator(StrEnum):
+    """Quem provocou uma transicao de estado. Modelos e usuarios usam prefixo:
+    `modelo:qualidade@v1`, `usuario:<id>`."""
+
+    INGESTAO = "ingestao"
+    HEURISTICA = "heuristica"
+    SISTEMA = "sistema"

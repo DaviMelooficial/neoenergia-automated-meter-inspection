@@ -18,6 +18,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -26,6 +27,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from inspecao.db import Base
@@ -88,6 +90,12 @@ class Leitura(Base):
         back_populates="leitura", cascade="all, delete-orphan", passive_deletes=True
     )
     fotos: Mapped[list["Foto"]] = relationship(back_populates="leitura")
+    historico: Mapped[list["HistoricoStatus"]] = relationship(
+        back_populates="leitura",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="HistoricoStatus.id",
+    )
 
 
 class LeituraMedidor(Base):
@@ -128,3 +136,65 @@ class Foto(Base):
 
     lote: Mapped["Lote"] = relationship(back_populates="fotos")
     leitura: Mapped["Leitura | None"] = relationship(back_populates="fotos")
+
+
+class HistoricoStatus(Base):
+    """Trilha append-only de transicoes. Nunca recebe UPDATE nem DELETE direto.
+
+    So `estados.transicionar` e `estados.registrar_estado_inicial` escrevem aqui.
+    Ordene sempre por `id`: `criado_em` usa now(), que e o instante da transacao,
+    e todas as linhas de uma mesma ingestao compartilham o mesmo valor.
+    """
+
+    __tablename__ = "historico_status"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    leitura_id: Mapped[int] = mapped_column(
+        ForeignKey("leituras.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    # ingestao | heuristica | modelo:<nome>@v<N> | usuario:<id>
+    ator: Mapped[str] = mapped_column(String(80))
+    confianca: Mapped[float | None] = mapped_column(Float, nullable=True)
+    detalhe: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    leitura: Mapped["Leitura"] = relationship(back_populates="historico")
+
+
+class Quarentena(Base):
+    """Inconsistencia de dados detectada na ingestao. Granularidade: o registro.
+
+    `leitura_id` e nulo para foto orfa; `foto_id` e nulo para inconsistencias
+    que nao envolvem imagem. `lote_id` esta sempre preenchido para permitir
+    agregacao por lote sem join.
+    """
+
+    __tablename__ = "quarentena"
+    __table_args__ = (
+        Index("ix_quarentena_lote_tipo", "lote_id", "tipo"),
+        Index(
+            "ix_quarentena_pendente",
+            "severidade",
+            postgresql_where="resolvido = false",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    lote_id: Mapped[int] = mapped_column(ForeignKey("lotes.id", ondelete="CASCADE"))
+    leitura_id: Mapped[int | None] = mapped_column(
+        ForeignKey("leituras.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    foto_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fotos.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    tipo: Mapped[str] = mapped_column(String(40), index=True)
+    severidade: Mapped[str] = mapped_column(String(15))
+    detalhe: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    resolvido: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Texto por enquanto: a tabela usuarios so existe a partir do marco M3.
+    resolvido_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    resolvido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

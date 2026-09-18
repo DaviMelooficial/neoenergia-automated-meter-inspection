@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos \
         api-dev worker-dev front-dev test lint up down logs reset health
 
 help:  ## lista os alvos disponiveis
@@ -52,6 +52,9 @@ seed-staging:  ## copia um lote de "Base cliente" para data/staging (uso: make s
 ingest:  ## ingere um lote de data/staging (uso: make ingest LOTE=...)
 	@test -n "$(LOTE)" || (echo 'uso: make ingest LOTE=PSP_EXTRATLEITIMPL_200526_0352'; exit 1)
 	cd app/backend && uv run python -m inspecao.ingest.batch --lote $(LOTE)
+
+ingest-todos:  ## ingere todos os lotes de data/staging (use REPROCESSAR=1 para substituir)
+	cd app/backend && uv run python -m inspecao.ingest.batch --todos $(if $(REPROCESSAR),--reprocessar,)
 
 # ---------------------------------------------------------------------------
 # Desenvolvimento (processos no host, com hot reload)

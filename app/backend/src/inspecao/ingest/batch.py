@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import IO
@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal
-from inspecao.enums import StatusLeitura
+from inspecao.enums import Ator
+from inspecao.estados import ESTADO_INICIAL, registrar_estado_inicial
 from inspecao.ingest import notas as notas_mod
 from inspecao.ingest.parser import (
     PADRAO_LOTE,
@@ -29,6 +30,7 @@ from inspecao.ingest.parser import (
     dimensoes_jpeg,
     ler_csv,
 )
+from inspecao.ingest.validacao import ResumoValidacao, validar_lote
 from inspecao.models import Foto, Leitura, LeituraMedidor, Lote
 from inspecao.storage.local import LocalFileStorage
 
@@ -82,13 +84,10 @@ class ResultadoIngestao:
     medidores: int = 0
     fotos: int = 0
     fotos_orfas: int = 0
-    fotos_ausentes: list[str] = None  # type: ignore[assignment]
+    fotos_ausentes: list[str] = field(default_factory=list)
+    validacao: ResumoValidacao = field(default_factory=ResumoValidacao)
     segundos: float = 0.0
     pulado: bool = False
-
-    def __post_init__(self) -> None:
-        if self.fotos_ausentes is None:
-            self.fotos_ausentes = []
 
 
 def _checksum(caminho: Path) -> str:
@@ -163,7 +162,7 @@ def ingerir(
                 "linha_csv": ln.linha_csv,
                 "posicao_lida": ln.posicao_lida,
                 "nota_codigo": ln.nota_codigo,
-                "status_atual": StatusLeitura.RECEBIDA,
+                "status_atual": ESTADO_INICIAL.value,  # unico ponto fora de estados.py
             }
             for ln in linhas
         ],
@@ -188,10 +187,13 @@ def ingerir(
     resultado.medidores = len(medidores)
 
     # ------------------------------------------------------------------- fotos
-    # Nome de arquivo -> id da leitura que o referencia no CSV.
-    leitura_por_foto = {
-        ln.foto_nome: id_por_linha[ln.linha_csv] for ln in linhas if ln.foto_nome
-    }
+    # Nome de arquivo -> id da leitura que o referencia no CSV. Se duas linhas
+    # apontarem o mesmo arquivo, a PRIMEIRA fica com a foto; a outra e tratada
+    # pela validacao como referencia nao atendida (foto_referenciada_ausente).
+    leitura_por_foto: dict[str, int] = {}
+    for ln in linhas:
+        if ln.foto_nome:
+            leitura_por_foto.setdefault(ln.foto_nome, id_por_linha[ln.linha_csv])
     vistos: set[str] = set()
     pendentes: list[dict] = []
 
@@ -229,8 +231,11 @@ def ingerir(
         sessao.bulk_insert_mappings(Foto, pendentes)
 
     resultado.fotos = len(vistos)
-    # Referenciada no CSV mas ausente do disco: bloqueante, tratado no M2.
     resultado.fotos_ausentes = sorted(set(leitura_por_foto) - vistos)
+
+    # ------------------------------------------------- historico e validacao
+    registrar_estado_inicial(sessao, id_por_linha.values(), Ator.INGESTAO.value)
+    resultado.validacao = validar_lote(sessao, lote.id, linhas, id_por_linha, vistos)
 
     lote.total_linhas = resultado.leituras
     lote.total_fotos_disco = resultado.fotos
@@ -281,6 +286,11 @@ def main(argv: list[str] | None = None) -> int:
             log.info(
                 "%s: %d leituras, %d medidores, %d fotos (%d orfas) em %.1fs",
                 nome, r.leituras, r.medidores, r.fotos, r.fotos_orfas, r.segundos,
+            )
+            v = r.validacao
+            log.info(
+                "%s: %d sem_foto, %d seguem para triagem, %d bloqueantes; quarentena: %s",
+                nome, v.sem_foto, v.seguem_para_triagem, v.bloqueantes, v.quarentena_por_tipo,
             )
             if r.fotos_ausentes:
                 log.warning(

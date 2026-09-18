@@ -5,7 +5,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-inspecao}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inspecao_dev}
       POSTGRES_DB: ${POSTGRES_DB:-inspecao}
-    ports: ["5432:5432"]
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     restart: unless-stopped
     healthcheck:

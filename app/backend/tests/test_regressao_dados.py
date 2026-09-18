@@ -11,7 +11,16 @@ import pytest
 from sqlalchemy import func, select, text
 
 from inspecao.db import SessionLocal, engine
-from inspecao.models import Foto, Leitura, LeituraMedidor, Lote, NotaOcorrencia
+from inspecao.enums import Severidade, StatusLeitura, TipoInconsistencia
+from inspecao.models import (
+    Foto,
+    HistoricoStatus,
+    Leitura,
+    LeituraMedidor,
+    Lote,
+    NotaOcorrencia,
+    Quarentena,
+)
 
 # Valores medidos em "Base cliente/", 4 lotes. Alterar apenas com justificativa
 # no commit, nunca para acomodar um parser quebrado.
@@ -29,6 +38,26 @@ ESPERADO = {
 }
 
 SEQUENCIAS = {0: 11_817, 1: 435, 2: 50, 3: 13, 4: 10, 5: 6, 6: 3, 7: 4, 8: 2}
+
+# Marco M2. Tabela de aceite do plano (doc 02 do plano, secao 6), medida na
+# reingestao dos 4 lotes em 2026-09-18. `posicao_ausente` nao estava na tabela
+# original: foi adicionada pela regra de consistencia (plano 03, secao 6) e
+# medida em zero.
+QUARENTENA = {
+    TipoInconsistencia.NOTA_EXIGE_SEM_FOTO: 296,
+    TipoInconsistencia.FOTO_SEM_EXIGENCIA: 562,
+    TipoInconsistencia.CODIGO_NAO_MAPEADO: 6,
+    TipoInconsistencia.FOTO_ORFA: 866,
+    TipoInconsistencia.MEDIDOR_MULTIPLO: 1_316,
+    TipoInconsistencia.FOTO_REFERENCIADA_AUSENTE: 0,
+    TipoInconsistencia.POSICAO_INVALIDA: 0,
+    TipoInconsistencia.POSICAO_AUSENTE: 0,
+}
+
+# 11.474 leituras referenciam foto (= fotos principais); as outras 2.195 nao.
+# O exemplo de `/metricas/qualidade` no plano 03 citava 11.908 / 1.761 como
+# ilustracao, nao como medida. Estes sao os valores reais.
+STATUS = {StatusLeitura.RECEBIDA: 11_474, StatusLeitura.SEM_FOTO: 2_195}
 
 
 @pytest.fixture(scope="module")
@@ -138,3 +167,102 @@ def test_distribuicao_de_sequencias(sessao):
 def test_todas_as_imagens_360x480(sessao):
     outras = contar(sessao, Foto, (Foto.largura != 360) | (Foto.altura != 480))
     assert outras == 0
+
+
+# ----------------------------------------------------------------------- M2
+
+
+def test_quarentena_por_tipo(sessao):
+    """A ancora factual do M2. Divergencia aqui e regressao no parser ou na regra."""
+    linhas = sessao.execute(select(Quarentena.tipo, func.count()).group_by(Quarentena.tipo)).all()
+    medido = {TipoInconsistencia(t): n for t, n in linhas}
+    esperado = {t: n for t, n in QUARENTENA.items() if n > 0}
+    assert medido == esperado
+
+
+def test_apenas_nota_exige_sem_foto_e_bloqueante(sessao):
+    bloq = sessao.execute(
+        select(Quarentena.tipo, func.count())
+        .where(Quarentena.severidade == Severidade.BLOQUEANTE.value)
+        .group_by(Quarentena.tipo)
+    ).all()
+    assert dict(bloq) == {TipoInconsistencia.NOTA_EXIGE_SEM_FOTO.value: 296}
+
+
+def test_codigo_nao_mapeado_e_sempre_v100(sessao):
+    codigos = sessao.scalars(
+        select(Quarentena.detalhe["nota_codigo"].astext).where(
+            Quarentena.tipo == TipoInconsistencia.CODIGO_NAO_MAPEADO.value
+        )
+    ).all()
+    assert len(codigos) == 6 and set(codigos) == {"V100"}
+
+
+def test_distribuicao_de_status(sessao):
+    linhas = sessao.execute(
+        select(Leitura.status_atual, func.count()).group_by(Leitura.status_atual)
+    ).all()
+    assert {StatusLeitura(s): n for s, n in linhas} == STATUS
+    assert sum(STATUS.values()) == ESPERADO["leituras"]
+
+
+def test_sem_foto_e_exatamente_quem_nao_tem_foto_principal(sessao):
+    com_foto = select(Foto.leitura_id).where(Foto.principal.is_(True))
+    assert (
+        contar(
+            sessao,
+            Leitura,
+            Leitura.status_atual == StatusLeitura.SEM_FOTO,
+            Leitura.id.in_(com_foto),
+        )
+        == 0
+    )
+    assert (
+        contar(
+            sessao,
+            Leitura,
+            Leitura.status_atual == StatusLeitura.RECEBIDA,
+            Leitura.id.not_in(com_foto),
+        )
+        == 0
+    )
+
+
+def test_historico_tem_nascimento_de_todas_e_transicao_das_sem_foto(sessao):
+    por_status = dict(
+        sessao.execute(
+            select(HistoricoStatus.status, func.count()).group_by(HistoricoStatus.status)
+        ).all()
+    )
+    assert por_status == {
+        StatusLeitura.RECEBIDA.value: ESPERADO["leituras"],
+        StatusLeitura.SEM_FOTO.value: STATUS[StatusLeitura.SEM_FOTO],
+    }
+    atores = set(sessao.scalars(select(HistoricoStatus.ator).distinct()).all())
+    assert atores == {"ingestao"}
+
+
+def test_toda_orfa_aponta_para_uma_foto_sem_leitura(sessao):
+    """Cada registro `foto_orfa` referencia uma foto com leitura_id nulo, e vice-versa."""
+    orfas = select(Foto.id).where(Foto.leitura_id.is_(None))
+    n = contar(
+        sessao,
+        Quarentena,
+        Quarentena.tipo == TipoInconsistencia.FOTO_ORFA.value,
+        Quarentena.foto_id.in_(orfas),
+    )
+    assert n == ESPERADO["fotos_orfas"]
+
+
+def test_hipotese_orfa_mesma_leitura_refutada(sessao):
+    """T-M2-04: nenhuma orfa compartilha id_externo com foto principal do lote.
+
+    Se um dia isso mudar, a leitura de `ml/reports/orfas.md` precisa ser revista.
+    """
+    com_leitura_provavel = contar(
+        sessao,
+        Quarentena,
+        Quarentena.tipo == TipoInconsistencia.FOTO_ORFA.value,
+        Quarentena.detalhe["leitura_provavel_id"].astext.is_not(None),
+    )
+    assert com_leitura_provavel == 0

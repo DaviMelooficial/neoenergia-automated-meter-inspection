@@ -1,57 +1,34 @@
-import { Alert, Badge, Container, Group, Loader, Stack, Text, Title } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { Navigate, Route, Routes } from "react-router-dom";
 
-type Componente = { ok: boolean; erro?: string | null; detalhe?: string; backend?: string };
-type Health = { status: string; componentes: Record<string, Componente> };
+import { RotaProtegida } from "./auth/RotaProtegida";
+import { Fila } from "./pages/Fila";
+import { Layout } from "./pages/Layout";
+import { Login } from "./pages/Login";
+import { Metricas } from "./pages/Metricas";
+import { Quarentena } from "./pages/Quarentena";
+import { TrocarSenha } from "./pages/TrocarSenha";
+import { Usuarios } from "./pages/Usuarios";
 
-/**
- * Tela provisoria do marco M0: confirma que o frontend fala com a API.
- * Substituida pelas rotas reais no marco M4.
- */
 export function App() {
-  const { data, isLoading, error } = useQuery<Health>({
-    queryKey: ["health"],
-    queryFn: async () => (await axios.get<Health>("/api/health")).data,
-    refetchInterval: 5000,
-  });
-
   return (
-    <Container size="sm" py="xl">
-      <Title order={2}>Inspeção de Fotos de Leitura</Title>
-      <Text c="dimmed" size="sm" mb="lg">
-        Neoenergia Pernambuco. Marco M0: ambiente e esqueleto.
-      </Text>
+    <Routes>
+      <Route path="/login" element={<Login />} />
 
-      {isLoading && <Loader />}
+      <Route element={<RotaProtegida />}>
+        <Route path="/trocar-senha" element={<TrocarSenha />} />
+        <Route element={<Layout />}>
+          <Route path="/fila" element={<Fila />} />
+          <Route element={<RotaProtegida minimo="supervisor" />}>
+            <Route path="/quarentena" element={<Quarentena />} />
+            <Route path="/metricas" element={<Metricas />} />
+          </Route>
+          <Route element={<RotaProtegida minimo="admin" />}>
+            <Route path="/usuarios" element={<Usuarios />} />
+          </Route>
+        </Route>
+      </Route>
 
-      {error && (
-        <Alert color="red" title="API inacessível">
-          Não foi possível consultar /api/health. Verifique se o backend está no ar.
-        </Alert>
-      )}
-
-      {data && (
-        <Stack gap="xs">
-          <Group>
-            <Text fw={600}>Status geral</Text>
-            <Badge color={data.status === "ok" ? "green" : "yellow"}>{data.status}</Badge>
-          </Group>
-          {Object.entries(data.componentes).map(([nome, c]) => (
-            <Group key={nome} justify="space-between">
-              <Text>{nome}</Text>
-              <Group gap="xs">
-                {c.detalhe && (
-                  <Text size="xs" c="dimmed">
-                    {c.detalhe}
-                  </Text>
-                )}
-                <Badge color={c.ok ? "green" : "red"}>{c.ok ? "ok" : "falha"}</Badge>
-              </Group>
-            </Group>
-          ))}
-        </Stack>
-      )}
-    </Container>
+      <Route path="*" element={<Navigate to="/fila" replace />} />
+    </Routes>
   );
 }

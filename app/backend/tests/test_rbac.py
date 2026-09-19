@@ -14,6 +14,7 @@ ROTAS = [
     ("GET", "/fila-humana", Papel.AUDITOR, None),
     ("POST", "/fila-humana/proxima", Papel.AUDITOR, None),
     ("POST", "/fila-humana/1/decisao", Papel.AUDITOR, {"decisao": "aprovada"}),
+    ("POST", "/fila-humana/1/liberar", Papel.AUDITOR, None),
     ("GET", "/quarentena", Papel.SUPERVISOR, None),
     ("GET", "/quarentena/resumo", Papel.SUPERVISOR, None),
     ("POST", "/quarentena/1/resolver", Papel.SUPERVISOR, {}),

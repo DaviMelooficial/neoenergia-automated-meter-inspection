@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --max-warnings 0",
-    "test": "vitest"
+    "lint": "eslint src e2e --max-warnings 0",
+    "test": "vitest",
+    "tipos": "openapi-typescript openapi.json -o src/api/tipos.ts",
+    "e2e": "node e2e/fila.mjs"
   },
   "dependencies": {
     "@mantine/core": "^7.15.0",
@@ -28,8 +30,11 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "globals": "^15.14.0",
     "jsdom": "^25.0.1",
+    "openapi-typescript": "^7.13.0",
+    "puppeteer-core": "^23.11.1",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vite": "^6.0.5",

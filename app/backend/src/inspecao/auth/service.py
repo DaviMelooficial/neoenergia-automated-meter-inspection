@@ -244,16 +244,24 @@ def trocar_senha(
 
 
 def garantir_admin(sessao: Session) -> Usuario | None:
-    """Cria o admin inicial se nao existir nenhum usuario. Idempotente.
+    """Cria o admin inicial se nao existir nenhum admin ativo. Idempotente.
 
     Desvio consciente do plano (que previa migracao de seed): uma migracao que
     depende de variavel de ambiente e fragil e nao reexecuta. Esta funcao roda
     na subida da API e em `make seed-admin`. `senha_alterada_em` fica nulo para
     forcar a troca no primeiro login.
     """
-    if sessao.scalar(select(func.count()).select_from(Usuario)):
+    ha_admin = sessao.scalar(
+        select(func.count())
+        .select_from(Usuario)
+        .where(Usuario.papel == Papel.ADMIN.value, Usuario.ativo.is_(True))
+    )
+    if ha_admin:
         return None
     s = get_settings()
+    if sessao.scalar(select(Usuario).where(Usuario.email == normalizar_email(s.admin_email))):
+        log.error("nenhum admin ativo e o e-mail %s ja existe: reative-o por SQL", s.admin_email)
+        return None
     admin = Usuario(
         nome="Administrador",
         email=normalizar_email(s.admin_email),

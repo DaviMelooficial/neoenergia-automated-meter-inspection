@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo tipos-front \
         api-dev worker-dev front-dev test lint up down logs reset health
 
 help:  ## lista os alvos disponiveis
@@ -74,6 +74,10 @@ fila-resumo:  ## contagem de jobs por tipo e status
 
 front-dev:  ## sobe o vite dev server
 	cd app/frontend && npm run dev
+
+tipos-front:  ## regenera openapi.json e os tipos TypeScript do frontend a partir da API
+	cd app/backend && uv run python -c "import json; from inspecao.main import app; json.dump(app.openapi(), open('../frontend/openapi.json','w'), indent=1, ensure_ascii=False)"
+	cd app/frontend && npm run tipos
 
 # ---------------------------------------------------------------------------
 # Qualidade

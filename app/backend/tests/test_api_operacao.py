@@ -302,3 +302,23 @@ def test_ingest_batch_enfileira_job_e_lotes_lista(client, contas, db_session):
     assert client.post("/ingest/batch", headers=cab, json={"lote": "../etc"}).status_code == 422
     assert client.post("/ingest/webhook", headers=cab).status_code == 501
     assert client.get("/lotes", headers=login(client, contas["auditor"])).json() == []
+
+
+def test_pular_libera_a_reserva_e_proxima_exclui_os_pulados(client, contas, na_fila, db_session):
+    cab = login(client, contas["auditor"])
+    primeiro = client.post("/fila-humana/proxima", headers=cab).json()
+    assert client.post(f"/fila-humana/{primeiro['id']}/liberar", headers=cab).status_code == 204
+    db_session.expire_all()
+    assert db_session.get(Leitura, primeiro["id"]).reservado_por is None
+
+    segundo = client.post(
+        "/fila-humana/proxima", headers=cab, params={"excluir": [primeiro["id"]]}
+    ).json()
+    assert segundo["id"] != primeiro["id"]
+    # O item pulado continua disponivel para outro auditor.
+    outro = client.post("/fila-humana/proxima", headers=login(client, contas["auditor2"])).json()
+    assert outro["id"] == primeiro["id"]
+    # Liberar reserva alheia nao faz nada.
+    assert client.post(f"/fila-humana/{outro['id']}/liberar", headers=cab).status_code == 204
+    db_session.expire_all()
+    assert db_session.get(Leitura, outro["id"]).reservado_por == contas["auditor2"].id

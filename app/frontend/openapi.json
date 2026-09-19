@@ -1,0 +1,2255 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "Inspecao de Fotos de Leitura",
+  "description": "Verificacao automatizada de fotos de leitura, Neoenergia Pernambuco",
+  "version": "0.3.0"
+ },
+ "paths": {
+  "/health": {
+   "get": {
+    "tags": [
+     "infra"
+    ],
+    "summary": "Health",
+    "description": "Checa banco e storage. Usado pelo healthcheck do compose e pelo gate M0.",
+    "operationId": "health_health_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Health Health Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/login": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Login",
+    "operationId": "login_auth_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoginIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/refresh": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Refresh",
+    "operationId": "refresh_auth_refresh_post",
+    "parameters": [
+     {
+      "name": "refresh_token",
+      "in": "cookie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Refresh Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/logout": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Logout",
+    "operationId": "logout_auth_logout_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "refresh_token",
+      "in": "cookie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Refresh Token"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/me": {
+   "get": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Me",
+    "operationId": "me_auth_me_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UsuarioOut"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/auth/senha": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Trocar Senha",
+    "operationId": "trocar_senha_auth_senha_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TrocarSenhaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/lotes": {
+   "get": {
+    "tags": [
+     "operacao"
+    ],
+    "summary": "Listar Lotes",
+    "operationId": "listar_lotes_lotes_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/LoteOut"
+         },
+         "type": "array",
+         "title": "Response Listar Lotes Lotes Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/leituras/{leitura_id}": {
+   "get": {
+    "tags": [
+     "operacao"
+    ],
+    "summary": "Obter Leitura",
+    "operationId": "obter_leitura_leituras__leitura_id__get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "leitura_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Leitura Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeituraOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/fotos/{foto_id}/arquivo": {
+   "get": {
+    "tags": [
+     "operacao"
+    ],
+    "summary": "Arquivo Da Foto",
+    "operationId": "arquivo_da_foto_fotos__foto_id__arquivo_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "foto_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Foto Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/ingest/batch": {
+   "post": {
+    "tags": [
+     "operacao"
+    ],
+    "summary": "Disparar Ingestao",
+    "description": "Enfileira a ingestao; quem executa e o worker.",
+    "operationId": "disparar_ingestao_ingest_batch_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IngestBatchIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/JobOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/ingest/webhook": {
+   "post": {
+    "tags": [
+     "operacao"
+    ],
+    "summary": "Webhook Desativado",
+    "description": "Endpoint reservado. Fica desativado ate a integracao com o sistema de campo.",
+    "operationId": "webhook_desativado_ingest_webhook_post",
+    "responses": {
+     "501": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Webhook Desativado Ingest Webhook Post"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/fila-humana": {
+   "get": {
+    "tags": [
+     "fila-humana"
+    ],
+    "summary": "Listar",
+    "operationId": "listar_fila_humana_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lote",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lote"
+      }
+     },
+     {
+      "name": "nota",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Nota"
+      }
+     },
+     {
+      "name": "ordenar",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "antigas",
+        "recentes"
+       ],
+       "type": "string",
+       "default": "antigas",
+       "title": "Ordenar"
+      }
+     },
+     {
+      "name": "pagina",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "default": 1,
+       "title": "Pagina"
+      }
+     },
+     {
+      "name": "por_pagina",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "default": 50,
+       "title": "Por Pagina"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_LeituraResumoOut_"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/fila-humana/proxima": {
+   "post": {
+    "tags": [
+     "fila-humana"
+    ],
+    "summary": "Proxima",
+    "description": "Reserva o proximo item para este usuario por 10 minutos.\n\n`FOR UPDATE SKIP LOCKED` garante que dois auditores clicando ao mesmo tempo\nrecebem itens diferentes. `excluir` recebe os ids pulados na sessao.",
+    "operationId": "proxima_fila_humana_proxima_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "lote",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lote"
+      }
+     },
+     {
+      "name": "excluir",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "integer"
+         },
+         "maxItems": 200
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Excluir"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeituraOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/fila-humana/{leitura_id}/liberar": {
+   "post": {
+    "tags": [
+     "fila-humana"
+    ],
+    "summary": "Liberar",
+    "description": "Devolve a reserva do proprio usuario (\"pular\"). Reserva alheia nao e tocada.",
+    "operationId": "liberar_fila_humana__leitura_id__liberar_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "leitura_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Leitura Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/fila-humana/{leitura_id}/decisao": {
+   "post": {
+    "tags": [
+     "fila-humana"
+    ],
+    "summary": "Decidir",
+    "operationId": "decidir_fila_humana__leitura_id__decisao_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "leitura_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Leitura Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DecisaoIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RevisaoOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/quarentena": {
+   "get": {
+    "tags": [
+     "quarentena"
+    ],
+    "summary": "Listar",
+    "operationId": "listar_quarentena_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "tipo",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "$ref": "#/components/schemas/TipoInconsistencia"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tipo"
+      }
+     },
+     {
+      "name": "severidade",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "$ref": "#/components/schemas/Severidade"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Severidade"
+      }
+     },
+     {
+      "name": "resolvido",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false,
+       "title": "Resolvido"
+      }
+     },
+     {
+      "name": "lote",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lote"
+      }
+     },
+     {
+      "name": "pagina",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "default": 1,
+       "title": "Pagina"
+      }
+     },
+     {
+      "name": "por_pagina",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "default": 50,
+       "title": "Por Pagina"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_QuarentenaOut_"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/quarentena/resumo": {
+   "get": {
+    "tags": [
+     "quarentena"
+    ],
+    "summary": "Resumo",
+    "operationId": "resumo_quarentena_resumo_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "additionalProperties": {
+           "type": "integer"
+          },
+          "type": "object"
+         },
+         "type": "object",
+         "title": "Response Resumo Quarentena Resumo Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/quarentena/{quarentena_id}/resolver": {
+   "post": {
+    "tags": [
+     "quarentena"
+    ],
+    "summary": "Resolver",
+    "operationId": "resolver_quarentena__quarentena_id__resolver_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "quarentena_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Quarentena Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResolverQuarentenaIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/QuarentenaOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/metricas/qualidade": {
+   "get": {
+    "tags": [
+     "metricas"
+    ],
+    "summary": "Qualidade",
+    "operationId": "qualidade_metricas_qualidade_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Qualidade Metricas Qualidade Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/metricas/drift": {
+   "get": {
+    "tags": [
+     "metricas"
+    ],
+    "summary": "Drift",
+    "description": "Serie por lote. Sinais de modelo (confianca media, discordancia) so a partir do M5.",
+    "operationId": "drift_metricas_drift_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Drift Metricas Drift Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/usuarios": {
+   "get": {
+    "tags": [
+     "usuarios"
+    ],
+    "summary": "Listar",
+    "operationId": "listar_usuarios_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/UsuarioOut"
+         },
+         "type": "array",
+         "title": "Response Listar Usuarios Get"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   },
+   "post": {
+    "tags": [
+     "usuarios"
+    ],
+    "summary": "Criar",
+    "operationId": "criar_usuarios_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UsuarioIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UsuarioOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/usuarios/{usuario_id}": {
+   "patch": {
+    "tags": [
+     "usuarios"
+    ],
+    "summary": "Atualizar",
+    "operationId": "atualizar_usuarios__usuario_id__patch",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "usuario_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Usuario Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UsuarioPatch"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UsuarioOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "DecisaoHumana": {
+    "type": "string",
+    "enum": [
+     "aprovada",
+     "reprovada"
+    ],
+    "title": "DecisaoHumana"
+   },
+   "DecisaoIn": {
+    "properties": {
+     "decisao": {
+      "$ref": "#/components/schemas/DecisaoHumana"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/MotivoReprovacao"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "observacao": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observacao"
+     }
+    },
+    "type": "object",
+    "required": [
+     "decisao"
+    ],
+    "title": "DecisaoIn"
+   },
+   "FotoOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "nome_arquivo": {
+      "type": "string",
+      "title": "Nome Arquivo"
+     },
+     "sequencia": {
+      "type": "integer",
+      "title": "Sequencia"
+     },
+     "principal": {
+      "type": "boolean",
+      "title": "Principal"
+     },
+     "largura": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Largura"
+     },
+     "altura": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Altura"
+     },
+     "bytes": {
+      "type": "integer",
+      "title": "Bytes"
+     },
+     "url": {
+      "type": "string",
+      "title": "Url"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome_arquivo",
+     "sequencia",
+     "principal",
+     "largura",
+     "altura",
+     "bytes",
+     "url"
+    ],
+    "title": "FotoOut"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "type": "array",
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "title": "HTTPValidationError"
+   },
+   "HistoricoOut": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "title": "Status"
+     },
+     "ator": {
+      "type": "string",
+      "title": "Ator"
+     },
+     "confianca": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Confianca"
+     },
+     "detalhe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detalhe"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "status",
+     "ator",
+     "confianca",
+     "detalhe",
+     "criado_em"
+    ],
+    "title": "HistoricoOut"
+   },
+   "InferenciaOut": {
+    "properties": {
+     "modelo": {
+      "type": "string",
+      "title": "Modelo"
+     },
+     "saida": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "Saida"
+     },
+     "latencia_ms": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Latencia Ms"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "modelo",
+     "saida",
+     "latencia_ms",
+     "criado_em"
+    ],
+    "title": "InferenciaOut"
+   },
+   "IngestBatchIn": {
+    "properties": {
+     "lote": {
+      "type": "string",
+      "pattern": "^PSP_EXTRATLEITIMPL_\\d{6}_\\d{4}$",
+      "title": "Lote"
+     },
+     "reprocessar": {
+      "type": "boolean",
+      "title": "Reprocessar",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "lote"
+    ],
+    "title": "IngestBatchIn"
+   },
+   "JobOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "tipo": {
+      "type": "string",
+      "title": "Tipo"
+     },
+     "status": {
+      "type": "string",
+      "title": "Status"
+     },
+     "payload": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "Payload"
+     },
+     "tentativas": {
+      "type": "integer",
+      "title": "Tentativas"
+     },
+     "agendado_para": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Agendado Para"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "tipo",
+     "status",
+     "payload",
+     "tentativas",
+     "agendado_para",
+     "criado_em"
+    ],
+    "title": "JobOut"
+   },
+   "LeituraOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "lote": {
+      "type": "string",
+      "title": "Lote"
+     },
+     "linha_csv": {
+      "type": "integer",
+      "title": "Linha Csv"
+     },
+     "medidores": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Medidores"
+     },
+     "posicao_lida": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Posicao Lida"
+     },
+     "nota_codigo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota Codigo"
+     },
+     "status_atual": {
+      "type": "string",
+      "title": "Status Atual"
+     },
+     "foto_principal": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/FotoOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reservado_por": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reservado Por"
+     },
+     "reservado_ate": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reservado Ate"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/NotaOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "fotos": {
+      "items": {
+       "$ref": "#/components/schemas/FotoOut"
+      },
+      "type": "array",
+      "title": "Fotos"
+     },
+     "historico": {
+      "items": {
+       "$ref": "#/components/schemas/HistoricoOut"
+      },
+      "type": "array",
+      "title": "Historico"
+     },
+     "inferencias": {
+      "items": {
+       "$ref": "#/components/schemas/InferenciaOut"
+      },
+      "type": "array",
+      "title": "Inferencias"
+     },
+     "quarentena": {
+      "items": {
+       "$ref": "#/components/schemas/QuarentenaOut"
+      },
+      "type": "array",
+      "title": "Quarentena"
+     },
+     "revisoes": {
+      "items": {
+       "$ref": "#/components/schemas/RevisaoOut"
+      },
+      "type": "array",
+      "title": "Revisoes"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "lote",
+     "linha_csv",
+     "medidores",
+     "posicao_lida",
+     "nota_codigo",
+     "status_atual",
+     "foto_principal",
+     "reservado_por",
+     "reservado_ate",
+     "criado_em",
+     "nota",
+     "fotos",
+     "historico",
+     "inferencias",
+     "quarentena",
+     "revisoes"
+    ],
+    "title": "LeituraOut"
+   },
+   "LeituraResumoOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "lote": {
+      "type": "string",
+      "title": "Lote"
+     },
+     "linha_csv": {
+      "type": "integer",
+      "title": "Linha Csv"
+     },
+     "medidores": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Medidores"
+     },
+     "posicao_lida": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Posicao Lida"
+     },
+     "nota_codigo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota Codigo"
+     },
+     "status_atual": {
+      "type": "string",
+      "title": "Status Atual"
+     },
+     "foto_principal": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/FotoOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reservado_por": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reservado Por"
+     },
+     "reservado_ate": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reservado Ate"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "lote",
+     "linha_csv",
+     "medidores",
+     "posicao_lida",
+     "nota_codigo",
+     "status_atual",
+     "foto_principal",
+     "reservado_por",
+     "reservado_ate",
+     "criado_em"
+    ],
+    "title": "LeituraResumoOut"
+   },
+   "LoginIn": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "senha": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Senha"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email",
+     "senha"
+    ],
+    "title": "LoginIn"
+   },
+   "LoteOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "data_extracao": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Data Extracao"
+     },
+     "csv_nome": {
+      "type": "string",
+      "title": "Csv Nome"
+     },
+     "total_linhas": {
+      "type": "integer",
+      "title": "Total Linhas"
+     },
+     "total_fotos_disco": {
+      "type": "integer",
+      "title": "Total Fotos Disco"
+     },
+     "ingerido_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Ingerido Em"
+     },
+     "por_status": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Por Status"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "data_extracao",
+     "csv_nome",
+     "total_linhas",
+     "total_fotos_disco",
+     "ingerido_em"
+    ],
+    "title": "LoteOut"
+   },
+   "MotivoReprovacao": {
+    "type": "string",
+    "enum": [
+     "fora_de_foco",
+     "glare",
+     "tampa_suja",
+     "enquadramento_incorreto",
+     "display_apagado",
+     "outro"
+    ],
+    "title": "MotivoReprovacao",
+    "description": "Lista fechada: as 5 classes de qualidade mais `outro`. Vira rotulo de treino."
+   },
+   "NotaOut": {
+    "properties": {
+     "codigo": {
+      "type": "string",
+      "title": "Codigo"
+     },
+     "descricao": {
+      "type": "string",
+      "title": "Descricao"
+     },
+     "exige_foto": {
+      "type": "boolean",
+      "title": "Exige Foto"
+     },
+     "cena_esperada": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cena Esperada"
+     }
+    },
+    "type": "object",
+    "required": [
+     "codigo",
+     "descricao",
+     "exige_foto",
+     "cena_esperada"
+    ],
+    "title": "NotaOut"
+   },
+   "Pagina_LeituraResumoOut_": {
+    "properties": {
+     "itens": {
+      "items": {
+       "$ref": "#/components/schemas/LeituraResumoOut"
+      },
+      "type": "array",
+      "title": "Itens"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "pagina": {
+      "type": "integer",
+      "title": "Pagina"
+     },
+     "por_pagina": {
+      "type": "integer",
+      "title": "Por Pagina"
+     }
+    },
+    "type": "object",
+    "required": [
+     "itens",
+     "total",
+     "pagina",
+     "por_pagina"
+    ],
+    "title": "Pagina[LeituraResumoOut]"
+   },
+   "Pagina_QuarentenaOut_": {
+    "properties": {
+     "itens": {
+      "items": {
+       "$ref": "#/components/schemas/QuarentenaOut"
+      },
+      "type": "array",
+      "title": "Itens"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "pagina": {
+      "type": "integer",
+      "title": "Pagina"
+     },
+     "por_pagina": {
+      "type": "integer",
+      "title": "Por Pagina"
+     }
+    },
+    "type": "object",
+    "required": [
+     "itens",
+     "total",
+     "pagina",
+     "por_pagina"
+    ],
+    "title": "Pagina[QuarentenaOut]"
+   },
+   "Papel": {
+    "type": "string",
+    "enum": [
+     "auditor",
+     "supervisor",
+     "admin"
+    ],
+    "title": "Papel",
+    "description": "Hierarquico: ADMIN > SUPERVISOR > AUDITOR. Comparar por ORDEM_PAPEL."
+   },
+   "QuarentenaOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "lote_id": {
+      "type": "integer",
+      "title": "Lote Id"
+     },
+     "leitura_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Leitura Id"
+     },
+     "foto_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Foto Id"
+     },
+     "tipo": {
+      "type": "string",
+      "title": "Tipo"
+     },
+     "severidade": {
+      "type": "string",
+      "title": "Severidade"
+     },
+     "detalhe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detalhe"
+     },
+     "resolvido": {
+      "type": "boolean",
+      "title": "Resolvido"
+     },
+     "resolvido_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resolvido Por"
+     },
+     "resolvido_em": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resolvido Em"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "lote_id",
+     "leitura_id",
+     "foto_id",
+     "tipo",
+     "severidade",
+     "detalhe",
+     "resolvido",
+     "resolvido_por",
+     "resolvido_em",
+     "criado_em"
+    ],
+    "title": "QuarentenaOut"
+   },
+   "ResolverQuarentenaIn": {
+    "properties": {
+     "observacao": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observacao"
+     }
+    },
+    "type": "object",
+    "title": "ResolverQuarentenaIn"
+   },
+   "RevisaoOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "usuario_id": {
+      "type": "integer",
+      "title": "Usuario Id"
+     },
+     "decisao": {
+      "$ref": "#/components/schemas/DecisaoHumana"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/MotivoReprovacao"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "observacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observacao"
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "usuario_id",
+     "decisao",
+     "motivo",
+     "observacao",
+     "criado_em"
+    ],
+    "title": "RevisaoOut"
+   },
+   "Severidade": {
+    "type": "string",
+    "enum": [
+     "bloqueante",
+     "informativo"
+    ],
+    "title": "Severidade"
+   },
+   "TipoInconsistencia": {
+    "type": "string",
+    "enum": [
+     "nota_exige_sem_foto",
+     "foto_sem_exigencia",
+     "codigo_nao_mapeado",
+     "foto_orfa",
+     "medidor_multiplo",
+     "posicao_invalida",
+     "posicao_ausente",
+     "foto_referenciada_ausente"
+    ],
+    "title": "TipoInconsistencia",
+    "description": "Tipos de registro em quarentena. Usados a partir do marco M2."
+   },
+   "TokenOut": {
+    "properties": {
+     "access_token": {
+      "type": "string",
+      "title": "Access Token"
+     },
+     "token_type": {
+      "type": "string",
+      "title": "Token Type",
+      "default": "bearer"
+     },
+     "expires_in": {
+      "type": "integer",
+      "title": "Expires In"
+     }
+    },
+    "type": "object",
+    "required": [
+     "access_token",
+     "expires_in"
+    ],
+    "title": "TokenOut"
+   },
+   "TrocarSenhaIn": {
+    "properties": {
+     "senha_atual": {
+      "type": "string",
+      "title": "Senha Atual"
+     },
+     "senha_nova": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 10,
+      "title": "Senha Nova"
+     }
+    },
+    "type": "object",
+    "required": [
+     "senha_atual",
+     "senha_nova"
+    ],
+    "title": "TrocarSenhaIn"
+   },
+   "UsuarioIn": {
+    "properties": {
+     "nome": {
+      "type": "string",
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Nome"
+     },
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "senha_inicial": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 10,
+      "title": "Senha Inicial"
+     },
+     "papel": {
+      "$ref": "#/components/schemas/Papel",
+      "default": "auditor"
+     }
+    },
+    "type": "object",
+    "required": [
+     "nome",
+     "email",
+     "senha_inicial"
+    ],
+    "title": "UsuarioIn"
+   },
+   "UsuarioOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "nome": {
+      "type": "string",
+      "title": "Nome"
+     },
+     "email": {
+      "type": "string",
+      "title": "Email"
+     },
+     "papel": {
+      "$ref": "#/components/schemas/Papel"
+     },
+     "ativo": {
+      "type": "boolean",
+      "title": "Ativo"
+     },
+     "precisa_trocar_senha": {
+      "type": "boolean",
+      "title": "Precisa Trocar Senha",
+      "default": false
+     },
+     "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "nome",
+     "email",
+     "papel",
+     "ativo",
+     "criado_em"
+    ],
+    "title": "UsuarioOut"
+   },
+   "UsuarioPatch": {
+    "properties": {
+     "nome": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 120,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nome"
+     },
+     "papel": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/Papel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "ativo": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ativo"
+     },
+     "resetar_senha": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 10
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resetar Senha"
+     }
+    },
+    "type": "object",
+    "title": "UsuarioPatch"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Location"
+     },
+     "msg": {
+      "type": "string",
+      "title": "Message"
+     },
+     "type": {
+      "type": "string",
+      "title": "Error Type"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "ctx": {
+      "type": "object",
+      "title": "Context"
+     }
+    },
+    "type": "object",
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError"
+   }
+  },
+  "securitySchemes": {
+   "HTTPBearer": {
+    "type": "http",
+    "scheme": "bearer"
+   }
+  }
+ }
+}

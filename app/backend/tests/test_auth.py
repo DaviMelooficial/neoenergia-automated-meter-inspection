@@ -178,3 +178,16 @@ def test_seed_do_admin_e_idempotente(db_session):
     assert admin is not None and admin.papel == "admin" and admin.senha_alterada_em is None
     assert service.garantir_admin(db_session) is None
     assert db_session.scalar(select(func.count()).select_from(Usuario)) == 1
+
+
+def test_seed_recria_admin_quando_so_ha_auditores(db_session):
+    """Condicao e 'nenhum admin ativo', nao 'tabela vazia': um banco so com
+    auditores (ou com o admin desativado) nao pode ficar sem porta de entrada."""
+    from tests.usuarios_fixture import criar_usuario
+
+    criar_usuario(db_session, "so.auditor@teste.com.br", Papel.AUDITOR)
+    admin = service.garantir_admin(db_session)
+    assert admin is not None and admin.papel == "admin"
+    admin.ativo = False
+    db_session.flush()
+    assert service.garantir_admin(db_session) is None  # mesmo e-mail existe: nao duplica

@@ -75,7 +75,7 @@ def listar(
     )
 
 
-def consulta_proxima(usuario_id: int, lote: str | None = None):
+def consulta_proxima(usuario_id: int, lote: str | None = None, excluir: list[int] | None = None):
     """SELECT ... FOR UPDATE OF leituras SKIP LOCKED do proximo item livre.
 
     `of=Leitura` e essencial: sem ele o lock cai tambem na linha de `lotes`
@@ -97,17 +97,25 @@ def consulta_proxima(usuario_id: int, lote: str | None = None):
     )
     if lote:
         consulta = consulta.where(Lote.nome == lote)
+    if excluir:
+        # Itens que o auditor pulou nesta sessao: ficam na fila para os outros.
+        consulta = consulta.where(Leitura.id.not_in(excluir))
     return consulta
 
 
 @router.post("/proxima", response_model=LeituraOut)
-def proxima(db: DB, usuario: Auditor, lote: str | None = None) -> LeituraOut:
+def proxima(
+    db: DB,
+    usuario: Auditor,
+    lote: str | None = None,
+    excluir: Annotated[list[int] | None, Query(max_length=200)] = None,
+) -> LeituraOut:
     """Reserva o proximo item para este usuario por 10 minutos.
 
     `FOR UPDATE SKIP LOCKED` garante que dois auditores clicando ao mesmo tempo
-    recebem itens diferentes.
+    recebem itens diferentes. `excluir` recebe os ids pulados na sessao.
     """
-    leitura_id = db.scalar(consulta_proxima(usuario.id, lote))
+    leitura_id = db.scalar(consulta_proxima(usuario.id, lote, excluir))
     if leitura_id is None:
         db.rollback()
         raise HTTPException(status.HTTP_404_NOT_FOUND, "fila vazia")
@@ -117,6 +125,23 @@ def proxima(db: DB, usuario: Auditor, lote: str | None = None) -> LeituraOut:
     leitura.reservado_ate = _agora() + RESERVA
     db.commit()
     return leitura_completa(db, carregar_leitura(db, leitura_id))
+
+
+@router.post("/{leitura_id}/liberar", status_code=status.HTTP_204_NO_CONTENT)
+def liberar(leitura_id: int, db: DB, usuario: Auditor) -> None:
+    """Devolve a reserva do proprio usuario ("pular"). Reserva alheia nao e tocada.
+
+    Com lock de linha: se a reserva venceu e outro auditor acabou de pegar o
+    item, a checagem de dono acontece ja com a linha travada e nada e apagado.
+    """
+    leitura = db.scalar(select(Leitura).where(Leitura.id == leitura_id).with_for_update())
+    if leitura is None:
+        db.rollback()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "leitura nao encontrada")
+    if leitura.reservado_por == usuario.id:
+        leitura.reservado_por = None
+        leitura.reservado_ate = None
+    db.commit()
 
 
 @router.post(

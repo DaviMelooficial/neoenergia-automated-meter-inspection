@@ -17,9 +17,7 @@ from inspecao.models import HistoricoStatus, Leitura
 ESTADO_INICIAL = StatusLeitura.RECEBIDA
 
 TRANSICOES: dict[StatusLeitura, frozenset[StatusLeitura]] = {
-    StatusLeitura.RECEBIDA: frozenset(
-        {StatusLeitura.TRIAGEM_QUALIDADE, StatusLeitura.SEM_FOTO}
-    ),
+    StatusLeitura.RECEBIDA: frozenset({StatusLeitura.TRIAGEM_QUALIDADE, StatusLeitura.SEM_FOTO}),
     StatusLeitura.TRIAGEM_QUALIDADE: frozenset(
         {
             StatusLeitura.REJEITADA_QUALIDADE,
@@ -118,12 +116,16 @@ def transicionar_em_lote(
 
     ids = list(leitura_ids)
     with sessao.begin_nested() as savepoint:
-        atualizados = sessao.execute(
-            update(Leitura)
-            .where(Leitura.id.in_(ids), Leitura.status_atual == origem.value)
-            .values(status_atual=destino.value)
-            .returning(Leitura.id)
-        ).scalars().all()
+        atualizados = (
+            sessao.execute(
+                update(Leitura)
+                .where(Leitura.id.in_(ids), Leitura.status_atual == origem.value)
+                .values(status_atual=destino.value)
+                .returning(Leitura.id)
+            )
+            .scalars()
+            .all()
+        )
 
         if len(atualizados) != len(ids):
             faltantes = sorted(set(ids) - set(atualizados))[:5]
@@ -156,8 +158,7 @@ def registrar_estado_inicial(sessao: Session, leitura_ids: Iterable[int], ator: 
     com `status_atual = ESTADO_INICIAL` pela ingestao.
     """
     linhas = [
-        {"leitura_id": lid, "status": ESTADO_INICIAL.value, "ator": ator}
-        for lid in leitura_ids
+        {"leitura_id": lid, "status": ESTADO_INICIAL.value, "ator": ator} for lid in leitura_ids
     ]
     if linhas:
         sessao.bulk_insert_mappings(HistoricoStatus, linhas)

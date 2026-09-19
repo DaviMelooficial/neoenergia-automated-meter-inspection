@@ -78,9 +78,7 @@ def avaliar(
         # O CSV prometeu evidencia que nao chegou. Nao fatura, nao vai a triagem.
         # Um so achado (a causa raiz), mesmo que a nota exija foto: o total que
         # bloqueia faturamento e nota_exige_sem_foto + foto_referenciada_ausente.
-        achados.append(
-            Achado(TipoInconsistencia.FOTO_REFERENCIADA_AUSENTE, Severidade.BLOQUEANTE)
-        )
+        achados.append(Achado(TipoInconsistencia.FOTO_REFERENCIADA_AUSENTE, Severidade.BLOQUEANTE))
         novo_status: StatusLeitura | None = StatusLeitura.SEM_FOTO
     elif not tem_foto:
         if exige_foto:

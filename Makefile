@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo \
         api-dev worker-dev front-dev test lint up down logs reset health
 
 help:  ## lista os alvos disponiveis
@@ -65,6 +65,12 @@ api-dev:  ## sobe a api no host com reload
 
 worker-dev:  ## sobe o worker no host
 	cd app/backend && uv run python -m inspecao.jobs.worker
+
+triagem-todos:  ## enfileira a triagem de qualidade para todas as leituras em "recebida"
+	cd app/backend && uv run python -m inspecao.jobs.cli reprocessar --todos
+
+fila-resumo:  ## contagem de jobs por tipo e status
+	cd app/backend && uv run python -m inspecao.jobs.cli resumo
 
 front-dev:  ## sobe o vite dev server
 	cd app/frontend && npm run dev

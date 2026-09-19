@@ -71,7 +71,10 @@ class NotaOcorrencia(Base):
 
 class Leitura(Base):
     __tablename__ = "leituras"
-    __table_args__ = (UniqueConstraint("lote_id", "linha_csv", name="uq_leitura_lote_linha"),)
+    __table_args__ = (
+        UniqueConstraint("lote_id", "linha_csv", name="uq_leitura_lote_linha"),
+        Index("ix_leituras_reserva", "reservado_por", "reservado_ate"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     lote_id: Mapped[int] = mapped_column(ForeignKey("lotes.id", ondelete="CASCADE"), index=True)
@@ -83,6 +86,11 @@ class Leitura(Base):
     status_atual: Mapped[str] = mapped_column(
         String(30), default=StatusLeitura.RECEBIDA, index=True
     )
+    # Reserva de item da fila humana: evita dois auditores na mesma foto.
+    reservado_por: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    reservado_ate: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     lote: Mapped["Lote"] = relationship(back_populates="leituras")
@@ -95,6 +103,12 @@ class Leitura(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="HistoricoStatus.id",
+    )
+    revisoes: Mapped[list["RevisaoHumana"]] = relationship(
+        back_populates="leitura",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="RevisaoHumana.id",
     )
 
 
@@ -136,6 +150,12 @@ class Foto(Base):
 
     lote: Mapped["Lote"] = relationship(back_populates="fotos")
     leitura: Mapped["Leitura | None"] = relationship(back_populates="fotos")
+    inferencias: Mapped[list["ResultadoInferencia"]] = relationship(
+        back_populates="foto",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ResultadoInferencia.id",
+    )
 
 
 class HistoricoStatus(Base):
@@ -198,3 +218,144 @@ class Quarentena(Base):
     resolvido_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
     resolvido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Acesso (marco M3)
+# ---------------------------------------------------------------------------
+
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nome: Mapped[str] = mapped_column(String(120))
+    # Sempre em minusculas: normalizado no servico antes de gravar ou consultar.
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    senha_hash: Mapped[str] = mapped_column(String(300))
+    papel: Mapped[str] = mapped_column(String(20), default="auditor")
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Nulo = precisa trocar a senha no proximo login (seed do admin, reset por admin).
+    senha_alterada_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class RefreshToken(Base):
+    """Refresh token opaco: so o sha256 fica no banco. Rotacao encadeada."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), index=True
+    )
+    token_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    expira_em: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revogado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    revogado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    substituido_por: Mapped[int | None] = mapped_column(
+        ForeignKey("refresh_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="refresh_tokens")
+
+
+class LogAcesso(Base):
+    """Append-only. Base do rate limiting e da trilha de auditoria de acesso."""
+
+    __tablename__ = "log_acesso"
+    __table_args__ = (
+        Index("ix_log_acesso_identificador_evento", "identificador", "evento", "criado_em"),
+        Index("ix_log_acesso_ip_evento", "ip_origem", "evento", "criado_em"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    usuario_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    identificador: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    evento: Mapped[str] = mapped_column(String(30))
+    ip_origem: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Fila e inferencia (marco M3)
+# ---------------------------------------------------------------------------
+
+
+class Job(Base):
+    """Fila de jobs no proprio Postgres. Claim com FOR UPDATE SKIP LOCKED."""
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        Index(
+            "ix_jobs_pendentes",
+            "agendado_para",
+            "id",
+            postgresql_where="status = 'pendente'",
+        ),
+        Index("ix_jobs_status_tipo", "status", "tipo"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(40))
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String(20), default="pendente", server_default="pendente")
+    tentativas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    max_tentativas: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
+    erro: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agendado_para: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    iniciado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    concluido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResultadoInferencia(Base):
+    """Saida bruta de um detector sobre uma foto. Permite re-decidir sem reabrir imagem."""
+
+    __tablename__ = "resultados_inferencia"
+    __table_args__ = (Index("ix_resultados_inferencia_foto_modelo", "foto_id", "modelo"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    foto_id: Mapped[int] = mapped_column(ForeignKey("fotos.id", ondelete="CASCADE"))
+    modelo: Mapped[str] = mapped_column(String(80), index=True)  # ex.: nulo@v0, heuristica@v1
+    saida: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    latencia_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    foto: Mapped["Foto"] = relationship(back_populates="inferencias")
+
+
+class RevisaoHumana(Base):
+    """Decisao de um auditor sobre uma leitura da fila humana. Append-only."""
+
+    __tablename__ = "revisoes_humanas"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    leitura_id: Mapped[int] = mapped_column(
+        ForeignKey("leituras.id", ondelete="CASCADE"), index=True
+    )
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), index=True
+    )
+    decisao: Mapped[str] = mapped_column(String(20))
+    motivo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Marcada quando o item foi redistribuido para um segundo revisor (auditoria
+    # amostral do marco M8). Fica no esquema desde ja para nao migrar depois.
+    redistribuida: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    leitura: Mapped["Leitura"] = relationship(back_populates="revisoes")

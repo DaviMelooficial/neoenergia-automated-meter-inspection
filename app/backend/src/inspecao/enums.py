@@ -43,3 +43,55 @@ class Ator(StrEnum):
     INGESTAO = "ingestao"
     HEURISTICA = "heuristica"
     SISTEMA = "sistema"
+
+
+class Papel(StrEnum):
+    """Hierarquico: ADMIN > SUPERVISOR > AUDITOR. Comparar por ORDEM_PAPEL."""
+
+    AUDITOR = "auditor"
+    SUPERVISOR = "supervisor"
+    ADMIN = "admin"
+
+
+ORDEM_PAPEL: dict[Papel, int] = {Papel.AUDITOR: 1, Papel.SUPERVISOR: 2, Papel.ADMIN: 3}
+
+
+class EventoAcesso(StrEnum):
+    LOGIN = "login"
+    LOGOUT = "logout"
+    LOGIN_FALHO = "login_falho"
+    LOGIN_BLOQUEADO = "login_bloqueado"
+    REFRESH = "refresh"
+    REFRESH_REUSO = "refresh_reuso"
+    SENHA_ALTERADA = "senha_alterada"
+
+
+class StatusJob(StrEnum):
+    PENDENTE = "pendente"
+    PROCESSANDO = "processando"
+    CONCLUIDO = "concluido"
+    ERRO = "erro"
+
+
+class TipoJob(StrEnum):
+    TRIAGEM_QUALIDADE = "triagem_qualidade"
+    VALIDACAO_LEITURA = "validacao_leitura"
+    REPROCESSAR_LOTE = "reprocessar_lote"
+    INGERIR_LOTE = "ingerir_lote"
+    # recalcular_decisao entra no marco M5 (T-M5-06), junto com a politica calibrada.
+
+
+class DecisaoHumana(StrEnum):
+    APROVADA = "aprovada"
+    REPROVADA = "reprovada"
+
+
+class MotivoReprovacao(StrEnum):
+    """Lista fechada: as 5 classes de qualidade mais `outro`. Vira rotulo de treino."""
+
+    FORA_DE_FOCO = "fora_de_foco"
+    GLARE = "glare"
+    TAMPA_SUJA = "tampa_suja"
+    ENQUADRAMENTO_INCORRETO = "enquadramento_incorreto"
+    DISPLAY_APAGADO = "display_apagado"
+    OUTRO = "outro"

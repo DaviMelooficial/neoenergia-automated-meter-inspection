@@ -81,11 +81,15 @@ def test_status_atual_so_e_escrito_por_estados_py():
     """
     padroes = [
         re.compile(r"\.status_atual\s*=[^=]"),
-        re.compile(r"status_atual\s*=[^=]"),  # values(status_atual=...)
+        re.compile(r"status_atual\s*=[^=]"),  # values(status_atual=...), kwargs, etc.
         re.compile(r"[\"']status_atual[\"']\s*:"),  # bulk mappings
         re.compile(r"setattr\(.*status_atual"),
     ]
     excecao_batch = '"status_atual": ESTADO_INICIAL.value,'
+    # Leituras (nao escritas) que a regex ampla pega. Allowlist explicita, por linha.
+    permitidas = {
+        ("routers/operacao.py", "status_atual=leitura.status_atual,"),  # kwarg de schema Pydantic
+    }
     violacoes: list[str] = []
     for arquivo in RAIZ_SRC.rglob("*.py"):
         if arquivo.name == "estados.py":
@@ -95,6 +99,8 @@ def test_status_atual_so_e_escrito_por_estados_py():
                 if arquivo.name == "batch.py" and linha.strip().startswith(excecao_batch):
                     continue
                 if "mapped_column" in linha:  # a declaracao da coluna em models.py
+                    continue
+                if (str(arquivo.relative_to(RAIZ_SRC)), linha.strip()) in permitidas:
                     continue
                 violacoes.append(f"{arquivo.relative_to(RAIZ_SRC)}:{numero}: {linha.strip()}")
     assert not violacoes, "status_atual escrito fora de estados.py:\n" + "\n".join(violacoes)

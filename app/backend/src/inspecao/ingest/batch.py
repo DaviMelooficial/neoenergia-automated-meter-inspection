@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal
-from inspecao.enums import Ator
+from inspecao.enums import Ator, StatusLeitura, TipoJob
 from inspecao.estados import ESTADO_INICIAL, registrar_estado_inicial
 from inspecao.ingest import notas as notas_mod
 from inspecao.ingest.parser import (
@@ -31,6 +31,7 @@ from inspecao.ingest.parser import (
     ler_csv,
 )
 from inspecao.ingest.validacao import ResumoValidacao, validar_lote
+from inspecao.jobs import fila
 from inspecao.models import Foto, Leitura, LeituraMedidor, Lote
 from inspecao.storage.local import LocalFileStorage
 
@@ -86,6 +87,7 @@ class ResultadoIngestao:
     fotos_orfas: int = 0
     fotos_ausentes: list[str] = field(default_factory=list)
     validacao: ResumoValidacao = field(default_factory=ResumoValidacao)
+    jobs_enfileirados: int = 0
     segundos: float = 0.0
     pulado: bool = False
 
@@ -237,6 +239,16 @@ def ingerir(
     registrar_estado_inicial(sessao, id_por_linha.values(), Ator.INGESTAO.value)
     resultado.validacao = validar_lote(sessao, lote.id, linhas, id_por_linha, vistos)
 
+    # Quem continua em `recebida` tem foto e segue para a triagem de qualidade.
+    para_triagem = sessao.scalars(
+        select(Leitura.id).where(
+            Leitura.lote_id == lote.id, Leitura.status_atual == StatusLeitura.RECEBIDA
+        )
+    ).all()
+    resultado.jobs_enfileirados = fila.enfileirar_em_lote(
+        sessao, TipoJob.TRIAGEM_QUALIDADE, ({"leitura_id": i} for i in para_triagem)
+    )
+
     lote.total_linhas = resultado.leituras
     lote.total_fotos_disco = resultado.fotos
     sessao.flush()
@@ -285,17 +297,28 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             log.info(
                 "%s: %d leituras, %d medidores, %d fotos (%d orfas) em %.1fs",
-                nome, r.leituras, r.medidores, r.fotos, r.fotos_orfas, r.segundos,
+                nome,
+                r.leituras,
+                r.medidores,
+                r.fotos,
+                r.fotos_orfas,
+                r.segundos,
             )
             v = r.validacao
             log.info(
-                "%s: %d sem_foto, %d seguem para triagem, %d bloqueantes; quarentena: %s",
-                nome, v.sem_foto, v.seguem_para_triagem, v.bloqueantes, v.quarentena_por_tipo,
+                "%s: %d sem_foto, %d seguem para triagem (%d jobs), %d bloqueantes; quarentena: %s",
+                nome,
+                v.sem_foto,
+                v.seguem_para_triagem,
+                r.jobs_enfileirados,
+                v.bloqueantes,
+                v.quarentena_por_tipo,
             )
             if r.fotos_ausentes:
                 log.warning(
                     "%s: %d fotos referenciadas no CSV ausentes do disco",
-                    nome, len(r.fotos_ausentes),
+                    nome,
+                    len(r.fotos_ausentes),
                 )
 
     log.info("tempo total: %.1fs", time.perf_counter() - total)

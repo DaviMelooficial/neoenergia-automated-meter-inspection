@@ -22,6 +22,7 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-inspecao}:${POSTGRES_PASSWORD:-inspecao_dev}@postgres:5432/${POSTGRES_DB:-inspecao}
       STORAGE_LOCAL_ROOT: /app/data/storage
       INGEST_STAGING_DIR: /app/data/staging
+      CONFIAR_X_FORWARDED_FOR: "true"   # o nginx do compose e o unico caminho ate a api
     ports: ["8000:8000"]
     volumes:
       - ./data:/app/data
@@ -39,6 +40,7 @@ services:
   worker:
     build: ./app/backend
     command: ["python", "-m", "inspecao.jobs.worker"]
+    stop_grace_period: 60s   # termina os jobs reivindicados antes do SIGKILL
     env_file: .env
     environment:
       APP_ROOT: /app
@@ -50,7 +52,6 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
-    profiles: ["completo"]   # so sobe a partir do marco M3, quando o worker existir
 
   frontend:
     build: ./app/frontend

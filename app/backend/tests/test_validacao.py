@@ -1,126 +1,24 @@
-"""Integracao da validacao com o banco, usando um lote sintetico.
+"""Integracao da validacao (M2) com o banco de teste, usando o lote sintetico."""
 
-Cobre os caminhos que os 4 lotes reais nao exercitam (`foto_referenciada_ausente`,
-`posicao_invalida`, `posicao_ausente`) e a mecanica de `transicionar`. Tudo roda
-dentro de uma transacao revertida ao final: nada fica no banco.
-Pula quando o banco nao esta acessivel.
-"""
-
-import csv
-from pathlib import Path
-
-import cv2
-import numpy as np
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
-from inspecao.db import SessionLocal, engine
-from inspecao.enums import Ator, Severidade, StatusLeitura, TipoInconsistencia
+from inspecao.enums import Ator, Severidade, StatusLeitura, TipoInconsistencia, TipoJob
 from inspecao.estados import TransicaoInvalida, transicionar, transicionar_em_lote
 from inspecao.ingest.batch import BatchFolderSource, ingerir
-from inspecao.models import Foto, HistoricoStatus, Leitura, Lote, NotaOcorrencia, Quarentena
+from inspecao.models import Foto, HistoricoStatus, Job, Leitura, Lote, Quarentena
 from inspecao.storage.local import LocalFileStorage
-
-LOTE = "PSP_EXTRATLEITIMPL_010199_0000"  # data impossivel: nunca colide com lote real
-PREFIXO = f"{LOTE}_"
-CABECALHO = [
-    "Numero do medidor",
-    "Posicao do medidor lida",
-    "Nota de Leitura Atual",
-    "Foto do medidor",
-]
-
-
-def foto(id_externo: int, seq: int = 0) -> str:
-    return f"{PREFIXO}{id_externo:020d}_{seq:03d}.jpg"
-
-
-# linha_csv comeca em 2 (a 1 e o cabecalho). Uma linha por cenario.
-LINHAS = [
-    # 2: normal, sem nota, com foto -> segue para triagem, sem quarentena
-    ["1001", "123", "NA", foto(1)],
-    # 3: nota exige foto e nao tem -> bloqueante + sem_foto
-    ["1002", "456", "Z901", "NA"],
-    # 4: nota nao exige e tem foto -> informativa, segue
-    ["1003", "789", "Z902", foto(3)],
-    # 5: codigo desconhecido, sem foto -> informativa + sem_foto
-    ["1004", "NA", "Z999", "NA"],
-    # 6: tres medidores, com foto -> medidor_multiplo, segue
-    ["2001/2002/F2003", "10", "NA", foto(6)],
-    # 7: CSV aponta foto que nao existe em disco -> bloqueante + sem_foto
-    ["1007", "11", "Z901", foto(7)],
-    # 8: posicao nao numerica -> posicao_invalida
-    ["1008", "12ab", "NA", foto(8)],
-    # 9: sem foto e sem nota -> sem_foto, sem quarentena
-    ["1009", "13", "NA", "NA"],
-    # 10: nota que pressupoe leitura (e nao exige foto), posicao vazia, com foto
-    #     -> posicao_ausente + foto_sem_exigencia
-    ["1010", "NA", "T111", foto(10)],
-    # 11: aponta o MESMO arquivo da linha 2 -> a foto fica com a linha 2; esta vira
-    #     foto_referenciada_ausente (bloqueante) + sem_foto
-    ["1011", "14", "NA", foto(1)],
-]
-FOTOS_EM_DISCO = [foto(1), foto(3), foto(6), foto(8), foto(10), foto(999, 2)]  # 999 = orfa
-
-
-def jpeg_bytes() -> bytes:
-    ok, buf = cv2.imencode(".jpg", np.zeros((480, 360, 3), dtype=np.uint8))
-    assert ok
-    return buf.tobytes()
+from tests import lote_sintetico as ls
 
 
 @pytest.fixture(scope="module")
-def staging(tmp_path_factory) -> Path:
-    raiz = tmp_path_factory.mktemp("staging")
-    pasta = raiz / LOTE
-    pasta.mkdir()
-    with (pasta / "BaseExtracao_01011999_Dia.csv").open("w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh, delimiter=";", lineterminator="\r\n")
-        w.writerow(CABECALHO)
-        w.writerows(LINHAS)
-    dados = jpeg_bytes()
-    for nome in FOTOS_EM_DISCO:
-        (pasta / nome).write_bytes(dados)
-    return raiz
+def staging(tmp_path_factory):
+    return ls.criar_staging(tmp_path_factory.mktemp("staging"))
 
 
 @pytest.fixture
-def sessao():
-    try:
-        with engine.connect() as c:
-            c.execute(text("SELECT 1"))
-    except Exception:
-        pytest.skip("banco indisponivel")
-    s = SessionLocal()
-    try:
-        yield s
-    finally:
-        s.rollback()
-        s.close()
-
-
-@pytest.fixture
-def ingerido(sessao, staging, tmp_path):
-    # Notas sinteticas, na mesma transacao: nao dependem da planilha do cliente.
-    sessao.add_all(
-        [
-            NotaOcorrencia(codigo="Z901", descricao="exige foto", exige_foto=True),
-            NotaOcorrencia(codigo="Z902", descricao="nao exige foto", exige_foto=False),
-        ]
-    )
-    # T111 e um codigo real (pressupoe leitura). O teste precisa controlar o seu
-    # exige_foto, entao sobrescreve na transacao o que vier da planilha.
-    t111 = sessao.get(NotaOcorrencia, "T111")
-    if t111 is None:
-        sessao.add(NotaOcorrencia(codigo="T111", descricao="tampa danificada", exige_foto=False))
-    else:
-        t111.exige_foto = False
-    sessao.flush()
-
-    origem = BatchFolderSource(staging)
-    storage = LocalFileStorage(raiz=tmp_path / "storage")
-    resultado = ingerir(sessao, origem, LOTE, storage)
-    lote = sessao.scalar(select(Lote).where(Lote.nome == LOTE))
+def ingerido(db_session, staging, tmp_path):
+    resultado, lote, _ = ls.ingerir_sintetico(db_session, staging, tmp_path / "storage")
     return resultado, lote
 
 
@@ -144,15 +42,24 @@ def test_resultado_da_ingestao(ingerido):
     assert resultado.leituras == 10
     assert resultado.fotos == 6
     assert resultado.fotos_orfas == 1
-    assert resultado.fotos_ausentes == [foto(7)]
+    assert resultado.fotos_ausentes == [ls.foto(7)]
     assert resultado.validacao.sem_foto == 5  # linhas 3, 5, 7, 9, 11
     assert resultado.validacao.seguem_para_triagem == 5  # linhas 2, 4, 6, 8, 10
     assert resultado.validacao.bloqueantes == 3  # linhas 3, 7 e 11
+    assert resultado.jobs_enfileirados == 5
 
 
-def test_quarentena_por_tipo(ingerido, sessao):
+def test_jobs_de_triagem_enfileirados_para_quem_tem_foto(ingerido, db_session):
     _, lote = ingerido
-    assert contar_quarentena(sessao, lote.id) == {
+    com_foto = {leitura_da_linha(db_session, lote.id, n).id for n in ls.LINHAS_COM_FOTO}
+    jobs = db_session.scalars(select(Job).where(Job.tipo == TipoJob.TRIAGEM_QUALIDADE)).all()
+    assert {j.payload["leitura_id"] for j in jobs} == com_foto
+    assert all(j.status == "pendente" for j in jobs)
+
+
+def test_quarentena_por_tipo(ingerido, db_session):
+    _, lote = ingerido
+    assert contar_quarentena(db_session, lote.id) == {
         TipoInconsistencia.NOTA_EXIGE_SEM_FOTO.value: 1,
         TipoInconsistencia.FOTO_SEM_EXIGENCIA.value: 2,  # linhas 4 e 10
         TipoInconsistencia.CODIGO_NAO_MAPEADO.value: 1,
@@ -164,9 +71,9 @@ def test_quarentena_por_tipo(ingerido, sessao):
     }
 
 
-def test_severidades(ingerido, sessao):
+def test_severidades(ingerido, db_session):
     _, lote = ingerido
-    bloqueantes = sessao.scalars(
+    bloqueantes = db_session.scalars(
         select(Quarentena.tipo).where(
             Quarentena.lote_id == lote.id,
             Quarentena.severidade == Severidade.BLOQUEANTE.value,
@@ -181,64 +88,55 @@ def test_severidades(ingerido, sessao):
     )
 
 
-def test_foto_ausente_guarda_o_nome_prometido(ingerido, sessao):
+def test_foto_ausente_guarda_o_nome_prometido(ingerido, db_session):
     _, lote = ingerido
     por_leitura = {
         q.leitura_id: q
-        for q in sessao.scalars(
+        for q in db_session.scalars(
             select(Quarentena).where(
                 Quarentena.lote_id == lote.id,
                 Quarentena.tipo == TipoInconsistencia.FOTO_REFERENCIADA_AUSENTE.value,
             )
         )
     }
-    ausente = por_leitura[leitura_da_linha(sessao, lote.id, 7).id]
-    assert ausente.detalhe == {"foto_nome": foto(7)}
+    ausente = por_leitura[leitura_da_linha(db_session, lote.id, 7).id]
+    assert ausente.detalhe == {"foto_nome": ls.foto(7)}
 
-    duplicada = por_leitura[leitura_da_linha(sessao, lote.id, 11).id]
-    assert duplicada.detalhe["foto_nome"] == foto(1)
+    duplicada = por_leitura[leitura_da_linha(db_session, lote.id, 11).id]
+    assert duplicada.detalhe["foto_nome"] == ls.foto(1)
     assert "outra linha" in duplicada.detalhe["motivo"]
-    # a foto ficou com a linha 2, e so com ela
-    assert sessao.scalar(select(Foto.leitura_id).where(Foto.nome_arquivo == foto(1))) == (
-        leitura_da_linha(sessao, lote.id, 2).id
+    assert db_session.scalar(select(Foto.leitura_id).where(Foto.nome_arquivo == ls.foto(1))) == (
+        leitura_da_linha(db_session, lote.id, 2).id
     )
 
 
-def test_orfa_aponta_para_a_foto_e_nao_para_leitura(ingerido, sessao):
+def test_orfa_aponta_para_a_foto_e_nao_para_leitura(ingerido, db_session):
     _, lote = ingerido
-    q = sessao.scalar(
+    q = db_session.scalar(
         select(Quarentena).where(
             Quarentena.lote_id == lote.id, Quarentena.tipo == TipoInconsistencia.FOTO_ORFA.value
         )
     )
     assert q.leitura_id is None
-    assert q.foto_id == sessao.scalar(select(Foto.id).where(Foto.nome_arquivo == foto(999, 2)))
+    assert q.foto_id == db_session.scalar(
+        select(Foto.id).where(Foto.nome_arquivo == ls.foto(999, 2))
+    )
     assert q.detalhe["sequencia"] == 2
     assert q.detalhe["leitura_provavel_id"] is None
 
 
-def test_status_por_linha(ingerido, sessao):
+def test_status_por_linha(ingerido, db_session):
     _, lote = ingerido
-    esperado = {
-        2: StatusLeitura.RECEBIDA,
-        3: StatusLeitura.SEM_FOTO,
-        4: StatusLeitura.RECEBIDA,
-        5: StatusLeitura.SEM_FOTO,
-        6: StatusLeitura.RECEBIDA,
-        7: StatusLeitura.SEM_FOTO,
-        8: StatusLeitura.RECEBIDA,
-        9: StatusLeitura.SEM_FOTO,
-        10: StatusLeitura.RECEBIDA,
-        11: StatusLeitura.SEM_FOTO,
-    }
-    for linha, status in esperado.items():
-        assert leitura_da_linha(sessao, lote.id, linha).status_atual == status.value, linha
+    for linha in ls.LINHAS_COM_FOTO:
+        assert leitura_da_linha(db_session, lote.id, linha).status_atual == "recebida", linha
+    for linha in ls.LINHAS_SEM_FOTO:
+        assert leitura_da_linha(db_session, lote.id, linha).status_atual == "sem_foto", linha
 
 
-def test_historico_tem_nascimento_e_transicao(ingerido, sessao):
+def test_historico_tem_nascimento_e_transicao(ingerido, db_session):
     _, lote = ingerido
-    sem_foto = leitura_da_linha(sessao, lote.id, 3)
-    hist = sessao.scalars(
+    sem_foto = leitura_da_linha(db_session, lote.id, 3)
+    hist = db_session.scalars(
         select(HistoricoStatus)
         .where(HistoricoStatus.leitura_id == sem_foto.id)
         .order_by(HistoricoStatus.id)
@@ -247,46 +145,51 @@ def test_historico_tem_nascimento_e_transicao(ingerido, sessao):
     assert {h.ator for h in hist} == {Ator.INGESTAO.value}
     assert hist[1].detalhe == {"origem": "consistencia_ingestao"}
 
-    normal = leitura_da_linha(sessao, lote.id, 2)
+    normal = leitura_da_linha(db_session, lote.id, 2)
     assert [h.status for h in normal.historico] == ["recebida"]
 
 
-def test_reingestao_e_idempotente(ingerido, sessao, staging, tmp_path):
+def test_reingestao_e_idempotente(ingerido, db_session, staging, tmp_path):
     _, lote = ingerido
-    antes = contar_quarentena(sessao, lote.id)
-    r = ingerir(sessao, BatchFolderSource(staging), LOTE, LocalFileStorage(raiz=tmp_path / "s2"))
+    antes = contar_quarentena(db_session, lote.id)
+    r = ingerir(
+        db_session, BatchFolderSource(staging), ls.LOTE, LocalFileStorage(raiz=tmp_path / "s2")
+    )
     assert r.pulado
-    assert contar_quarentena(sessao, lote.id) == antes
+    assert contar_quarentena(db_session, lote.id) == antes
+    assert (
+        db_session.scalar(select(func.count()).select_from(Lote).where(Lote.nome == ls.LOTE)) == 1
+    )
 
 
-def test_transicionar_grava_historico_e_recusa_aresta_invalida(ingerido, sessao):
+def test_transicionar_grava_historico_e_recusa_aresta_invalida(ingerido, db_session):
     _, lote = ingerido
-    leitura = leitura_da_linha(sessao, lote.id, 2)
+    leitura = leitura_da_linha(db_session, lote.id, 2)
 
     registro = transicionar(
-        sessao, leitura, StatusLeitura.TRIAGEM_QUALIDADE, ator="heuristica", confianca=0.5
+        db_session, leitura, StatusLeitura.TRIAGEM_QUALIDADE, ator="heuristica", confianca=0.5
     )
     assert leitura.status_atual == StatusLeitura.TRIAGEM_QUALIDADE.value
     assert registro.confianca == 0.5
     assert [h.status for h in leitura.historico] == ["recebida", "triagem_qualidade"]
 
     with pytest.raises(TransicaoInvalida):
-        transicionar(sessao, leitura, StatusLeitura.APROVADA_HUMANO, ator="usuario:1")
+        transicionar(db_session, leitura, StatusLeitura.APROVADA_HUMANO, ator="usuario:1")
     assert leitura.status_atual == StatusLeitura.TRIAGEM_QUALIDADE.value
 
-    final = leitura_da_linha(sessao, lote.id, 3)  # ja esta em sem_foto
+    final = leitura_da_linha(db_session, lote.id, 3)  # ja esta em sem_foto
     with pytest.raises(TransicaoInvalida):
-        transicionar(sessao, final, StatusLeitura.TRIAGEM_QUALIDADE, ator="heuristica")
+        transicionar(db_session, final, StatusLeitura.TRIAGEM_QUALIDADE, ator="heuristica")
 
 
-def test_transicionar_em_lote_exige_que_todas_estejam_na_origem(ingerido, sessao):
+def test_transicionar_em_lote_exige_que_todas_estejam_na_origem(ingerido, db_session):
     _, lote = ingerido
-    recebida = leitura_da_linha(sessao, lote.id, 2)
-    sem_foto = leitura_da_linha(sessao, lote.id, 3)
+    recebida = leitura_da_linha(db_session, lote.id, 2)
+    sem_foto = leitura_da_linha(db_session, lote.id, 3)
 
     with pytest.raises(TransicaoInvalida, match="1 leituras nao estavam em recebida"):
         transicionar_em_lote(
-            sessao,
+            db_session,
             [recebida.id, sem_foto.id],
             de=StatusLeitura.RECEBIDA,
             para=StatusLeitura.TRIAGEM_QUALIDADE,
@@ -295,22 +198,20 @@ def test_transicionar_em_lote_exige_que_todas_estejam_na_origem(ingerido, sessao
 
     # Atomicidade: a leitura que casava com a origem NAO pode ter mudado, e a
     # transacao continua utilizavel (savepoint, nao rollback total).
-    sessao.expire_all()
+    db_session.expire_all()
     assert recebida.status_atual == StatusLeitura.RECEBIDA.value
     assert [h.status for h in recebida.historico] == ["recebida"]
-    assert sessao.scalar(select(func.count()).select_from(Lote).where(Lote.id == lote.id)) == 1
 
-    # Lista vazia nao executa nada, mas ainda valida a aresta.
-    assert transicionar_em_lote(sessao, [], StatusLeitura.RECEBIDA, "sem_foto", "x") == 0
+    assert transicionar_em_lote(db_session, [], StatusLeitura.RECEBIDA, "sem_foto", "x") == 0
     with pytest.raises(TransicaoInvalida):
-        transicionar_em_lote(sessao, [], StatusLeitura.SEM_FOTO, "recebida", "x")
+        transicionar_em_lote(db_session, [], StatusLeitura.SEM_FOTO, "recebida", "x")
 
 
-def test_transicionar_em_lote_grava_confianca(ingerido, sessao):
+def test_transicionar_em_lote_grava_confianca(ingerido, db_session):
     _, lote = ingerido
-    leitura = leitura_da_linha(sessao, lote.id, 2)
+    leitura = leitura_da_linha(db_session, lote.id, 2)
     n = transicionar_em_lote(
-        sessao,
+        db_session,
         [leitura.id],
         de=StatusLeitura.RECEBIDA,
         para=StatusLeitura.TRIAGEM_QUALIDADE,
@@ -318,6 +219,6 @@ def test_transicionar_em_lote_grava_confianca(ingerido, sessao):
         confianca=0.87,
     )
     assert n == 1
-    sessao.expire_all()
+    db_session.expire_all()
     assert leitura.status_atual == StatusLeitura.TRIAGEM_QUALIDADE.value
     assert leitura.historico[-1].confianca == 0.87

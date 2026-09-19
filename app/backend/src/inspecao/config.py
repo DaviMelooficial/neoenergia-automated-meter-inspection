@@ -3,7 +3,9 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import ClassVar
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Marcadores que identificam a raiz do projeto ao subir a arvore de diretorios.
@@ -38,6 +40,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # dev | producao. Em producao os placeholders de segredo derrubam a subida.
+    ambiente: str = "dev"
+
     # Banco
     database_url: str = "postgresql+psycopg://inspecao:inspecao_dev@localhost:5432/inspecao"
 
@@ -56,11 +61,18 @@ class Settings(BaseSettings):
     auth_provider: str = "local_password"
     jwt_secret: str = "trocar_em_producao"
     jwt_alg: str = "HS256"
+    # Aceitar X-Forwarded-For so quando ha um proxy confiavel na frente (nginx do
+    # compose). Sem isso qualquer cliente forjaria o IP do rate limit e do log.
+    confiar_x_forwarded_for: bool = False
     access_token_minutes: int = 15
     refresh_token_days: int = 7
     login_max_tentativas: int = 5
     login_bloqueio_minutos: int = 15
     admin_senha_inicial: str = "trocar_no_primeiro_login"
+    admin_email: str = "admin@exemplo.com.br"
+    # Cookie do refresh token. Navegadores aceitam Secure em http://localhost;
+    # so desligue em ambiente onde isso nao vale.
+    cookie_secure: bool = True
 
     # Workers
     worker_concurrency: int = 4
@@ -70,6 +82,33 @@ class Settings(BaseSettings):
     # Modelos
     modelo_qualidade_path: Path = Path("./ml/artifacts/qualidade.onnx")
     modelo_qualidade_ativo: bool = False
+
+    PLACEHOLDERS_INSEGUROS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "trocar_em_producao",
+            "trocar_em_producao_use_openssl_rand_hex_32",
+            "trocar_no_primeiro_login",
+        }
+    )
+
+    @model_validator(mode="after")
+    def _proibir_placeholders_fora_de_dev(self) -> "Settings":
+        if self.jwt_alg not in {"HS256", "HS384", "HS512"}:
+            raise ValueError("JWT_ALG precisa ser HS256, HS384 ou HS512")
+        if self.ambiente != "dev":
+            inseguros = [
+                nome
+                for nome, valor in (
+                    ("JWT_SECRET", self.jwt_secret),
+                    ("ADMIN_SENHA_INICIAL", self.admin_senha_inicial),
+                )
+                if valor in self.PLACEHOLDERS_INSEGUROS or len(valor) < 16
+            ]
+            if inseguros:
+                raise ValueError(
+                    f"AMBIENTE={self.ambiente}: defina valores fortes para {', '.join(inseguros)}"
+                )
+        return self
 
     def caminho_absoluto(self, caminho: Path) -> Path:
         """Resolve um caminho relativo contra a raiz do repositorio."""

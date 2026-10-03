@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Arquitetura da Solução</title>
+<style>
+  :root{
+    --navy:#0F2A44; --navy2:#173B5E; --green:#1B8F5A; --green2:#E4F4EB;
+    --ink:#1B2430; --muted:#5B6773; --line:#D7DEE5; --bg:#FFFFFF; --soft:#F4F6F8;
+    --amber:#C9820A; --amber2:#FBF1DC; --red:#B3403A; --red2:#F8E4E2; --blue:#2F6DB5; --blue2:#E3ECF8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#888}
+  body{font-family:-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif;color:var(--ink);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:1280px 720px;margin:0}
+  .slide{width:1280px;height:720px;position:relative;background:var(--bg);overflow:hidden;page-break-after:always;break-after:page;padding:52px 64px 56px 64px;display:flex;flex-direction:column}
+  @media screen{.slide{margin:24px auto;box-shadow:0 4px 24px rgba(0,0,0,.3)}}
+  .slide:last-child{page-break-after:auto}
+  .kicker{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--green);font-weight:700;margin-bottom:8px}
+  h1{font-size:30px;margin:0 0 18px 0;color:var(--navy);font-weight:700;letter-spacing:-.01em}
+  h2{font-size:17px;margin:0 0 8px 0;color:var(--navy);font-weight:700}
+  p{margin:0 0 8px 0;font-size:15px;line-height:1.45}
+  .lead{font-size:17px;color:var(--muted);max-width:1000px;margin-bottom:16px}
+  .foot{position:absolute;left:64px;right:64px;bottom:22px;display:flex;justify-content:space-between;font-size:11px;color:var(--muted);letter-spacing:.04em}
+  .foot .bar{position:absolute;left:0;top:-10px;width:56px;height:3px;background:var(--green)}
+  .body{flex:1;display:flex;gap:28px;min-height:0}
+  .col{flex:1;min-width:0}
+  ul{margin:0;padding-left:18px;font-size:14.5px;line-height:1.45}
+  li{margin-bottom:6px}
+  li b{color:var(--navy)}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;background:var(--navy);color:#fff;padding:8px 10px;font-weight:600;font-size:12.5px;letter-spacing:.03em}
+  td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.35}
+  tr:nth-child(even) td{background:var(--soft)}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:3px;color:var(--navy)}
+  th code{background:transparent;color:#fff}
+  .card{border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:#fff}
+  .card.g{background:var(--green2);border-color:#BFE3CE}
+  .card.a{background:var(--amber2);border-color:#EED9A8}
+  .card.b{background:var(--blue2);border-color:#BFD3EE}
+  .card.r{background:var(--red2);border-color:#EBC2BE}
+  .card h2{font-size:15px;margin-bottom:6px}
+  .card p,.card ul{font-size:13.5px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:999px;margin-right:6px}
+  .pill.done{background:var(--green2);color:var(--green)}
+  .pill.next{background:var(--amber2);color:var(--amber)}
+  .pill.todo{background:var(--soft);color:var(--muted)}
+  .pill.blk{background:var(--red2);color:var(--red)}
+  svg text{font-family:-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif}
+  .note{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.4}
+.dense td{padding:5px 9px;font-size:12.6px;line-height:1.3}.dense th{padding:6px 9px}
+  .roadmap td{padding:4px 8px;font-size:12.3px;line-height:1.3}.roadmap th{padding:6px 8px}.roadmap .pill{font-size:10px;padding:2px 6px}
+  .num{font-size:44px;font-weight:700;color:var(--navy);line-height:1}
+  .numl{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+  /* cover */
+  .cover{background:var(--navy);color:#fff;justify-content:flex-end;padding-bottom:84px}
+  .cover .kicker{color:#7FD4A6}
+  .cover h1{color:#fff;font-size:50px;line-height:1.08;max-width:900px;margin-bottom:14px}
+  .cover .sub{font-size:20px;color:#B9C7D6;max-width:820px;line-height:1.4}
+  .cover .meta{position:absolute;right:64px;bottom:64px;text-align:right;font-size:13px;color:#8FA3B8;line-height:1.6}
+  .cover .stripe{position:absolute;left:0;top:0;bottom:0;width:14px;background:var(--green)}
+  .cover .foot{display:none}
+  .section{background:var(--navy2);color:#fff;justify-content:center}
+  .section .kicker{color:#7FD4A6}
+  .section h1{color:#fff;font-size:44px}
+  .section p{color:#B9C7D6;font-size:19px;max-width:860px}
+  .section .foot{color:#8FA3B8}
+</style>
+</head>
+<body>
+
+<!-- 1. CAPA -->
+<section class="slide cover">
+  <div class="stripe"></div>
+  <div class="kicker">Neoenergia Pernambuco · Projeto 4: Dados</div>
+  <h1>Verificação Automatizada de Fotos de Leitura</h1>
+  <div class="sub">Arquitetura da solução técnica: fluxo de processamento, componentes, modelo de dados, camada de IA e tecnologias adotadas.</div>
+  <div class="meta">Documento técnico da solução<br>Setembro de 2026 · versão para apresentação</div>
+</section>
+
+<!-- 2. PRINCÍPIOS -->
+<section class="slide">
+  <div class="kicker">Ponto de partida</div>
+  <h1>O que a solução faz e como foi desenhada</h1>
+  <p class="lead">Um pipeline que recebe os lotes diários de leitura (CSV + fotos), filtra automaticamente o que é seguro decidir e entrega aos auditores apenas a zona de incerteza. Cada passo é registrado como evento, o que torna o fluxo mensurável de ponta a ponta.</p>
+  <div class="grid4" style="margin-top:6px">
+    <div class="card g"><h2>1. Simplicidade antes de sofisticação</h2><p>Heurística e modelo pré-treinado antes de treino customizado. Monólito antes de microserviços. Fila leve antes de orquestrador pesado.</p></div>
+    <div class="card g"><h2>2. Consistência antes de OCR pleno</h2><p>O sistema não "lê" o medidor do zero. Verifica se a foto é coerente com a leitura e a ocorrência já declaradas.</p></div>
+    <div class="card g"><h2>3. Faseamento com gate de métrica</h2><p>Cada fase só avança se a anterior atingiu o critério de sucesso definido. O calendário não decide, a métrica decide.</p></div>
+    <div class="card g"><h2>4. Humano no que é incerto</h2><p>Auto-decisão só onde a confiança é alta e medida. A decisão humana vira rótulo e retroalimenta o modelo.</p></div>
+  </div>
+  <div class="grid3" style="margin-top:22px">
+    <div><div class="num">2</div><div class="numl">filtros automáticos antes do auditor: qualidade da imagem e consistência foto × dado declarado</div></div>
+    <div><div class="num">4</div><div class="numl">interfaces plugáveis que isolam decisões de infraestrutura: origem de lote, storage, autenticação e detector</div></div>
+    <div><div class="num">100%</div><div class="numl">das transições de estado registradas em histórico append-only, base da camada analítica</div></div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>2</span></div>
+</section>
+
+<!-- 3. FLUXO MACRO -->
+<section class="slide">
+  <div class="kicker">Visão macro</div>
+  <h1>Fluxo ponta a ponta: do lote em campo ao veredito</h1>
+  <svg id="fluxo" viewBox="0 0 1152 500" width="1152" height="500"></svg>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>3</span></div>
+</section>
+
+<!-- 4. STACK -->
+<section class="slide dense">
+  <div class="kicker">Tecnologias</div>
+  <h1>Stack adotada e o motivo de cada escolha</h1>
+  <div class="body">
+    <div class="col" style="flex:1.35">
+      <table>
+        <tr><th style="width:26%">Camada</th><th style="width:30%">Tecnologia</th><th>Por quê</th></tr>
+        <tr><td>Linguagem e ambiente</td><td>Python 3.12 fixado via <code>uv</code></td><td>Stack de visão (torch, opencv, onnxruntime) ainda sem wheels estáveis para 3.14. Lockfile reproduzível.</td></tr>
+        <tr><td>API</td><td>FastAPI + Pydantic + Uvicorn</td><td>API fina que só orquestra. Tipagem forte gera o OpenAPI de onde saem os tipos do frontend.</td></tr>
+        <tr><td>Banco</td><td>PostgreSQL 16</td><td>Único banco para domínio, histórico, quarentena e fila. Volume por lote é trivial.</td></tr>
+        <tr><td>ORM e migrações</td><td>SQLAlchemy 2 + Alembic</td><td>Esquema versionado e reversível. Inserção em lote para bater a meta de ingestão.</td></tr>
+        <tr><td>Fila de jobs</td><td>Tabela <code>jobs</code> no Postgres com <code>SELECT … FOR UPDATE SKIP LOCKED</code></td><td>Fila transacional junto ao domínio, sem broker adicional. Redis + RQ é o caminho de upgrade.</td></tr>
+        <tr><td>Storage de fotos</td><td>Adapter <code>StorageBackend</code>: filesystem local hoje, S3 / MinIO em produção</td><td>Nenhum chamador conhece o backend. Gravação atômica e proteção contra path traversal.</td></tr>
+        <tr><td>Inferência</td><td>OpenCV (heurísticas) + ONNX Runtime em workers dedicados</td><td>Desacopla API e modelo. Modelo carregado uma vez por worker.</td></tr>
+        <tr><td>Treino</td><td>PyTorch + torchvision, scikit-learn, exportação ONNX</td><td>Treino fora do caminho de produção. Paridade torch × onnxruntime verificada antes de publicar.</td></tr>
+        <tr><td>Frontend</td><td>React 18 + TypeScript + Vite + Mantine + TanStack Query + React Router</td><td>SPA com autenticação robusta e rotas protegidas por papel. Cache e revalidação da fila sem estado global.</td></tr>
+        <tr><td>Serviço web</td><td>nginx</td><td>Serve o build estático, faz fallback de SPA e proxy de <code>/api</code> sob o mesmo domínio.</td></tr>
+        <tr><td>Orquestração</td><td>Docker Compose</td><td>Quatro serviços em um arquivo. Kubernetes só se volume ou equipe crescerem.</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>4</span></div>
+</section>
+
+<!-- 5. TOPOLOGIA -->
+<section class="slide">
+  <div class="kicker">Implantação</div>
+  <h1>Topologia de execução: quatro serviços, um compose</h1>
+  <div class="body">
+    <div class="col" style="flex:1.5"><svg id="topo" viewBox="0 0 700 470" width="700" height="470"></svg></div>
+    <div class="col">
+      <div class="card b" style="margin-bottom:12px"><h2>Sem dependência externa em runtime</h2><p>Nenhuma seta sai da máquina. Rede externa só na instalação de dependências. O mesmo compose sobe em notebook de desenvolvimento e em servidor on-premise.</p></div>
+      <div class="card" style="margin-bottom:12px"><h2>Volumes</h2><ul>
+        <li><code>data/staging/</code>: lote a ingerir, somente leitura pela API</li>
+        <li><code>data/storage/</code>: fotos gerenciadas pelo <code>StorageBackend</code></li>
+        <li><code>ml/artifacts/</code>: modelos <code>.onnx</code> montados como somente leitura nos workers</li>
+        <li><code>pgdata</code>: volume nomeado do Postgres</li>
+      </ul></div>
+      <div class="card"><h2>Operação</h2><ul>
+        <li>Healthcheck do Postgres condiciona a subida da API e do worker</li>
+        <li><code>/api/health</code> checa banco, storage e presença do modelo</li>
+        <li>Política <code>restart: unless-stopped</code> em todos os serviços</li>
+        <li>Worker sobe pelo profile <code>completo</code> a partir do marco M3</li>
+      </ul></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>5</span></div>
+</section>
+
+<!-- 6. INGESTÃO -->
+<section class="slide">
+  <div class="kicker">Pipeline de dados</div>
+  <h1>Ingestão: do lote bruto ao domínio consistente</h1>
+  <div class="body">
+    <div class="col" style="flex:1.4"><svg id="ingest" viewBox="0 0 680 460" width="680" height="460"></svg></div>
+    <div class="col">
+      <div class="card" style="margin-bottom:12px"><h2>Contrato do CSV</h2><ul>
+        <li>Delimitador <code>;</code>, cabeçalho fixo de 4 colunas validado antes de qualquer inserção</li>
+        <li>Sentinela <code>NA</code> tratada como ausência de valor, não como texto</li>
+        <li>Coluna de medidor separada por <code>/</code>: até 8 medidores por linha, identificadores alfanuméricos preservados como texto</li>
+        <li>Nome da foto casado por regex: extrai <code>id_externo</code> e <code>sequencia</code></li>
+      </ul></div>
+      <div class="card" style="margin-bottom:12px"><h2>Garantias</h2><ul>
+        <li><b>Idempotência</b> por checksum sha256 do CSV. Reingerir o mesmo lote não altera nada; <code>--reprocessar</code> substitui de forma explícita</li>
+        <li><b>Performance</b>: inserção em lote de 2.000 linhas e dimensões lidas direto do cabeçalho JPEG, sem decodificar a imagem</li>
+        <li><b>Quarentena, não bloqueio</b>: inconsistências viram registro classificado e o lote segue</li>
+      </ul></div>
+      <div class="card g"><h2>Ponto de extensão</h2><p>A origem vive atrás de <code>IngestSource</code>. Hoje é pasta em disco (<code>BatchFolderSource</code>). Um webhook do sistema de campo entra como nova implementação sem tocar o resto do pipeline.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>6</span></div>
+</section>
+
+<!-- 7. MODELO DE DADOS -->
+<section class="slide">
+  <div class="kicker">Modelo de dados</div>
+  <h1>Esquema relacional: domínio, decisão, operação e acesso</h1>
+  <div class="body">
+    <div class="col" style="flex:2.1"><svg id="erd" viewBox="0 0 800 470" width="760" height="447"></svg></div>
+    <div class="col">
+      <div class="card" style="margin-bottom:12px"><h2>Decisões de modelagem</h2><ul>
+        <li>Relação leitura → foto vive em <code>fotos.leitura_id</code> + <code>principal</code>, evitando chave estrangeira circular. Foto órfã tem <code>leitura_id</code> nulo</li>
+        <li><code>leituras.nota_codigo</code> sem chave estrangeira: código não mapeado entra e vai para quarentena, nunca é descartado</li>
+        <li>Medidor sempre texto: existem identificadores como <code>F50081</code></li>
+      </ul></div>
+      <div class="card a"><h2>Append-only por padrão</h2><ul>
+        <li><code>historico_status</code>: toda transição, com ator e confiança</li>
+        <li><code>log_acesso</code>: todo login, falho ou não</li>
+        <li><code>revisoes_humanas</code> e <code>rotulos</code>: decisões nunca sobrescritas</li>
+      </ul><p style="margin-top:6px">É isso que permite medir taxa de foto inutilizável, latência até o veredito e produtividade da auditoria, números que hoje não existem.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>7</span></div>
+</section>
+
+<!-- 8. MÁQUINA DE ESTADOS -->
+<section class="slide">
+  <div class="kicker">Ciclo de vida da leitura</div>
+  <h1>Máquina de estados: uma função de transição, um histórico</h1>
+  <div class="body">
+    <div class="col" style="flex:1.6"><svg id="estados" viewBox="0 0 760 460" width="760" height="460"></svg></div>
+    <div class="col">
+      <div class="card" style="margin-bottom:12px"><h2>Regras</h2><ul>
+        <li><code>status_atual</code> só é escrito pela função <code>transicionar()</code>, que valida a transição contra a tabela permitida. Um teste varre o código para garantir isso</li>
+        <li>Cada transição grava linha em <code>historico_status</code> com ator (worker, modelo ou auditor), confiança e timestamp</li>
+        <li>Nunca há <code>UPDATE</code> destrutivo de status sem histórico</li>
+      </ul></div>
+      <div class="card b" style="margin-bottom:12px"><h2>Estados terminais</h2><p><b>Faturamento</b> recebe auto-aprovadas e aprovadas por humano. <b>Revisita</b> recebe rejeitadas por qualidade, auto-rejeitadas e reprovadas por humano.</p></div>
+      <div class="card"><h2>Estado especial</h2><p><code>sem_foto</code> cobre leituras cuja nota não exige evidência fotográfica. Saem do fluxo de inferência sem entrar na fila humana.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>8</span></div>
+</section>
+
+<!-- 9. SEÇÃO IA -->
+<section class="slide section">
+  <div class="kicker">Camada de inteligência</div>
+  <h1>Dois pontos de decisão automática, um loop de aprendizado</h1>
+  <p>Ponto A filtra qualidade da imagem. Ponto B verifica consistência entre a foto e o que foi declarado. A decisão humana sobre o que sobra alimenta o retreino, sempre com gate manual.</p>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>9</span></div>
+</section>
+
+<!-- 10. PONTO A -->
+<section class="slide">
+  <div class="kicker">Ponto A</div>
+  <h1>Triagem de qualidade: heurística primeiro, modelo depois</h1>
+  <div class="body">
+    <div class="col">
+      <div class="card g" style="margin-bottom:12px"><h2>V0 · Heurísticas de visão clássica (sem treino)</h2><ul>
+        <li><b>Nitidez</b>: variância do Laplaciano abaixo de limiar indica fora de foco</li>
+        <li><b>Exposição e reflexo</b>: picos de saturação no histograma indicam glare</li>
+        <li><b>Contraste e uniformidade</b>: display apagado ou tampa embaçada</li>
+        <li><b>Presença de display</b>: região retangular de alto contraste no quadro</li>
+        <li>Limiares calibrados nas 12.340 imagens reais e fixados em política versionada</li>
+      </ul></div>
+      <div class="card b"><h2>V1 · Classificador multi-label (CNN leve)</h2><ul>
+        <li>MobileNetV3 com transfer learning, entrada na resolução nativa 360×480</li>
+        <li>Classes: glare, fora de foco, tampa suja ou embaçada, enquadramento incorreto, display apagado</li>
+        <li><b>Estágio 1</b>: pré-treino com rótulo fraco por degradação sintética (blur, overlay de glare, downscale)</li>
+        <li><b>Estágio 2</b>: fine-tune nos rótulos humanos consolidados</li>
+        <li>Exportado para ONNX, servido por <code>DetectorOnnx</code> nos workers</li>
+      </ul></div>
+    </div>
+    <div class="col">
+      <svg id="pontoA" viewBox="0 0 520 300" width="520" height="300"></svg>
+      <div class="card a" style="margin-top:6px"><h2>Gate de aceite</h2><p>Entre 5% e 15% do volume auto-rejeitado com <b>zero</b> falso positivo confirmado nas 200 imagens de extremo inspecionadas. O modelo V1 só substitui a heurística se bater o macro-F1 dela no mesmo conjunto rotulado. Se não bater, não entra.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>10</span></div>
+</section>
+
+<!-- 11. PONTO B -->
+<section class="slide">
+  <div class="kicker">Ponto B</div>
+  <h1>Validação de consistência: três estágios, roteamento condicional</h1>
+  <div class="body">
+    <div class="col" style="flex:1.55"><svg id="pontoB" viewBox="0 0 720 440" width="720" height="440"></svg></div>
+    <div class="col">
+      <div class="card" style="margin-bottom:12px"><h2>Por que não OCR pleno</h2><p>O sistema não precisa ler o medidor do zero. Compara o que extrai da foto com a leitura e a ocorrência já declaradas. O Estágio 3 é uma regra determinística, não um modelo, o que a torna auditável.</p></div>
+      <div class="card a" style="margin-bottom:12px"><h2>Gate de viabilidade de resolução</h2><p>Antes de investir em OCR de dígito ou regressão de ponteiro, um spike de um dia roda OCR pronto (Tesseract, EasyOCR) sobre 150 fotos legíveis com gabarito manual. Se a taxa for insuficiente em 360×480, a saída é pedir maior resolução ao cliente, não sofisticar o modelo.</p></div>
+      <div class="card r"><h2>Restrição de dados atual</h2><p>Dos 61 códigos de ocorrência, 19 aparecem na base e 96% das notas esperam a mesma cena: o display. O Estágio 2c depende de amostra dirigida com cenários físicos distintos, já registrada como pendência de entrada.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>11</span></div>
+</section>
+
+<!-- 12. ACTIVE LEARNING -->
+<section class="slide">
+  <div class="kicker">MLOps</div>
+  <h1>Ground truth, active learning e monitoramento de drift</h1>
+  <div class="body">
+    <div class="col" style="flex:1.5"><svg id="loop" viewBox="0 0 700 430" width="700" height="430"></svg></div>
+    <div class="col">
+      <div class="card g" style="margin-bottom:12px"><h2>Bootstrap sem viés</h2><ul>
+        <li>300 fotos em amostra estratificada por lote, nota e faixa de qualidade</li>
+        <li>Dupla rotulagem cega com cegueira garantida no servidor</li>
+        <li>Gate: kappa de Cohen igual ou acima de 0,6. Abaixo disso, as definições de classe são revisadas e a rodada refeita</li>
+      </ul></div>
+      <div class="card" style="margin-bottom:12px"><h2>Salvaguardas de treino</h2><ul>
+        <li>Split treino/validação por lote e tempo, nunca aleatório</li>
+        <li>Métricas por classe com intervalo de confiança, nunca só o agregado</li>
+        <li>Treino reproduzível por semente</li>
+      </ul></div>
+      <div class="card a"><h2>Drift e retreino</h2><ul>
+        <li>Série por lote: distribuição de defeitos, taxa de rejeição, confiança média, medidor não visto</li>
+        <li>Auditoria amostral contínua de 5% a 10% mede concordância inter-anotador</li>
+        <li>Retreino <b>nunca</b> automático. Alerta dispara decisão humana</li>
+      </ul></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>12</span></div>
+</section>
+
+<!-- 13. SEGURANÇA -->
+<section class="slide">
+  <div class="kicker">Segurança e acesso</div>
+  <h1>Autenticação, papéis e trilha de auditoria</h1>
+  <div class="body">
+    <div class="col" style="flex:1.5"><svg id="auth" viewBox="0 0 700 400" width="680" height="389"></svg></div>
+    <div class="col">
+      <div class="card" style="margin-bottom:12px"><h2>Mecanismos</h2><ul>
+        <li>Access token JWT de 15 minutos. Refresh token opaco de 7 dias em cookie <code>httpOnly</code> e <code>secure</code>, com hash no banco</li>
+        <li>Rotação de refresh com detecção de reuso: reapresentar token já usado revoga toda a cadeia do usuário</li>
+        <li>Senhas com argon2. Rate limiting de login por e-mail e IP. Troca de senha forçada no primeiro acesso</li>
+      </ul></div>
+      <div class="card b" style="margin-bottom:12px"><h2>RBAC hierárquico</h2><table style="font-size:12.5px">
+        <tr><th>Papel</th><th>Acessa</th></tr>
+        <tr><td><code>auditor</code></td><td>Fila humana e decisão</td></tr>
+        <tr><td><code>supervisor</code></td><td>+ métricas, drift, quarentena</td></tr>
+        <tr><td><code>admin</code></td><td>+ gestão de usuários e papéis</td></tr>
+      </table><p style="margin-top:6px">Cada rota valida o papel no servidor, via dependency do FastAPI.</p></div>
+      <div class="card g"><h2>Evolução para SSO</h2><p>Login atrás de <code>AuthProvider</code>. Um provedor OpenID Connect (Entra ID ou outro IdP) entra sem reescrever backend ou frontend.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>13</span></div>
+</section>
+
+<!-- 14. API + FRONTEND -->
+<section class="slide dense">
+  <div class="kicker">Interfaces</div>
+  <h1>API REST e painel de auditoria</h1>
+  <div class="body">
+    <div class="col" style="flex:1.25">
+      <table>
+        <tr><th style="width:44%">Rota</th><th>Função · papel mínimo</th></tr>
+        <tr><td><code>POST /auth/login · /refresh · /logout</code></td><td>Emissão, renovação e revogação de tokens</td></tr>
+        <tr><td><code>GET /auth/me</code></td><td>Usuário e papel, para o frontend ajustar a interface</td></tr>
+        <tr><td><code>POST /ingest/batch</code></td><td>Dispara processamento de lote em staging · admin</td></tr>
+        <tr><td><code>POST /ingest/webhook</code></td><td>Pronto e desativado até integração com o sistema de campo</td></tr>
+        <tr><td><code>GET /leituras/{id}</code></td><td>Detalhe da leitura com histórico completo · auditor</td></tr>
+        <tr><td><code>GET /fila-humana</code></td><td>Lista paginada e filtrável, com reserva de item por 10 min · auditor</td></tr>
+        <tr><td><code>POST /fila-humana/{id}/decisao</code></td><td>Aprova ou reprova com motivo em taxonomia fechada · auditor</td></tr>
+        <tr><td><code>GET /rotulagem/proxima · POST /rotulagem/{foto_id}</code></td><td>Rotulagem dupla-cega, cegueira garantida no servidor · auditor</td></tr>
+        <tr><td><code>GET /quarentena</code></td><td>Inconsistências de dados pendentes · supervisor</td></tr>
+        <tr><td><code>GET /metricas/qualidade</code></td><td>Funil por status, auto-decisão, defeitos, latências, produtividade · supervisor</td></tr>
+        <tr><td><code>GET /metricas/drift</code></td><td>Série por lote dos sinais de drift · supervisor</td></tr>
+              </table>
+      <p class="note">Tipos TypeScript gerados a partir do OpenAPI: mudança de contrato quebra o build antes de quebrar em produção.</p>
+    </div>
+    <div class="col">
+      <div class="card" style="margin-bottom:12px"><h2>Telas do painel</h2><ul>
+        <li><b>Login</b> e troca de senha obrigatória</li>
+        <li><b>Fila de revisão</b>: visualizador com zoom e pan, painel com leitura e nota declaradas, decisão com atalhos de teclado e pré-carregamento da próxima imagem</li>
+        <li><b>Rotulagem</b>: modo cego com as definições operacionais das 5 classes visíveis</li>
+        <li><b>Quarentena e métricas</b>: funil, baseline e drift por lote</li>
+        <li><b>Usuários</b>: papéis e ativação</li>
+      </ul></div>
+      <div class="card b"><h2>Mecânica do cliente</h2><ul>
+        <li>Interceptor de refresh com deduplicação de chamadas concorrentes</li>
+        <li><code>RotaProtegida</code> por papel mínimo</li>
+        <li>TanStack Query revalida fila e métricas sem estado global manual</li>
+        <li>nginx serve o build, faz fallback de SPA e proxy de <code>/api</code></li>
+      </ul></div>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>14</span></div>
+</section>
+
+<!-- 15. PONTOS DE EXTENSÃO -->
+<section class="slide">
+  <div class="kicker">Evolução</div>
+  <h1>Pontos de extensão: o que muda sem reescrever o sistema</h1>
+  <div class="grid4" style="margin-top:4px">
+    <div class="card"><h2><code>IngestSource</code></h2><p><b>Hoje</b>: pasta em disco com CSV e fotos.</p><p><b>Depois</b>: webhook ou API do sistema de campo, quando negociado com o terceiro.</p></div>
+    <div class="card"><h2><code>StorageBackend</code></h2><p><b>Hoje</b>: filesystem local com gravação atômica.</p><p><b>Depois</b>: S3 ou MinIO, conforme contrato de infraestrutura do cliente.</p></div>
+    <div class="card"><h2><code>AuthProvider</code></h2><p><b>Hoje</b>: senha local com argon2 e JWT próprio.</p><p><b>Depois</b>: OpenID Connect com o provedor de identidade corporativo.</p></div>
+    <div class="card"><h2><code>Detector</code></h2><p><b>Hoje</b>: <code>DetectorNulo</code> roteia tudo para humano; heurísticas OpenCV na sequência.</p><p><b>Depois</b>: <code>DetectorOnnx</code> com o modelo treinado, trocado por configuração.</p></div>
+  </div>
+  <div class="grid2" style="margin-top:16px">
+    <div class="card g"><h2>Fila de jobs</h2><p>Tabela no Postgres com claim atômico, backoff, recuperação de job órfão e desligamento limpo em SIGTERM. Se o volume exigir, Redis + RQ entra como implementação alternativa da mesma interface de enfileiramento.</p></div>
+    <div class="card g"><h2>Política de decisão versionada</h2><p>Limiares de auto-rejeição e auto-aprovação vivem em arquivo versionado. O job <code>recalcular_decisao</code> re-decide o histórico sem reabrir imagem, o que permite ajustar política e medir o efeito sobre lotes já processados.</p></div>
+  </div>
+  <div class="card a" style="margin-top:16px"><h2>Auto-aprovação desligada por padrão</h2><p>A interface mostra o motivo estatístico: quantidade de rótulos acumulados contra os 600 necessários para estimar a taxa de falso-negativo com o intervalo de confiança exigido. Liga-se por decisão de supervisor, não por deploy.</p></div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>15</span></div>
+</section>
+
+<!-- 16. ROADMAP -->
+<section class="slide roadmap">
+  <div class="kicker">Roadmap técnico</div>
+  <h1>Marcos de execução e estado atual</h1>
+  <div class="body">
+    <div class="col" style="flex:1.6">
+      <table>
+        <tr><th style="width:9%">Marco</th><th style="width:30%">Entrega</th><th>Critério de aceite verificável</th><th style="width:13%">Estado</th></tr>
+        <tr><td>M0</td><td>Ambiente e esqueleto</td><td>Compose sobe 4 serviços, <code>/health</code> 200, dados do cliente fora do git</td><td><span class="pill done">concluído</span></td></tr>
+        <tr><td>M1</td><td>Ingestão e domínio</td><td>13.669 leituras, 12.340 fotos, 61 notas em &lt; 90 s. Reingestão idempotente</td><td><span class="pill done">concluído</span></td></tr>
+        <tr><td>M2</td><td>Validação e quarentena</td><td>Contagens exatas por tipo de inconsistência em teste de regressão</td><td><span class="pill next">próximo</span></td></tr>
+        <tr><td>M3</td><td>API, autenticação e fila</td><td>2 workers × 500 jobs, cada job exatamente uma vez. RBAC e rotação testados</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>M4</td><td>Frontend de revisão</td><td>20 decisões por teclado gravadas em revisões e histórico</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>M5</td><td>Heurísticas de qualidade</td><td>5% a 15% auto-rejeitado, zero falso positivo em 200 imagens</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>M6</td><td>Rotulagem e ground truth</td><td>300 fotos consolidadas, kappa ≥ 0,6</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>M7</td><td>Modelo de qualidade</td><td>Macro-F1 acima da heurística, paridade ONNX, treino reproduzível</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>M8</td><td>Operação, limiares e drift</td><td>Baseline real nos 4 lotes, auditoria amostral ativa</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>M9</td><td>Spike de OCR (paralelo)</td><td>Veredito de viabilidade fundamentado em 360×480</td><td><span class="pill todo">planejado</span></td></tr>
+        <tr><td>—</td><td>Classificador de cena</td><td>Depende de amostra dirigida do cliente</td><td><span class="pill blk">bloqueado</span></td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <svg id="deps" viewBox="0 0 400 480" width="380" height="456"></svg>
+    </div>
+  </div>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>16</span></div>
+</section>
+
+<!-- 17. FECHAMENTO -->
+<section class="slide section">
+  <div class="kicker">Síntese</div>
+  <h1>Uma arquitetura que decide o que é seguro e mede tudo o resto</h1>
+  <p>Monólito Python com Postgres como única dependência de estado. Filtros de qualidade e consistência antes do auditor. Interfaces plugáveis para origem, storage, autenticação e detector. Cada evento registrado, cada fase com gate de métrica, retreino sempre com decisão humana.</p>
+  <div class="foot"><span class="bar"></span><span>Arquitetura da Solução Técnica</span><span>17</span></div>
+</section>
+
+<script>
+// ---------- mini motor de diagramas ----------
+const C = {navy:'#0F2A44',green:'#1B8F5A',green2:'#E4F4EB',amber:'#C9820A',amber2:'#FBF1DC',red:'#B3403A',red2:'#F8E4E2',blue:'#2F6DB5',blue2:'#E3ECF8',soft:'#F4F6F8',line:'#8A97A3',ink:'#1B2430',muted:'#5B6773',white:'#fff'};
+const NS='http://www.w3.org/2000/svg';
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+function defs(svg){
+  const d=el('defs',{},svg);
+  for(const [id,color] of [['arr',C.line],['arrG',C.green],['arrR',C.red],['arrA',C.amber],['arrB',C.blue],['arrN',C.navy]]){
+    const m=el('marker',{id,viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'},d);
+    el('path',{d:'M0,0 L10,5 L0,10 z',fill:color},m);
+  }
+}
+// box: {id,x,y,w,h,label(lines array or string),fill,stroke,color,fs,rx,db(true=database shape),dashed}
+function box(svg,b){
+  const g=el('g',{},svg);
+  const fill=b.fill||C.white, stroke=b.stroke||C.navy, color=b.color||C.ink, fs=b.fs||12;
+  if(b.db){
+    const ry=8;
+    el('path',{d:`M${b.x},${b.y+ry} a${b.w/2},${ry} 0 0 1 ${b.w},0 v${b.h-2*ry} a${b.w/2},${ry} 0 0 1 -${b.w},0 z`,fill,stroke,'stroke-width':1.4},g);
+    el('path',{d:`M${b.x},${b.y+ry} a${b.w/2},${ry} 0 0 0 ${b.w},0`,fill:'none',stroke,'stroke-width':1.4},g);
+  } else if(b.diamond){
+    const cx=b.x+b.w/2, cy=b.y+b.h/2;
+    el('path',{d:`M${cx},${b.y} L${b.x+b.w},${cy} L${cx},${b.y+b.h} L${b.x},${cy} z`,fill,stroke,'stroke-width':1.4},g);
+  } else {
+    el('rect',{x:b.x,y:b.y,width:b.w,height:b.h,rx:b.rx==null?6:b.rx,fill,stroke,'stroke-width':1.4,'stroke-dasharray':b.dashed?'5 4':'none'},g);
+  }
+  const lines=Array.isArray(b.label)?b.label:[b.label];
+  const lh=fs*1.25; const total=lines.length*lh; const y0=b.y+b.h/2-total/2+lh*0.8+(b.db?4:0);
+  lines.forEach((ln,i)=>{
+    const t=el('text',{x:b.x+b.w/2,y:y0+i*lh,'text-anchor':'middle','font-size':fs,fill:color,'font-weight':(i===0&&b.bold!==false&&lines.length>1)||b.bold?'700':'400'},g);
+    t.textContent=ln;
+  });
+  return g;
+}
+function label(svg,x,y,txt,opts={}){
+  const t=el('text',{x,y,'font-size':opts.fs||11,fill:opts.color||C.muted,'text-anchor':opts.anchor||'middle','font-weight':opts.bold?'700':'400','font-style':opts.italic?'italic':'normal'},svg);
+  t.textContent=txt; return t;
+}
+// arrow with optional label; pts = array of [x,y]
+function arrow(svg,pts,opts={}){
+  const d=pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' ');
+  const mk=opts.marker||'arr';
+  el('path',{d,fill:'none',stroke:opts.color||C.line,'stroke-width':opts.width||1.5,'marker-end':`url(#${mk})`,'stroke-dasharray':opts.dashed?'5 4':'none'},svg);
+  if(opts.label){
+    const mid=(opts.at!=null)?opts.at:Math.floor((pts.length-1)/2);
+    const [x1,y1]=pts[mid],[x2,y2]=pts[mid+1];
+    let lx=(x1+x2)/2+(opts.dx||0), ly=(y1+y2)/2+(opts.dy||0);
+    const lines=Array.isArray(opts.label)?opts.label:[opts.label];
+    const fs=opts.fs||10.5; const w=Math.max(...lines.map(s=>s.length))*fs*0.55+10, h=lines.length*(fs+3)+4;
+    el('rect',{x:lx-w/2,y:ly-h/2-1,width:w,height:h,fill:C.white,opacity:.92,rx:3},svg);
+    lines.forEach((ln,i)=>label(svg,lx,ly-h/2+fs+i*(fs+3)-1,ln,{fs,color:opts.labelColor||C.muted}));
+  }
+}
+function group(svg,x,y,w,h,title,opts={}){
+  el('rect',{x,y,width:w,height:h,rx:10,fill:opts.fill||C.soft,stroke:opts.stroke||'#C9D2DA','stroke-width':1,'stroke-dasharray':opts.dashed?'6 4':'none'},svg);
+  if(title) label(svg,x+12,y+18,title,{anchor:'start',fs:11.5,bold:true,color:opts.color||C.navy});
+}
+
+// ---------- 3. FLUXO MACRO ----------
+(function(){
+  const s=document.getElementById('fluxo'); defs(s);
+  group(s,0,20,190,150,'CAMPO (terceiro)',{dashed:true});
+  group(s,220,20,300,150,'INGESTÃO');
+  group(s,560,20,592,190,'PROCESSAMENTO AUTOMÁTICO',{fill:C.blue2,stroke:'#BFD3EE'});
+  group(s,560,250,592,150,'DECISÃO',{fill:C.white});
+  box(s,{x:16,y:50,w:158,h:44,label:['Leiturista','visita e captura'],fs:11.5});
+  box(s,{x:16,y:112,w:158,h:44,label:['App de campo','base SAP'],fs:11.5});
+  arrow(s,[[95,94],[95,112]]);
+  box(s,{x:236,y:50,w:120,h:48,label:['Lote diário','CSV + JPGs'],fs:11.5,fill:C.amber2,stroke:C.amber});
+  arrow(s,[[174,134],[205,134],[205,74],[236,74]],{label:'batch',dy:-30,dx:0});
+  box(s,{x:380,y:50,w:124,h:48,label:['Ingestão','IngestSource'],fs:11.5});
+  arrow(s,[[356,74],[380,74]]);
+  box(s,{x:236,y:118,w:120,h:40,label:['Storage','fotos'],fs:11,db:true,fill:C.soft});
+  box(s,{x:380,y:118,w:124,h:40,label:['PostgreSQL','domínio + fila'],fs:11,db:true,fill:C.soft});
+  arrow(s,[[420,98],[300,118]],{});
+  arrow(s,[[442,98],[442,118]]);
+  // processing
+  box(s,{x:580,y:70,w:150,h:52,label:['Worker: Triagem','de qualidade (Ponto A)'],fs:11.5,fill:C.white,stroke:C.blue});
+  arrow(s,[[504,74],[540,74],[540,96],[580,96]],{label:'jobs',dy:-14});
+  box(s,{x:800,y:70,w:170,h:52,label:['Worker: Validação','de consistência (Ponto B)'],fs:11.5,fill:C.white,stroke:C.blue});
+  arrow(s,[[730,96],[800,96]],{label:'qualidade OK',dy:-14});
+  box(s,{x:1010,y:70,w:130,h:52,label:['Regra determinística','foto × declarado'],fs:11,fill:C.white,stroke:C.blue,bold:false});
+  arrow(s,[[970,96],[1010,96]]);
+  label(s,655,160,'Fase 1: heurísticas OpenCV',{fs:10.5});
+  label(s,655,175,'Fase 2: CNN leve (ONNX)',{fs:10.5});
+  label(s,885,160,'Fase 2: coerência foto × ocorrência',{fs:10.5});
+  label(s,885,175,'Fase 3: dígito / ponteiro',{fs:10.5});
+  label(s,1075,160,'auditável, não é ML',{fs:10.5,italic:true});
+  // decision
+  box(s,{x:590,y:290,w:140,h:48,label:['Auto-rejeitada','alta confiança'],fs:11.5,fill:C.red2,stroke:C.red});
+  box(s,{x:790,y:290,w:150,h:48,label:['Fila humana','zona de incerteza'],fs:11.5,fill:C.amber2,stroke:C.amber});
+  box(s,{x:1000,y:290,w:140,h:48,label:['Auto-aprovada','alta confiança'],fs:11.5,fill:C.green2,stroke:C.green});
+  arrow(s,[[655,122],[655,290]],{color:C.red,marker:'arrR',label:'falha óbvia',dx:-42,dy:40});
+  arrow(s,[[1075,122],[1075,290]],{color:C.green,marker:'arrG',label:'consistente',dx:40,dy:60});
+  arrow(s,[[1040,122],[1040,230],[865,230],[865,290]],{color:C.amber,marker:'arrA',label:'baixa confiança',dy:-12,at:1});
+  arrow(s,[[1050,122],[1050,215],[720,215],[720,290]],{color:C.red,marker:'arrR',label:'inconsistente',dy:12,dx:-80,at:1});
+  box(s,{x:790,y:355,w:150,h:38,label:['Painel web · 6 auditores','aprova / reprova + motivo'],fs:10.5,fill:C.white,stroke:C.amber,bold:false});
+  arrow(s,[[865,338],[865,355]],{color:C.amber,marker:'arrA'});
+  arrow(s,[[790,374],[660,374],[660,338]],{color:C.red,marker:'arrR',label:'reprova',dy:-12,at:0});
+  arrow(s,[[940,374],[1070,374],[1070,338]],{color:C.green,marker:'arrG',label:'aprova',dy:-12,at:0});
+  // outcomes
+  box(s,{x:1010,y:430,w:130,h:44,label:['Faturamento'],fs:12,fill:C.green2,stroke:C.green});
+  box(s,{x:600,y:430,w:130,h:44,label:['Revisita em campo'],fs:12,fill:C.red2,stroke:C.red});
+  arrow(s,[[1075,338],[1075,430]],{color:C.green,marker:'arrG'});
+  arrow(s,[[640,338],[640,430]],{color:C.red,marker:'arrR'});
+  arrow(s,[[600,452],[95,452],[95,156]],{dashed:true,label:'revisita',dx:-120,dy:-12,at:0});
+  // active learning
+  box(s,{x:300,y:372,w:190,h:48,label:['Dataset de treino','decisão humana = rótulo'],fs:11.5,db:true,fill:C.soft});
+  arrow(s,[[790,388],[490,388]],{dashed:true,label:'active learning',dy:-12,dx:40});
+  arrow(s,[[395,372],[395,250],[555,250],[555,112],[580,112]],{dashed:true,color:C.blue,marker:'arrB',label:['retreino', 'gate manual'],at:1,dy:-16,dx:-30});
+  label(s,395,478,'cada seta é um evento em historico_status',{fs:10.5,italic:true});
+})();
+
+// ---------- 5. TOPOLOGIA ----------
+(function(){
+  const s=document.getElementById('topo'); defs(s);
+  group(s,0,0,700,470,'Máquina host · docker compose',{});
+  group(s,20,40,290,410,'Sistema de arquivos',{fill:C.white});
+  group(s,340,40,340,410,'Containers',{fill:C.blue2,stroke:'#BFD3EE'});
+  box(s,{x:40,y:70,w:250,h:52,label:['Base cliente/','4 lotes, somente leitura'],fs:11.5,fill:C.soft,stroke:C.muted});
+  box(s,{x:40,y:150,w:250,h:52,label:['data/staging/','lote a ingerir'],fs:11.5,fill:C.amber2,stroke:C.amber});
+  box(s,{x:40,y:240,w:250,h:52,label:['data/storage/','fotos gerenciadas · StorageBackend'],fs:11.5});
+  box(s,{x:40,y:330,w:250,h:52,label:['ml/artifacts/','modelos .onnx (ro)'],fs:11.5});
+  box(s,{x:40,y:400,w:250,h:36,label:['pgdata (volume nomeado)'],fs:11,db:true,fill:C.soft});
+  arrow(s,[[165,122],[165,150]],{label:'make seed-staging',dx:70});
+  box(s,{x:360,y:70,w:300,h:56,label:['frontend · nginx:80 → :5173','build React + fallback SPA + proxy /api'],fs:11.5,fill:C.white,stroke:C.navy});
+  box(s,{x:360,y:160,w:300,h:56,label:['api · FastAPI :8000','ingestão, auth, fila humana, métricas'],fs:11.5,fill:C.white,stroke:C.navy});
+  box(s,{x:360,y:250,w:300,h:56,label:['worker · python -m inspecao.jobs.worker','claim de jobs, heurísticas, ONNX'],fs:11.5,fill:C.white,stroke:C.navy});
+  box(s,{x:360,y:350,w:300,h:60,label:['postgres:16-alpine :5432','domínio · histórico · quarentena · fila jobs'],fs:11.5,db:true,fill:C.white,stroke:C.navy});
+  arrow(s,[[510,126],[510,160]],{label:'REST /api',dx:50});
+  arrow(s,[[450,216],[450,350]],{color:C.navy,marker:'arrN',label:'SQL',dx:-24,dy:40});
+  arrow(s,[[570,306],[570,350]],{color:C.navy,marker:'arrN',label:'SKIP LOCKED',dx:50});
+  arrow(s,[[360,188],[165,188],[165,202]],{label:'IngestSource',dy:-12,at:0});
+  arrow(s,[[360,200],[290,266]],{label:'grava fotos',dy:16,dx:20});
+  arrow(s,[[290,272],[360,272]],{label:'lê fotos',dy:-12});
+  arrow(s,[[290,356],[360,290]],{label:'carrega modelo',dy:14,dx:16});
+  arrow(s,[[290,418],[360,395]],{dashed:true});
+  label(s,350,455,'nenhuma seta sai da máquina',{fs:11,italic:true,color:C.navy});
+})();
+
+// ---------- 6. INGESTÃO ----------
+(function(){
+  const s=document.getElementById('ingest'); defs(s);
+  const X=40, W=280;
+  const steps=[
+    ['1. Descobrir lote','pasta casa com PSP_EXTRATLEITIMPL_DDMMAA_HHMM',C.white,C.navy],
+    ['2. Checksum sha256 do CSV','já ingerido e igual: pula · diferente: exige --reprocessar',C.amber2,C.amber],
+    ['3. Sincronizar notas','upsert dos 61 códigos da planilha (openpyxl)',C.white,C.navy],
+    ['4. Parsear CSV','cabeçalho validado · NA → nulo · split de medidores',C.white,C.navy],
+    ['5. Inserir leituras e medidores','bulk_insert_mappings em blocos de 2.000',C.white,C.navy],
+    ['6. Percorrer fotos do lote','regex do nome · dimensões do header JPEG · sha256',C.white,C.navy],
+    ['7. Gravar no storage e em fotos','referenciada → principal · sem referência → órfã',C.white,C.navy],
+    ['8. Validar e classificar quarentena','8 regras · severidade bloqueante ou informativa',C.red2,C.red],
+    ['9. Enfileirar jobs de triagem','uma linha em jobs por leitura com foto',C.green2,C.green],
+  ];
+  steps.forEach((st,i)=>{
+    const y=8+i*50;
+    box(s,{x:X,y,w:W,h:40,label:[st[0]],fs:12,fill:st[2],stroke:st[3]});
+    label(s,X+W+14,y+24,st[1],{anchor:'start',fs:11,color:C.muted});
+    if(i<steps.length-1) arrow(s,[[X+W/2,y+40],[X+W/2,y+50]]);
+  });
+  label(s,X+W/2,458,'tudo em uma transação por lote: falha = rollback completo',{fs:11,italic:true,color:C.navy});
+})();
+
+// ---------- 7. ERD ----------
+(function(){
+  const s=document.getElementById('erd'); defs(s);
+  function tbl(x,y,name,cols,fill,stroke){
+    const h=22+cols.length*15+8, w=142;
+    el('rect',{x,y,width:w,height:h,rx:5,fill:C.white,stroke:stroke||C.navy,'stroke-width':1.3},s);
+    el('rect',{x,y,width:w,height:22,rx:5,fill:fill||C.navy},s);
+    el('rect',{x,y:y+16,width:w,height:6,fill:fill||C.navy},s);
+    label(s,x+w/2,y+15,name,{fs:11.5,bold:true,color:C.white});
+    cols.forEach((c,i)=>{const t=label(s,x+8,y+22+14+i*15,c,{anchor:'start',fs:10.2,color:C.ink});t.setAttribute('font-family','Menlo,Consolas,monospace');});
+    return {x,y,w,h};
+  }
+  group(s,0,0,480,300,'Domínio (M1)',{fill:C.green2,stroke:'#BFE3CE'});
+  group(s,0,312,480,158,'Decisão e operação (M2 · M3 · M6)',{fill:C.blue2,stroke:'#BFD3EE'});
+  group(s,486,0,314,470,'Acesso e operação (M3 · M5 · M6)',{fill:C.soft});
+  const lotes=tbl(14,30,'lotes',['id','nome (uq)','checksum_csv','data_extracao','total_linhas'],C.green,C.green);
+  const leit=tbl(180,30,'leituras',['id','lote_id → lotes','linha_csv','posicao_lida','nota_codigo (sem FK)','status_atual'],C.green,C.green);
+  const med=tbl(180,160,'leitura_medidores',['id','leitura_id → leituras','numero (texto)','ordem'],C.green,C.green);
+  const fotos=tbl(340,30,'fotos',['id','lote_id → lotes','leitura_id (nulo=órfã)','principal','id_externo, sequencia','caminho_storage','sha256, largura, altura'],C.green,C.green);
+  const notas=tbl(14,160,'notas_ocorrencia',['codigo (pk)','descricao','exige_foto','cena_esperada'],C.green,C.green);
+  arrow(s,[[164,60],[180,60]]);
+  arrow(s,[[255,141],[255,160]]);
+  arrow(s,[[330,60],[340,60]]);
+  arrow(s,[[330,72],[340,72]]);
+  arrow(s,[[89,160],[89,141]],{dashed:true,label:'código',dx:26});
+  tbl(14,340,'historico_status',['leitura_id','status, ator','confianca','timestamp'],C.blue,C.blue);
+  tbl(174,340,'quarentena',['leitura_id / foto_id','tipo_inconsistencia','severidade','resolvido'],C.blue,C.blue);
+  tbl(334,340,'revisoes_humanas',['leitura_id, auditor_id','decisao, motivo','redistribuida'],C.blue,C.blue);
+  tbl(498,30,'usuarios',['id, nome, email','senha_hash (argon2)','papel','ativo, trocar_senha'],C.navy,C.navy);
+  tbl(498,150,'refresh_tokens',['usuario_id','token_hash','expira_em','revogado'],C.navy,C.navy);
+  tbl(498,262,'log_acesso',['usuario_id','evento','ip_origem','timestamp'],C.navy,C.navy);
+  tbl(652,30,'jobs',['tipo, payload','status, tentativas','reservado_ate','erro'],C.amber,C.amber);
+  tbl(652,150,'resultados_inferencia',['foto_id','detector, versao','sinais (json)','decisao'],C.amber,C.amber);
+  tbl(652,262,'rotulos',['foto_id, usuario_id','rodada','classes (multi)','timestamp'],C.amber,C.amber);
+  arrow(s,[[569,113],[569,150]]);
+  arrow(s,[[569,225],[569,262]]);
+  label(s,643,455,'azul-escuro: acesso · laranja: fila, inferência e rótulos',{fs:10.5,italic:true});
+})();
+
+// ---------- 8. ESTADOS ----------
+(function(){
+  const s=document.getElementById('estados'); defs(s);
+  const st=(x,y,name,fill,stroke,w=150)=>{box(s,{x,y,w,h:40,label:[name],fs:12,fill:fill||C.white,stroke:stroke||C.navy,rx:20});return {x,y,w,h:40,cx:x+w/2,cy:y+20};};
+  el('circle',{cx:75,cy:30,r:7,fill:C.navy},s);
+  const rec=st(0,60,'recebida');
+  arrow(s,[[75,37],[75,60]]);
+  const sem=st(190,60,'sem_foto',C.soft,C.muted,130);
+  arrow(s,[[150,80],[190,80]],{label:'nota não exige foto',dy:-14,dx:60});
+  const tri=st(0,140,'triagem_qualidade',C.blue2,C.blue);
+  arrow(s,[[75,100],[75,140]],{color:C.blue,marker:'arrB',label:'job Ponto A',dx:50});
+  const rej=st(0,240,'rejeitada_qualidade',C.red2,C.red);
+  arrow(s,[[75,180],[75,240]],{color:C.red,marker:'arrR',label:'falha óbvia',dx:44});
+  const val=st(260,140,'validacao_leitura',C.blue2,C.blue);
+  arrow(s,[[150,160],[260,160]],{color:C.blue,marker:'arrB',label:'qualidade OK',dy:-14});
+  const arj=st(220,240,'auto_rejeitada',C.red2,C.red);
+  const fh=st(400,240,'fila_humana',C.amber2,C.amber);
+  const aap=st(580,240,'auto_aprovada',C.green2,C.green);
+  arrow(s,[[300,180],[295,240]],{color:C.red,marker:'arrR',label:'inconsistente',dx:-42,dy:0});
+  arrow(s,[[335,180],[440,240]],{color:C.amber,marker:'arrA',label:'incerteza',dx:30,dy:-6});
+  arrow(s,[[410,160],[655,160],[655,240]],{color:C.green,marker:'arrG',label:'consistente',dy:-14,at:0});
+  const rph=st(220,330,'reprovada_humano',C.red2,C.red);
+  const aph=st(580,330,'aprovada_humano',C.green2,C.green);
+  arrow(s,[[440,280],[320,330]],{color:C.red,marker:'arrR',label:'reprova + motivo',dx:-50,dy:6});
+  arrow(s,[[510,280],[630,330]],{color:C.green,marker:'arrG',label:'aprova',dx:46,dy:6});
+  const rev=st(60,410,'revisita em campo',C.red2,C.red,190);
+  const fat=st(520,410,'faturamento',C.green2,C.green,190);
+  arrow(s,[[75,280],[75,410]],{color:C.red,marker:'arrR'});
+  arrow(s,[[295,280],[295,300],[180,300],[180,410]],{color:C.red,marker:'arrR'});
+  arrow(s,[[295,370],[295,390],[230,390],[230,410]],{color:C.red,marker:'arrR'});
+  arrow(s,[[655,280],[655,300],[690,300],[690,410]],{color:C.green,marker:'arrG'});
+  arrow(s,[[655,370],[655,410]],{color:C.green,marker:'arrG'});
+  label(s,380,440,'terminais · toda seta grava em historico_status',{fs:10.5,italic:true});
+})();
+
+// ---------- 10. PONTO A ----------
+(function(){
+  const s=document.getElementById('pontoA'); defs(s);
+  box(s,{x:10,y:20,w:130,h:44,label:['Foto recebida','360×480 JPEG'],fs:11.5});
+  box(s,{x:190,y:10,w:150,h:64,label:['V0 · Heurísticas','5 sinais OpenCV','limiares versionados'],fs:11,fill:C.green2,stroke:C.green});
+  arrow(s,[[140,42],[190,42]]);
+  box(s,{x:390,y:20,w:120,h:44,label:['Segue para','Ponto B'],fs:11.5,fill:C.blue2,stroke:C.blue});
+  arrow(s,[[340,42],[390,42]],{color:C.green,marker:'arrG',label:'OK',dy:-12});
+  box(s,{x:200,y:120,w:130,h:44,label:['Auto-rejeitada','rejeitada_qualidade'],fs:11,fill:C.red2,stroke:C.red});
+  arrow(s,[[265,74],[265,120]],{color:C.red,marker:'arrR',label:'falha óbvia',dx:46});
+  box(s,{x:190,y:210,w:150,h:64,label:['V1 · MobileNetV3','multi-label · ONNX','DetectorOnnx'],fs:11,fill:C.white,stroke:C.blue,dashed:true});
+  arrow(s,[[265,210],[265,164]],{dashed:true,color:C.blue,marker:'arrB',label:'substitui V0 se F1 maior',dx:80});
+  box(s,{x:10,y:210,w:130,h:64,label:['Rótulo fraco','degradação sintética','+ rótulos humanos'],fs:10.5,fill:C.soft,stroke:C.muted,bold:false});
+  arrow(s,[[140,242],[190,242]],{label:'treino',dy:-12});
+  box(s,{x:390,y:210,w:120,h:64,label:['resultados_','inferencia','sinais + decisão'],fs:10.5,fill:C.soft,stroke:C.muted,db:true,bold:false});
+  arrow(s,[[340,242],[390,242]],{label:'grava',dy:-12});
+  label(s,450,120,'recalcular_decisao re-decide',{fs:10,italic:true});
+  label(s,450,134,'sem reabrir imagem',{fs:10,italic:true});
+})();
+
+// ---------- 11. PONTO B ----------
+(function(){
+  const s=document.getElementById('pontoB'); defs(s);
+  box(s,{x:260,y:5,w:200,h:40,label:['Foto aprovada em qualidade'],fs:12,fill:C.blue2,stroke:C.blue});
+  box(s,{x:210,y:80,w:300,h:56,label:['Estágio 1 · Classificador de tipo e cena','digital · eletromecânico · cena de ocorrência · ilegível'],fs:11.5,fill:C.white,stroke:C.navy});
+  arrow(s,[[360,45],[360,80]]);
+  const y2=190;
+  box(s,{x:10,y:y2,w:160,h:70,label:['Estágio 2a · Display + OCR','detecção da região','CRNN nos dígitos'],fs:10.5,fill:C.soft,stroke:C.muted});
+  box(s,{x:190,y:y2,w:160,h:70,label:['Estágio 2b · Ponteiro','regressão de ângulo','disco / relógio'],fs:10.5,fill:C.soft,stroke:C.muted});
+  box(s,{x:370,y:y2,w:160,h:70,label:['Estágio 2c · Cena esperada','classificador foto × nota','ex.: I100 = fachada fechada'],fs:10.5,fill:C.white,stroke:C.navy});
+  box(s,{x:550,y:y2,w:160,h:70,label:['Fila humana','ilegível vai direto'],fs:11,fill:C.amber2,stroke:C.amber});
+  arrow(s,[[260,136],[90,y2]],{label:'digital',dx:-30,dy:0});
+  arrow(s,[[330,136],[270,y2]],{label:'eletromec.',dx:-24,dy:8});
+  arrow(s,[[400,136],[450,y2]],{label:'ocorrência',dx:30,dy:8});
+  arrow(s,[[470,136],[630,y2]],{color:C.amber,marker:'arrA',label:'ilegível',dx:30});
+  label(s,90,275,'Fase 3+ · após gate de resolução',{fs:10,italic:true});
+  label(s,270,275,'Fase 3+ · após gate de resolução',{fs:10,italic:true});
+  label(s,450,275,'Fase 2 · bloqueado por dados',{fs:10,italic:true,color:C.red});
+  box(s,{x:160,y:310,w:400,h:56,label:['Estágio 3 · Regra determinística de consistência (não é ML)','compara valor extraído × leitura declarada e cena × nota de ocorrência'],fs:11.5,fill:C.white,stroke:C.navy});
+  arrow(s,[[90,260],[90,338],[160,338]]);
+  arrow(s,[[270,260],[270,310]]);
+  arrow(s,[[450,260],[450,310]]);
+  box(s,{x:60,y:400,w:150,h:36,label:['Auto-rejeitada'],fs:11.5,fill:C.red2,stroke:C.red});
+  box(s,{x:285,y:400,w:150,h:36,label:['Fila humana'],fs:11.5,fill:C.amber2,stroke:C.amber});
+  box(s,{x:510,y:400,w:150,h:36,label:['Auto-aprovada'],fs:11.5,fill:C.green2,stroke:C.green});
+  arrow(s,[[220,366],[135,400]],{color:C.red,marker:'arrR',label:'inconsistente',dx:-50,dy:-2});
+  arrow(s,[[360,366],[360,400]],{color:C.amber,marker:'arrA',label:'baixa confiança',dx:60});
+  arrow(s,[[500,366],[585,400]],{color:C.green,marker:'arrG',label:'consistente',dx:50,dy:-2});
+  arrow(s,[[630,260],[630,380],[600,400]],{color:C.amber,marker:'arrA'});
+})();
+
+// ---------- 12. LOOP ----------
+(function(){
+  const s=document.getElementById('loop'); defs(s);
+  box(s,{x:10,y:10,w:170,h:56,label:['Amostra estratificada','300 fotos · lote, nota, qualidade'],fs:11,fill:C.white,stroke:C.navy});
+  box(s,{x:220,y:10,w:170,h:56,label:['Dupla rotulagem cega','rodadas A e B, rotuladores distintos'],fs:11,fill:C.white,stroke:C.navy});
+  arrow(s,[[180,38],[220,38]]);
+  box(s,{x:430,y:10,w:110,h:56,label:['Divergência?'],fs:11.5,fill:C.amber2,stroke:C.amber,diamond:true});
+  arrow(s,[[390,38],[430,38]]);
+  box(s,{x:580,y:10,w:110,h:56,label:['Desempate','3º rotulador'],fs:11,fill:C.white,stroke:C.amber});
+  arrow(s,[[540,38],[580,38]],{color:C.amber,marker:'arrA',label:'sim',dy:-12});
+  box(s,{x:400,y:110,w:170,h:56,label:['Rótulo consolidado','gate: kappa de Cohen ≥ 0,6'],fs:11,fill:C.green2,stroke:C.green});
+  arrow(s,[[485,66],[485,110]],{color:C.green,marker:'arrG',label:'não',dx:20});
+  arrow(s,[[635,66],[635,138],[570,138]],{color:C.amber,marker:'arrA'});
+  box(s,{x:400,y:200,w:170,h:56,label:['Treino do modelo','split por lote e tempo · ONNX'],fs:11,fill:C.blue2,stroke:C.blue});
+  arrow(s,[[485,166],[485,200]],{color:C.blue,marker:'arrB'});
+  box(s,{x:400,y:290,w:170,h:56,label:['Produção nos workers','política de limiares versionada'],fs:11,fill:C.white,stroke:C.navy});
+  arrow(s,[[485,256],[485,290]]);
+  box(s,{x:110,y:290,w:190,h:56,label:['Decisão dos auditores','= rótulo contínuo (rodada producao)'],fs:11,fill:C.amber2,stroke:C.amber});
+  arrow(s,[[400,318],[300,318]],{label:'fila humana',dy:-12});
+  box(s,{x:110,y:370,w:190,h:52,label:['Auditoria amostral 5-10%','concordância inter-anotador'],fs:11,fill:C.white,stroke:C.amber});
+  arrow(s,[[205,346],[205,370]],{color:C.amber,marker:'arrA'});
+  box(s,{x:400,y:370,w:170,h:52,label:['Monitor de drift','série por lote · 5 sinais'],fs:11,fill:C.white,stroke:C.navy});
+  arrow(s,[[485,346],[485,370]]);
+  box(s,{x:590,y:290,w:105,h:60,label:['Gate manual','de retreino','nunca automático'],fs:10.5,fill:C.red2,stroke:C.red});
+  arrow(s,[[570,396],[642,396],[642,350]],{color:C.red,marker:'arrR',label:'alerta',dy:-12,at:0});
+  arrow(s,[[300,396],[400,396]],{label:'queda = viés',dy:-12});
+  arrow(s,[[642,290],[642,228],[570,228]],{dashed:true,color:C.red,marker:'arrR',label:'decisão humana',dy:-12,at:1});
+  arrow(s,[[205,290],[205,120],[400,138]],{dashed:true,label:'realimenta rótulos',dx:-60,dy:-12,at:0});
+})();
+
+// ---------- 13. AUTH ----------
+(function(){
+  const s=document.getElementById('auth'); defs(s);
+  const lanes=[['Navegador',70],['Frontend React',250],['API FastAPI',430],['PostgreSQL',610]];
+  lanes.forEach(([n,x])=>{box(s,{x:x-65,y:6,w:130,h:32,label:[n],fs:11.5,fill:C.navy,color:C.white,stroke:C.navy});el('line',{x1:x,y1:38,x2:x,y2:390,stroke:'#C9D2DA','stroke-dasharray':'4 4'},s);});
+  const msg=(y,x1,x2,txt,opts={})=>{arrow(s,[[x1,y],[x2,y]],{color:opts.color||C.navy,marker:opts.marker||'arrN',dashed:opts.dashed});label(s,(x1+x2)/2,y-6,txt,{fs:10.5,color:opts.tc||C.ink});};
+  msg(70,70,250,'e-mail + senha');
+  msg(100,250,430,'POST /auth/login');
+  msg(130,430,610,'busca usuario · verifica argon2 · rate limit por email/IP');
+  msg(160,610,430,'papel · trocar_senha?',{dashed:true});
+  msg(190,430,610,'INSERT log_acesso · INSERT refresh_tokens (hash)');
+  msg(220,430,250,'access JWT 15 min + refresh em cookie httpOnly',{dashed:true,color:C.green,marker:'arrG'});
+  msg(250,250,430,'GET /fila-humana · Authorization: Bearer');
+  msg(280,430,610,'require_role(auditor) · consulta');
+  el('rect',{x:150,y:300,width:500,height:22,rx:4,fill:C.amber2},s);label(s,400,315,'access token expira',{fs:10.5,bold:true,color:C.amber});
+  msg(345,250,430,'POST /auth/refresh (cookie) · interceptor deduplicado');
+  msg(370,430,610,'valida hash · rotaciona · reuso? revoga cadeia + log refresh_reuso',{tc:C.red});
+  msg(392,430,250,'novo access + novo refresh',{dashed:true,color:C.green,marker:'arrG'});
+})();
+
+// ---------- 16. DEPS ----------
+(function(){
+  const s=document.getElementById('deps'); defs(s);
+  const st=(x,y,name,state)=>{const f={done:[C.green2,C.green],next:[C.amber2,C.amber],todo:[C.white,C.navy],par:[C.soft,C.muted]}[state];box(s,{x,y,w:120,h:36,label:[name],fs:11.5,fill:f[0],stroke:f[1],rx:18});return {cx:x+60,cy:y+18,x,y};};
+  label(s,200,16,'Dependências entre marcos',{fs:11.5,bold:true,color:C.navy});
+  const m0=st(140,30,'M0 ambiente','done');
+  const m1=st(140,90,'M1 ingestão','done');
+  const m2=st(140,150,'M2 quarentena','next');
+  const m3=st(30,220,'M3 API + auth','todo');
+  const m5=st(250,220,'M5 heurísticas','todo');
+  const m4=st(30,280,'M4 frontend','todo');
+  const m9=st(250,280,'M9 spike OCR','par');
+  const m6=st(140,340,'M6 rotulagem','todo');
+  const m7=st(30,400,'M7 modelo','todo');
+  const m8=st(250,400,'M8 operação','todo');
+  arrow(s,[[200,66],[200,90]],{color:C.green,marker:'arrG'});
+  arrow(s,[[200,126],[200,150]],{color:C.green,marker:'arrG'});
+  arrow(s,[[170,186],[90,220]],{color:C.amber,marker:'arrA'});
+  arrow(s,[[230,186],[310,220]],{color:C.amber,marker:'arrA'});
+  arrow(s,[[90,256],[90,280]]);
+  arrow(s,[[310,256],[310,280]],{dashed:true,label:'paralelo',dx:40});
+  arrow(s,[[90,316],[170,340]]);
+  arrow(s,[[290,256],[230,340]]);
+  arrow(s,[[170,376],[90,400]]);
+  arrow(s,[[150,418],[250,418]]);
+  label(s,200,466,'M5 anda em paralelo com M3 e M4 · M9 não bloqueia nada',{fs:10,italic:true});
+})();
+
+// modo captura: #s=N mostra so o slide N em 1280x720
+(function(){const m=location.hash.match(/s=(\d+)/);if(!m)return;const n=+m[1];document.querySelectorAll('.slide').forEach((el,i)=>{if(i!==n-1)el.style.display='none';else{el.style.margin='0';el.style.boxShadow='none';}});document.body.style.background='#fff';})();
+</script>
+</body>
+</html>

@@ -11,7 +11,9 @@ class LocalFileStorage:
 
     def __init__(self, raiz: Path | None = None) -> None:
         settings = get_settings()
-        self.raiz = raiz or settings.caminho_absoluto(settings.storage_local_root)
+        # resolve() tambem na raiz: em macOS /tmp e symlink de /private/tmp e a
+        # comparacao com o destino resolvido falharia sem isso.
+        self.raiz = (raiz or settings.caminho_absoluto(settings.storage_local_root)).resolve()
         self.raiz.mkdir(parents=True, exist_ok=True)
 
     def _caminho(self, chave: str) -> Path:

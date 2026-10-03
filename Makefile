@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo tipos-front \
         api-dev worker-dev front-dev test lint up down logs reset health
 
 help:  ## lista os alvos disponiveis
@@ -53,6 +53,9 @@ ingest:  ## ingere um lote de data/staging (uso: make ingest LOTE=...)
 	@test -n "$(LOTE)" || (echo 'uso: make ingest LOTE=PSP_EXTRATLEITIMPL_200526_0352'; exit 1)
 	cd app/backend && uv run python -m inspecao.ingest.batch --lote $(LOTE)
 
+ingest-todos:  ## ingere todos os lotes de data/staging (use REPROCESSAR=1 para substituir)
+	cd app/backend && uv run python -m inspecao.ingest.batch --todos $(if $(REPROCESSAR),--reprocessar,)
+
 # ---------------------------------------------------------------------------
 # Desenvolvimento (processos no host, com hot reload)
 # ---------------------------------------------------------------------------
@@ -63,8 +66,18 @@ api-dev:  ## sobe a api no host com reload
 worker-dev:  ## sobe o worker no host
 	cd app/backend && uv run python -m inspecao.jobs.worker
 
+triagem-todos:  ## enfileira a triagem de qualidade para todas as leituras em "recebida"
+	cd app/backend && uv run python -m inspecao.jobs.cli reprocessar --todos
+
+fila-resumo:  ## contagem de jobs por tipo e status
+	cd app/backend && uv run python -m inspecao.jobs.cli resumo
+
 front-dev:  ## sobe o vite dev server
 	cd app/frontend && npm run dev
+
+tipos-front:  ## regenera openapi.json e os tipos TypeScript do frontend a partir da API
+	cd app/backend && uv run python -c "import json; from inspecao.main import app; json.dump(app.openapi(), open('../frontend/openapi.json','w'), indent=1, ensure_ascii=False)"
+	cd app/frontend && npm run tipos
 
 # ---------------------------------------------------------------------------
 # Qualidade

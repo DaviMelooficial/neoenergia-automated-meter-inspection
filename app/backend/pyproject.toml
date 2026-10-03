@@ -17,6 +17,7 @@ dependencies = [
     "numpy>=2.1",
     "openpyxl>=3.1",
     "onnxruntime>=1.20",
+    "email-validator>=2.2",
 ]
 
 [dependency-groups]
@@ -44,3 +45,6 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# -rs: lista os testes pulados. O teste de regressao de dados pula sem banco ou
+# sem os 4 lotes ingeridos, e isso precisa ficar visivel, nao virar verde falso.
+addopts = "-rs"

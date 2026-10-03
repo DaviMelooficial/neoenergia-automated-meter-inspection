@@ -149,7 +149,9 @@ def test_dimensoes_jpeg_le_cabecalho():
     # JPEG minimo: SOI + SOF0 declarando 480 de altura por 360 de largura
     jpeg = (
         b"\xff\xd8"
-        b"\xff\xc0\x00\x11\x08" + (480).to_bytes(2, "big") + (360).to_bytes(2, "big")
+        b"\xff\xc0\x00\x11\x08"
+        + (480).to_bytes(2, "big")
+        + (360).to_bytes(2, "big")
         + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
     )
     assert dimensoes_jpeg(jpeg) == (360, 480)

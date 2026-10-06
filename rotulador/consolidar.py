@@ -13,6 +13,7 @@ Saidas em saida/ (fora do git):
 
 import csv
 import glob
+import hashlib
 import os
 from collections import Counter, defaultdict
 from itertools import combinations
@@ -20,23 +21,43 @@ from itertools import combinations
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PASTA_ROTULOS = os.path.join(AQUI, "rotulos")
 PASTA_SAIDA = os.path.join(AQUI, "saida")
-MANIFESTO = os.path.join(AQUI, "manifesto.csv")
+CONTROLE = os.path.join(AQUI, "controle.dat")  # sha256 dos nomes das fotos de controle
 
 DEFEITOS = ["reflexo", "fora_de_foco", "tampa_suja", "enquadramento", "display_apagado"]
 CLASSES = ["cena"] + DEFEITOS + ["legivel"]
+# Cenas em que o medidor aparece: so nelas defeito e legibilidade sao uma escolha real
+# (nas outras a regra do app impoe 0), entao o kappa condicionado olha so para elas.
+COM_MEDIDOR = ("digital", "eletromecanico")
 LIMIAR_KAPPA = 0.6
 
 
 def ler_todos():
-    linhas, puladas = [], 0
+    linhas, puladas, pasta_de = [], 0, {}
     for caminho in sorted(glob.glob(os.path.join(PASTA_ROTULOS, "*", "rotulos.csv"))):
+        pasta = os.path.basename(os.path.dirname(caminho))
         with open(caminho, encoding="utf-8", newline="") as f:
             for r in csv.DictReader(f):
+                # A mesma pessoa em duas pastas (ex.: zip copiado duas vezes) contaria
+                # como dois rotuladores concordando consigo mesmos: inflaria o kappa.
+                if pasta_de.setdefault(r["rotulador"], pasta) != pasta:
+                    raise SystemExit("Rotulador '%s' aparece nas pastas '%s' e '%s'. Deixe so uma." % (
+                        r["rotulador"], pasta_de[r["rotulador"]], pasta))
                 if r["pulada"] == "1":
                     puladas += 1
                     continue
                 linhas.append(r)
     return linhas, puladas
+
+
+def aplicar_regra(saida, empates):
+    """Mesma regra do app: sem medidor visivel, defeitos e legivel sao 0 (e nao empatam)."""
+    if saida["cena"] == "nao_medidor":
+        for d in DEFEITOS:
+            saida[d] = "0"
+            empates.discard(d)
+    if saida["cena"] in ("nao_medidor", "ocorrencia"):
+        saida["legivel"] = "0"
+        empates.discard("legivel")
 
 
 def kappa_cohen(a, b):
@@ -77,10 +98,13 @@ def main():
         raise SystemExit("Nenhum rotulo em %s/*/rotulos.csv" % PASTA_ROTULOS)
     os.makedirs(PASTA_SAIDA, exist_ok=True)
 
-    controle = set()
-    if os.path.exists(MANIFESTO):
-        with open(MANIFESTO, encoding="utf-8", newline="") as f:
-            controle = {r["arquivo"] for r in csv.DictReader(f) if r["controle"] == "1"}
+    hashes_controle = set()
+    if os.path.exists(CONTROLE):
+        with open(CONTROLE, encoding="ascii") as f:
+            hashes_controle = {l.strip() for l in f if l.strip()}
+
+    def eh_controle(arquivo):
+        return hashlib.sha256(arquivo.encode("utf-8")).hexdigest() in hashes_controle
 
     colunas = list(linhas[0].keys())
     with open(os.path.join(PASTA_SAIDA, "todos_os_rotulos.csv"), "w", encoding="utf-8", newline="") as f:
@@ -99,13 +123,15 @@ def main():
     for foto in sorted(por_foto):
         votos = por_foto[foto]
         saida = {"nome_arquivo": foto, "lote": next(iter(votos.values()))["lote"],
-                 "n_rotuladores": len(votos), "controle": int(foto in controle)}
-        algum_empate = False
+                 "n_rotuladores": len(votos), "controle": int(eh_controle(foto))}
+        empates = set()
         for c in CLASSES:
             valor, empate = maioria([v[c] for v in votos.values()])
             saida[c] = valor
-            algum_empate |= empate
-        saida["empate"] = int(algum_empate)
+            if empate:
+                empates.add(c)
+        aplicar_regra(saida, empates)
+        saida["empate"] = int(bool(empates))
         consolidados.append(saida)
     with open(os.path.join(PASTA_SAIDA, "rotulos_consolidados.csv"), "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["nome_arquivo", "lote", "n_rotuladores", "controle"] + CLASSES + ["empate"])
@@ -113,37 +139,51 @@ def main():
         w.writerows(consolidados)
 
     # ---- kappa por par de rotuladores ----
-    pares = []  # (a, b, n, {classe: kappa})
+    pares = []  # (a, b, n, {classe: kappa}, {classe: (kappa, n)} so com medidor visivel)
     for a, b in combinations(rotuladores, 2):
         comuns = sorted(f for f, v in por_foto.items() if a in v and b in v)
         if not comuns:
             continue
         kappas = {c: kappa_cohen([por_foto[f][a][c] for f in comuns], [por_foto[f][b][c] for f in comuns])
                   for c in CLASSES}
-        pares.append((a, b, len(comuns), kappas))
+        visiveis = [f for f in comuns
+                    if por_foto[f][a]["cena"] in COM_MEDIDOR and por_foto[f][b]["cena"] in COM_MEDIDOR]
+        cond = {c: (kappa_cohen([por_foto[f][a][c] for f in visiveis], [por_foto[f][b][c] for f in visiveis]),
+                    len(visiveis)) for c in CLASSES[1:]}
+        pares.append((a, b, len(comuns), kappas, cond))
 
-    medio = {}
-    for c in CLASSES:
-        validos = [(n, k[c]) for _, _, n, k in pares if k[c] is not None]
+    def media_ponderada(itens):
+        validos = [(n, k) for n, k in itens if k is not None]
         peso = sum(n for n, _ in validos)
-        medio[c] = (sum(n * k for n, k in validos) / peso, peso) if peso else (None, 0)
+        return (sum(n * k for n, k in validos) / peso, peso) if peso else (None, 0)
 
-    ctrl_2mais = sum(1 for f in controle if len(por_foto.get(f, {})) >= 2)
+    medio = {c: media_ponderada([(n, k[c]) for _, _, n, k, _ in pares]) for c in CLASSES}
+    medio_cond = {c: media_ponderada([cd[c][::-1] for _, _, _, _, cd in pares]) for c in CLASSES[1:]}
+
+    ctrl_2mais = sum(1 for f in por_foto if len(por_foto[f]) >= 2 and eh_controle(f))
 
     md = ["# Concordancia entre rotuladores (kappa de Cohen)", "",
           "Rotuladores: %d (%s). Rotulos validos: %d. Puladas (ignoradas): %d." % (
               len(rotuladores), ", ".join(rotuladores), len(linhas), puladas),
-          "Fotos de controle com 2 ou mais rotulos: %d de %d." % (ctrl_2mais, len(controle)),
+          "Fotos de controle com 2 ou mais rotulos: %d de %d." % (ctrl_2mais, len(hashes_controle)),
           "Fotos com empate na maioria: %d de %d." % (sum(c["empate"] for c in consolidados), len(consolidados)),
           "", "## Kappa medio ponderado por n", "",
-          "| classe | kappa | n (pares-foto) | alerta |", "|---|---|---|---|"]
+          "Colunas 'so com medidor': apenas fotos em que os dois marcaram digital ou eletromecanico.",
+          "",
+          "| classe | kappa | n (pares-foto) | kappa so com medidor | n so com medidor | alerta |",
+          "|---|---|---|---|---|---|"]
     for c in CLASSES:
         k, n = medio[c]
-        alerta = "kappa < %.1f" % LIMIAR_KAPPA if k is not None and k < LIMIAR_KAPPA else ("sem dado" if k is None else "")
-        md.append("| %s | %s | %d | %s |" % (c, fmt(k), n, alerta))
+        kc, nc = medio_cond.get(c, (None, 0))
+        baixos = [x for x in (k, kc) if x is not None and x < LIMIAR_KAPPA]
+        alerta = "kappa < %.1f" % LIMIAR_KAPPA if baixos else ("sem dado" if k is None else "")
+        if c == "cena":
+            md.append("| %s | %s | %d | - | - | %s |" % (c, fmt(k), n, alerta))
+        else:
+            md.append("| %s | %s | %d | %s | %d | %s |" % (c, fmt(k), n, fmt(kc), nc, alerta))
     md += ["", "## Por par de rotuladores", "",
            "| par | n | " + " | ".join(CLASSES) + " |", "|---|---|" + "---|" * len(CLASSES)]
-    for a, b, n, k in pares:
+    for a, b, n, k, _ in pares:
         md.append("| %s x %s | %d | %s |" % (a, b, n, " | ".join(fmt(k[c]) for c in CLASSES)))
     if not pares:
         md.append("| (nenhum par rotulou a mesma foto) | 0 |" + " |" * len(CLASSES))

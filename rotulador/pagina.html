@@ -220,6 +220,7 @@
 "use strict";
 const DEFEITOS = ["reflexo", "fora_de_foco", "tampa_suja", "enquadramento", "display_apagado"];
 const TECLA_CENA = {"1": "digital", "2": "eletromecanico", "3": "ocorrencia", "4": "nao_medidor"};
+const SEM_LEITURA = ["ocorrencia", "nao_medidor"];  // cenas em que legivel e sempre Nao
 const TECLA_DEF = {q: "reflexo", w: "fora_de_foco", e: "tampa_suja", r: "enquadramento", t: "display_apagado"};
 
 const $ = (s) => document.querySelector(s);
@@ -229,7 +230,7 @@ const st = {
   nome: "", meta: 0,
   historico: [],   // fotos gravadas nesta sessao, em ordem
   pos: null,       // indice no historico quando corrigindo; null = foto nova
-  atual: null,     // {arquivo, cena, defeitos, legivel, segundosAntes}
+  atual: null,     // {arquivo, cena, defeitos, legivel, legivelAuto, segundosAntes}
   inicio: 0, feitas: 0, total: 0, pasta: "", enviando: false,  // inicio = quando a foto atual abriu
 };
 
@@ -296,6 +297,8 @@ function abrir(arquivo, rotulo) {
     cena: rotulo && !rotulo.pulada ? rotulo.cena : null,
     defeitos: Object.fromEntries(DEFEITOS.map((d) => [d, !!(rotulo && !rotulo.pulada && rotulo.defeitos[d])])),
     legivel: rotulo && !rotulo.pulada ? rotulo.legivel : null,
+    // legivel=0 imposto pela cena 3/4 (e nao escolhido pela pessoa)
+    legivelAuto: !!(rotulo && !rotulo.pulada && SEM_LEITURA.includes(rotulo.cena)),
     segundosAntes: rotulo ? rotulo.segundos : 0,
   };
   st.inicio = performance.now();
@@ -330,8 +333,15 @@ function desenhar() {
 function escolherCena(cena) {
   const a = st.atual;
   a.cena = cena;
-  if (cena === "nao_medidor") { DEFEITOS.forEach((d) => (a.defeitos[d] = false)); a.legivel = 0; }
-  if (cena === "ocorrencia") a.legivel = 0;
+  if (cena === "nao_medidor") DEFEITOS.forEach((d) => (a.defeitos[d] = false));
+  if (SEM_LEITURA.includes(cena)) {
+    a.legivel = 0;
+    a.legivelAuto = true;
+  } else if (a.legivelAuto) {
+    // Saiu de ocorrencia/nao_medidor: o "Nao" foi da regra, entao a pessoa escolhe de novo.
+    a.legivel = null;
+    a.legivelAuto = false;
+  }
   $("#g-cena").classList.remove("falta");
   desenhar();
 }
@@ -346,6 +356,7 @@ function escolherLegivel(v) {
   const c = st.atual.cena;
   if (v === 1 && (c === "nao_medidor" || c === "ocorrencia")) return;
   st.atual.legivel = v;
+  st.atual.legivelAuto = false;
   $("#g-legivel").classList.remove("falta");
   desenhar();
 }
@@ -364,7 +375,7 @@ async function salvar(pulada) {
     const segundos = a.segundosAntes + (performance.now() - st.inicio) / 1000;
     const r = await api("/api/rotulo", {
       nome: st.nome, arquivo: a.arquivo, pulada: !!pulada, cena: a.cena,
-      defeitos: a.defeitos, legivel: a.legivel, segundos,
+      defeitos: Object.fromEntries(DEFEITOS.map((d) => [d, a.defeitos[d] ? 1 : 0])), legivel: a.legivel, segundos,
     });
     st.feitas = r.feitas;
     if (st.pos === null) {

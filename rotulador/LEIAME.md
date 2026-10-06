@@ -4,7 +4,9 @@ App local para rotular fotos de medidor. Roda no seu computador, sem internet e 
 
 ## 1. Abrir
 
-- **Mac:** dê duplo clique em `ABRIR_MAC.command`. Se o Mac bloquear ("desenvolvedor não identificado"), clique com o botão direito no arquivo → **Abrir** → **Abrir**.
+- **Mac:** dê duplo clique em `ABRIR_MAC.command`. Se o Mac bloquear ("não foi possível verificar" / "desenvolvedor não identificado"):
+  - **macOS 15 (Sequoia) ou mais novo:** clique em **OK**, abra **Ajustes do Sistema → Privacidade e Segurança**, role até o fim, clique em **Abrir Mesmo Assim** ao lado de `ABRIR_MAC.command` e confirme com sua senha. Depois dê duplo clique de novo.
+  - **macOS 14 ou anterior:** clique com o botão direito no arquivo → **Abrir** → **Abrir**.
 - **Windows:** dê duplo clique em `ABRIR_WINDOWS.bat`. Se aparecer "O Windows protegeu o computador", clique em **Mais informações** → **Executar assim mesmo**.
 
 Uma janela preta abre e o navegador abre sozinho em `http://localhost:8765`. **Deixe a janela preta aberta** enquanto rotula; fechar ela encerra o app. Se o navegador não abrir, copie o endereço que aparece na janela preta.
@@ -16,6 +18,7 @@ Sem Python? Instale em <https://www.python.org/downloads/> (no Windows, marque *
 1. Digite seu nome (sempre o mesmo, para continuar de onde parou) e quantas fotos quer fazer agora.
 2. Para cada foto, marque a **cena**, os **defeitos** que houver e se a **leitura é legível**. Depois `Enter`.
 3. Tudo é salvo a cada foto. Pode fechar e voltar outro dia: as fotos já feitas não aparecem de novo.
+4. **Não abra o `rotulos.csv` no Excel com o app aberto.** O Excel trava o arquivo e o app não consegue salvar.
 
 | tecla | o quê |
 |---|---|
@@ -65,11 +68,11 @@ Em dúvida, escolha o que melhor descreve a foto e siga. Use `X` só se for impo
 ### Para o Davi
 
 ```bash
-python3 preparar.py      # uma vez: sorteia 400 fotos (100 por lote, 50 de controle) para imagens/ + manifesto.csv
+python3 preparar.py      # uma vez: sorteia 400 fotos (100 por lote, 50 de controle) -> imagens/, manifesto.csv, controle.dat
 # controles: mesma ordem para todos, 1 a cada 2 fotos (100 fotos cobrem os 50); controle pulado volta uma vez
 python3 rotulador.py     # testar local (porta opcional: python3 rotulador.py 9000)
 # colegas devolvem rotulos/<nome>/ -> copiar para rotulos/
 python3 consolidar.py    # saida/: consolidado por maioria, todos os rótulos e kappa.md
 ```
 
-`imagens/`, `manifesto.csv`, `rotulos/` e `saida/` ficam fora do git. Para distribuir, zipe a pasta `rotulador/` inteira (com `imagens/` e `manifesto.csv`, sem `rotulos/` e `saida/`).
+`imagens/`, `manifesto.csv`, `controle.dat`, `rotulos/` e `saida/` ficam fora do git. Para distribuir, zipe a pasta `rotulador/` inteira (com `imagens/`, `manifesto.csv` e `controle.dat`, sem `rotulos/` e `saida/`). O `controle.dat` guarda só hashes, então abrir os arquivos não revela quais fotos são controle.

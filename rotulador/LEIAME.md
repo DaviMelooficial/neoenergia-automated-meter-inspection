@@ -57,7 +57,7 @@ Em dúvida, escolha o que melhor descreve a foto e siga. Use `X` só se for impo
 
 ## Regras
 
-- **Às cegas:** não converse sobre as fotos nem sobre seus rótulos com colegas até todos terminarem. Parte das fotos é rotulada por várias pessoas para medir a concordância entre nós; conversar estraga a medida.
+- **Às cegas:** algumas fotos são vistas por mais de uma pessoa, para medirmos a concordância; por isso rotule sozinho e não converse sobre as fotos nem sobre seus rótulos com colegas até todos terminarem.
 - **Dados do cliente (LGPD):** as fotos são da Neoenergia. Não compartilhe, não poste e não envie para ninguém fora da equipe. **Apague esta pasta inteira ao fim do semestre.**
 
 ---
@@ -66,6 +66,7 @@ Em dúvida, escolha o que melhor descreve a foto e siga. Use `X` só se for impo
 
 ```bash
 python3 preparar.py      # uma vez: sorteia 400 fotos (100 por lote, 50 de controle) para imagens/ + manifesto.csv
+# controles: mesma ordem para todos, 1 a cada 2 fotos (100 fotos cobrem os 50); controle pulado volta uma vez
 python3 rotulador.py     # testar local (porta opcional: python3 rotulador.py 9000)
 # colegas devolvem rotulos/<nome>/ -> copiar para rotulos/
 python3 consolidar.py    # saida/: consolidado por maioria, todos os rótulos e kappa.md

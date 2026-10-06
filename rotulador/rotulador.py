@@ -37,8 +37,11 @@ PAGINA = os.path.join(AQUI, "pagina.html")
 
 PORTA_PADRAO = 8765
 TENTATIVAS_PORTA = 20
-# Uma foto de controle a cada N posicoes da fila de cada pessoa.
-INTERVALO_CONTROLE = 4
+# Ordem dos controles: fixa e igual para todos (seed do pool, nao do nome), para que
+# quem faz poucas fotos veja os mesmos primeiros controles que os colegas.
+SEED_CONTROLES = 20260706
+# Controle pulado volta depois de N fotos (uma vez so).
+ESPERA_CONTROLE_PULADO = 3
 
 CENAS = ("digital", "eletromecanico", "ocorrencia", "nao_medidor")
 DEFEITOS = ("reflexo", "fora_de_foco", "tampa_suja", "enquadramento", "display_apagado")
@@ -69,25 +72,28 @@ POOL = carregar_manifesto()
 POR_ARQUIVO = {p["arquivo"]: p for p in POOL}
 
 
-def ordem_da_pessoa(nome):
-    """Fila deterministica por nome: controles intercalados (1 a cada 4), depois o resto.
-
-    A seed vem do nome, entao a mesma pessoa ve sempre a mesma ordem e pessoas
-    diferentes veem ordens diferentes. Quem fizer as primeiras ~200 fotos passa
-    por todos os 50 controles.
-    """
-    rng = random.Random(int(hashlib.sha256(nome.encode()).hexdigest(), 16))
+def _ordem_controles():
     controles = sorted(p["arquivo"] for p in POOL if p["controle"])
+    random.Random(SEED_CONTROLES).shuffle(controles)
+    return controles
+
+
+ORDEM_CONTROLES = _ordem_controles()
+CONTROLES = set(ORDEM_CONTROLES)
+
+# Controles pulados uma vez nesta execucao do app: nome -> {arquivo: posicao em que pulou}.
+# Nao vao para o CSV; voltam na fila depois de ESPERA_CONTROLE_PULADO fotos.
+ADIADOS = {}
+# Controles que ja foram adiados uma vez: o segundo X grava como pulada.
+JA_ADIADOS = {}
+
+
+def ordem_demais(nome):
+    """Fotos que nao sao de controle, em ordem propria de cada pessoa (seed do nome)."""
+    rng = random.Random(int(hashlib.sha256(nome.encode()).hexdigest(), 16))
     demais = sorted(p["arquivo"] for p in POOL if not p["controle"])
-    rng.shuffle(controles)
     rng.shuffle(demais)
-    ordem = []
-    while controles or demais:
-        if controles and (len(ordem) % INTERVALO_CONTROLE == INTERVALO_CONTROLE - 1 or not demais):
-            ordem.append(controles.pop())
-        else:
-            ordem.append(demais.pop())
-    return ordem
+    return demais
 
 
 def arquivo_csv(nome):
@@ -118,17 +124,39 @@ def gravar_rotulos(nome, rotulos):
 
 def estado(nome):
     feitos = ler_rotulos(nome)
-    return {"nome": nome, "feitas": len(feitos), "total": len(POOL),
-            "restantes": sum(1 for a in POOL if a["arquivo"] not in feitos),
+    # Controle adiado conta como feito na tela, para o contador nao denunciar o controle.
+    vistos = set(feitos) | set(ADIADOS.get(nome, {}))
+    return {"nome": nome, "feitas": len(vistos), "total": len(POOL),
+            "restantes": len(POOL) - len(vistos),
             "pasta": os.path.join(PASTA_ROTULOS, nome)}
 
 
 def proxima(nome):
+    """Proxima foto da pessoa: alterna nao-controle e controle (posicoes 2, 4, 6...).
+
+    Os controles saem na ordem fixa ORDEM_CONTROLES ate a pessoa ter visto os 50;
+    as demais saem na ordem da pessoa. Um controle pulado uma vez volta no lugar de
+    uma nao-controle depois de ESPERA_CONTROLE_PULADO fotos.
+    """
     feitos = ler_rotulos(nome)
-    for arquivo in ordem_da_pessoa(nome):
-        if arquivo not in feitos:
-            return arquivo
-    return None
+    adiados = ADIADOS.get(nome, {})
+    processadas = len(feitos) + len(adiados)
+    n_controle = sum(1 for a in feitos if a in CONTROLES) + len(adiados)
+    n_demais = len(feitos) - sum(1 for a in feitos if a in CONTROLES)
+
+    controles = [a for a in ORDEM_CONTROLES if a not in feitos and a not in adiados]
+    demais = [a for a in ordem_demais(nome) if a not in feitos]
+    maduros = [a for a, pos in adiados.items() if processadas >= pos + ESPERA_CONTROLE_PULADO]
+
+    if controles and n_demais > n_controle:
+        return controles[0]
+    if maduros:
+        return maduros[0]
+    if demais:
+        return demais[0]
+    if controles:
+        return controles[0]
+    return next(iter(adiados), None)
 
 
 def montar_linha(nome, dados):
@@ -249,10 +277,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(estado(nome))
             if url.path == "/api/rotulo":
                 linha = montar_linha(nome, dados)
+                arquivo = linha["nome_arquivo"]
                 with TRAVA:
                     rotulos = ler_rotulos(nome)
-                    rotulos[linha["nome_arquivo"]] = linha
-                    gravar_rotulos(nome, rotulos)
+                    adiados = ADIADOS.setdefault(nome, {})
+                    ja = JA_ADIADOS.setdefault(nome, set())
+                    if (linha["pulada"] == 1 and arquivo in CONTROLES
+                            and arquivo not in rotulos and arquivo not in ja):
+                        # Primeiro X num controle: nao grava, volta mais adiante.
+                        adiados[arquivo] = len(rotulos) + len(adiados)
+                        ja.add(arquivo)
+                    else:
+                        adiados.pop(arquivo, None)
+                        rotulos[arquivo] = linha
+                        gravar_rotulos(nome, rotulos)
                 return self.json({"ok": True, **estado(nome)})
         except ValueError as e:
             return self.erro(400, str(e))

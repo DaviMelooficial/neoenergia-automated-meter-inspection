@@ -1,0 +1,9 @@
+# Fotos e dados do cliente (LGPD): nada disto pode ser versionado.
+imagens/
+rotulos/
+saida/
+manifesto.csv
+*.zip
+
+__pycache__/
+.DS_Store

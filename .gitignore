@@ -253,3 +253,11 @@ CRIPS-DM/.obsidian/cache
 CRIPS-DM/.obsidian/plugins/
 CRIPS-DM/.obsidian/themes/
 CRIPS-DM/.trash/
+
+# Rotulador (Lab 2): fotos, manifesto e rotulos tem nomes/imagens do cliente.
+# A pasta rotulador/ tem o proprio .gitignore; aqui fica a rede de seguranca.
+rotulador/imagens/
+rotulador/rotulos/
+rotulador/saida/
+rotulador/manifesto.csv
+*.zip

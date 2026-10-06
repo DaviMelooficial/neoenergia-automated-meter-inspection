@@ -33,14 +33,12 @@ AQUI = os.path.dirname(os.path.abspath(__file__))
 PASTA_IMAGENS = os.path.join(AQUI, "imagens")
 PASTA_ROTULOS = os.path.join(AQUI, "rotulos")
 MANIFESTO = os.path.join(AQUI, "manifesto.csv")
+CONTROLE = os.path.join(AQUI, "controle.dat")
 PAGINA = os.path.join(AQUI, "pagina.html")
 
 PORTA_PADRAO = 8765
 TENTATIVAS_PORTA = 20
-# Ordem dos controles: fixa e igual para todos (seed do pool, nao do nome), para que
-# quem faz poucas fotos veja os mesmos primeiros controles que os colegas.
-SEED_CONTROLES = 20260706
-# Controle pulado volta depois de N fotos (uma vez so).
+# Controle pulado volta depois de pelo menos N outras fotos (uma vez so).
 ESPERA_CONTROLE_PULADO = 3
 
 CENAS = ("digital", "eletromecanico", "ocorrencia", "nao_medidor")
@@ -60,25 +58,36 @@ def normalizar_nome(nome):
     return limpo.strip("_")[:40]
 
 
+def hash_nome(arquivo):
+    return hashlib.sha256(arquivo.encode("utf-8")).hexdigest()
+
+
 def carregar_manifesto():
     if not os.path.exists(MANIFESTO):
         return []
     with open(MANIFESTO, encoding="utf-8", newline="") as f:
-        return [{"arquivo": r["arquivo"], "lote": r["lote"], "controle": r["controle"] == "1"}
-                for r in csv.DictReader(f)]
+        return [{"arquivo": r["arquivo"], "lote": r["lote"]} for r in csv.DictReader(f)]
+
+
+def carregar_controles():
+    """Fotos de controle na ordem fixa, igual para todas as pessoas.
+
+    A lista vem de controle.dat como sha256 do nome do arquivo (gerado pelo
+    preparar.py), e nao como coluna do manifesto: a pasta vai zipada para os
+    colegas e o manifesto aberto no Excel revelaria quais fotos sao controle.
+    A ordem fixa faz quem rotula poucas fotos ver os mesmos primeiros controles
+    que os colegas, maximizando os pares para o kappa.
+    """
+    if not os.path.exists(CONTROLE):
+        return []
+    por_hash = {hash_nome(p["arquivo"]): p["arquivo"] for p in POOL}
+    with open(CONTROLE, encoding="ascii") as f:
+        return [por_hash[h] for h in (linha.strip() for linha in f) if h in por_hash]
 
 
 POOL = carregar_manifesto()
 POR_ARQUIVO = {p["arquivo"]: p for p in POOL}
-
-
-def _ordem_controles():
-    controles = sorted(p["arquivo"] for p in POOL if p["controle"])
-    random.Random(SEED_CONTROLES).shuffle(controles)
-    return controles
-
-
-ORDEM_CONTROLES = _ordem_controles()
+ORDEM_CONTROLES = carregar_controles()
 CONTROLES = set(ORDEM_CONTROLES)
 
 # Controles pulados uma vez nesta execucao do app: nome -> {arquivo: posicao em que pulou}.
@@ -91,7 +100,7 @@ JA_ADIADOS = {}
 def ordem_demais(nome):
     """Fotos que nao sao de controle, em ordem propria de cada pessoa (seed do nome)."""
     rng = random.Random(int(hashlib.sha256(nome.encode()).hexdigest(), 16))
-    demais = sorted(p["arquivo"] for p in POOL if not p["controle"])
+    demais = sorted(p["arquivo"] for p in POOL if p["arquivo"] not in CONTROLES)
     rng.shuffle(demais)
     return demais
 
@@ -179,10 +188,16 @@ def montar_linha(nome, dados):
     if cena not in CENAS:
         raise ValueError("cena obrigatoria")
     legivel = dados.get("legivel")
-    if legivel not in (0, 1):
-        raise ValueError("legivel obrigatorio")
+    if type(legivel) is not int or legivel not in (0, 1):
+        raise ValueError("legivel obrigatorio (0 ou 1)")
     defeitos = dados.get("defeitos") or {}
-    linha.update({d: 1 if defeitos.get(d) else 0 for d in DEFEITOS})
+    if not isinstance(defeitos, dict):
+        raise ValueError("defeitos invalidos")
+    for d in DEFEITOS:
+        valor = defeitos.get(d, 0)
+        if type(valor) is not int or valor not in (0, 1):
+            raise ValueError("defeito %s deve ser 0 ou 1" % d)
+        linha[d] = valor
     if cena == "nao_medidor":
         linha.update({d: 0 for d in DEFEITOS})
         legivel = 0
@@ -266,7 +281,14 @@ class Handler(BaseHTTPRequestHandler):
             tamanho = int(self.headers.get("Content-Length", 0))
             if tamanho > 100000:
                 return self.erro(413, "corpo grande demais")
+            # Outro site aberto no navegador nao pode gravar aqui (so a propria pagina).
+            origem = self.headers.get("Origin")
+            porta = self.server.server_address[1]
+            if origem and origem not in ("http://127.0.0.1:%d" % porta, "http://localhost:%d" % porta):
+                return self.erro(403, "origem nao permitida")
             dados = json.loads(self.rfile.read(tamanho) or b"{}")
+            if not isinstance(dados, dict):
+                raise ValueError("corpo deve ser um objeto JSON")
             nome = normalizar_nome(str(dados.get("nome", "")))
             if not nome:
                 raise ValueError("nome obrigatorio")
@@ -284,16 +306,21 @@ class Handler(BaseHTTPRequestHandler):
                     ja = JA_ADIADOS.setdefault(nome, set())
                     if (linha["pulada"] == 1 and arquivo in CONTROLES
                             and arquivo not in rotulos and arquivo not in ja):
-                        # Primeiro X num controle: nao grava, volta mais adiante.
-                        adiados[arquivo] = len(rotulos) + len(adiados)
+                        # Primeiro X num controle: nao grava, volta mais adiante. Guarda
+                        # quantas fotos ja tinham passado contando com esta.
                         ja.add(arquivo)
+                        adiados[arquivo] = len(rotulos) + len(adiados) + 1
                     else:
-                        adiados.pop(arquivo, None)
                         rotulos[arquivo] = linha
                         gravar_rotulos(nome, rotulos)
+                        adiados.pop(arquivo, None)
                 return self.json({"ok": True, **estado(nome)})
         except ValueError as e:
             return self.erro(400, str(e))
+        except OSError:
+            # No Windows o Excel trava o arquivo aberto e o os.replace falha.
+            return self.erro(409, "Nao consegui gravar o rotulos.csv. Feche o arquivo rotulos.csv "
+                                  "(ex.: Excel) e tente de novo.")
         self.erro(404, "nao encontrado")
 
     def servir_imagem(self, nome_arquivo):

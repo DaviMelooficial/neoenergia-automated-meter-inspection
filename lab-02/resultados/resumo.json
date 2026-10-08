@@ -1,0 +1,322 @@
+{
+ "fotos_rotuladas": 329,
+ "rotuladores": 3,
+ "rotulos_sinteticos": false,
+ "kappa": {
+  "cena": 0.744,
+  "reflexo": 0.41,
+  "fora_de_foco": 0.352,
+  "tampa_suja": 0.148,
+  "enquadramento": 0.355,
+  "display_apagado": 0.181,
+  "legivel": 0.817
+ },
+ "fotos_dupla_rotulagem": 117,
+ "particao": {
+  "treino": {
+   "fotos_finais": 6285,
+   "removidas_vazamento": 0
+  },
+  "validacao": {
+   "fotos_finais": 3063,
+   "removidas_vazamento": 0
+  },
+  "teste": {
+   "fotos_finais": 2992,
+   "removidas_vazamento": 0
+  }
+ },
+ "rotuladas_por_conjunto": {
+  "treino": 163,
+  "teste": 84,
+  "validacao": 82
+ },
+ "parametros": {
+  "ajuste fino (tudo destravado), 3 cabeças": {
+   "total": 932778,
+   "treinaveis": 932778
+  },
+  "extração (extrator congelado), 3 cabeças": {
+   "total": 932778,
+   "treinaveis": 5770
+  },
+  "ajuste fino, 2 cabeças (cena+defeitos, = esqueleto)": {
+   "total": 932201,
+   "treinaveis": 932201
+  },
+  "extração, 2 cabeças (cena+defeitos, = esqueleto)": {
+   "total": 932201,
+   "treinaveis": 5193
+  },
+  "alternativa descartada: ResNet-18 (classificador ImageNet)": {
+   "total": 11689512,
+   "treinaveis": 11689512
+  }
+ },
+ "b3": {
+  "fotos_2mais_defeitos": 94,
+  "legiveis_com_defeito": 91,
+  "ilegiveis_sem_defeito_com_medidor": 4
+ },
+ "d1": {
+  "CE cena": 1.3863,
+  "BCE defeitos": 0.6931,
+  "BCE legível": 0.6931
+ },
+ "d2": {
+  "n_fotos": 16,
+  "perda_inicial": 2.7703,
+  "perda_final": 0.00993,
+  "passos": 42
+ },
+ "d3_validacao": {
+  "V1 extração (MobileNetV3 480×360)": {
+   "cena_macro_f1": "0.576 ± 0.010",
+   "defeitos_macro_f1": "0.491 ± 0.008",
+   "legivel_auroc": "0.873 ± 0.004"
+  },
+  "V0 + regressão logística": {
+   "cena_macro_f1": "0.335 ± 0.000",
+   "defeitos_macro_f1": "0.498 ± 0.000",
+   "legivel_auroc": "0.816 ± 0.000"
+  },
+  "V0 + floresta aleatória": {
+   "cena_macro_f1": "0.365 ± 0.015",
+   "defeitos_macro_f1": "0.404 ± 0.004",
+   "legivel_auroc": "0.782 ± 0.006"
+  }
+ },
+ "e1": {
+  "cena (top-1, softmax)": {
+   "ECE antes": 0.1556,
+   "ECE depois": 0.1426,
+   "T": 1.9041
+  },
+  "legível (sigmoide)": {
+   "ECE antes": 0.1058,
+   "ECE depois": 0.0676,
+   "T": 1.984
+  }
+ },
+ "e2": {
+  "meta": "cobertura >= 30% com risco <= 2%",
+  "limiar_validacao": 0.943850040435791,
+  "cobertura_validacao": 0.15853658536585366,
+  "risco_validacao": 0.0,
+  "cobertura_teste": 0.14457831325301204,
+  "risco_teste": 0.08333333333333333,
+  "risco_teste_sup95": 0.3386806684340324,
+  "aceita_errada_teste": 1,
+  "rejeitada_errada_teste": 0
+ },
+ "k1_latencia": [
+  {
+   "entrada": "nativa 480×360",
+   "device": "cpu",
+   "p50_ms": 19.37,
+   "p95_ms": 19.71,
+   "media_ms": 19.56
+  },
+  {
+   "entrada": "nativa 480×360",
+   "device": "mps",
+   "p50_ms": 3.14,
+   "p95_ms": 3.72,
+   "media_ms": 3.22
+  },
+  {
+   "entrada": "nativa 480×360",
+   "device": "mps lote 64 (por foto)",
+   "p50_ms": 1.65,
+   "p95_ms": 1.71,
+   "media_ms": 1.66
+  },
+  {
+   "entrada": "224 letterbox",
+   "device": "cpu",
+   "p50_ms": 8.72,
+   "p95_ms": 9.04,
+   "media_ms": 8.71
+  },
+  {
+   "entrada": "224 letterbox",
+   "device": "mps",
+   "p50_ms": 3.04,
+   "p95_ms": 3.3,
+   "media_ms": 3.09
+  },
+  {
+   "entrada": "224 letterbox",
+   "device": "mps lote 64 (por foto)",
+   "p50_ms": 0.52,
+   "p95_ms": 0.54,
+   "media_ms": 0.52
+  }
+ ],
+ "k1_metricas": {
+  "V1 extração 480×360 (nativa)": {
+   "sementes": 3,
+   "cena_macro_f1": "0.576 ± 0.010",
+   "defeitos_macro_f1": "0.491 ± 0.008",
+   "legivel_auroc": "0.873 ± 0.004",
+   "f1_fora_de_foco": "0.552 ± 0.010",
+   "f1_reflexo": "0.574 ± 0.028",
+   "f1_tampa_suja": "0.437 ± 0.020"
+  },
+  "V1 extração 224 letterbox": {
+   "sementes": 3,
+   "cena_macro_f1": "0.518 ± 0.015",
+   "defeitos_macro_f1": "0.496 ± 0.013",
+   "legivel_auroc": "0.908 ± 0.001",
+   "f1_fora_de_foco": "0.566 ± 0.009",
+   "f1_reflexo": "0.561 ± 0.024",
+   "f1_tampa_suja": "0.439 ± 0.020"
+  }
+ },
+ "k1_decisao": "qualidade usa 224 porque nenhuma métrica de qualidade melhora mais que 0.02 na nativa (Δdefeitos_macro_f1 = -0.005 ± 0.006; Δf1_fora_de_foco = -0.013 ± 0.018; Δlegivel_auroc = -0.035 ± 0.005) e a latência em CPU cai 55% (19.4 → 8.7 ms p50)",
+ "k2": {
+  "fontes": 37,
+  "degradadas_por_fonte": 4,
+  "exemplos_sinteticos": 185,
+  "queda": {
+   "reflexo_AUROC": 0.198,
+   "reflexo_F1": 0.19,
+   "fora_de_foco_AUROC": 0.003,
+   "fora_de_foco_F1": -0.057,
+   "tampa_suja_AUROC": 0.156,
+   "tampa_suja_F1": 0.317,
+   "enquadramento_AUROC": 0.232,
+   "enquadramento_F1": 0.196,
+   "display_apagado_AUROC": null,
+   "display_apagado_F1": null,
+   "legivel_AUROC": 0.264,
+   "legivel_F1": 0.128
+  }
+ },
+ "k3": {
+  "V0 Laplaciano puro": {
+   "cobertura val": 0.0244,
+   "risco val": 0.0,
+   "cobertura teste": 0.0,
+   "risco teste": NaN,
+   "risco teste sup95": NaN,
+   "risco total val (cob=100%)": 0.4512
+  },
+  "V0 logística (12 features)": {
+   "cobertura val": 0.0488,
+   "risco val": 0.0,
+   "cobertura teste": 0.0,
+   "risco teste": NaN,
+   "risco teste sup95": NaN,
+   "risco total val (cob=100%)": 0.2561
+  },
+  "V0 floresta (12 features)": {
+   "cobertura val": 0.1951,
+   "risco val": 0.0,
+   "cobertura teste": 0.1687,
+   "risco teste": 0.0,
+   "risco teste sup95": 0.1926,
+   "risco total val (cob=100%)": 0.3171
+  },
+  "V1 MobileNetV3 (calibrada)": {
+   "cobertura val": 0.1585,
+   "risco val": 0.0,
+   "cobertura teste": 0.1446,
+   "risco teste": 0.0833,
+   "risco teste sup95": 0.3387,
+   "risco total val (cob=100%)": 0.2073
+  }
+ },
+ "k4": {
+  "metricas": {
+   "multitarefa (cena+qualidade)": {
+    "sementes": 3,
+    "cena_macro_f1": "0.570 ± 0.015",
+    "defeitos_macro_f1": "0.460 ± 0.054",
+    "legivel_auroc": "0.909 ± 0.003",
+    "legivel_f1": "0.744 ± 0.022"
+   },
+   "separado: só cena": {
+    "sementes": 3,
+    "cena_macro_f1": "0.590 ± 0.024",
+    "defeitos_macro_f1": "n/d",
+    "legivel_auroc": "n/d",
+    "legivel_f1": "n/d"
+   },
+   "separado: só qualidade": {
+    "sementes": 3,
+    "cena_macro_f1": "n/d",
+    "defeitos_macro_f1": "0.443 ± 0.013",
+    "legivel_auroc": "0.873 ± 0.012",
+    "legivel_f1": "0.746 ± 0.020"
+   }
+  },
+  "custo": [
+   {
+    "desenho": "multitarefa",
+    "device": "cpu",
+    "parâmetros": 932778,
+    "p50_ms": 19.94,
+    "p95_ms": 24.87,
+    "media_ms": 20.63
+   },
+   {
+    "desenho": "2 modelos separados",
+    "device": "cpu",
+    "parâmetros": 1859786,
+    "p50_ms": 39.54,
+    "p95_ms": 43.89,
+    "media_ms": 40.1
+   },
+   {
+    "desenho": "multitarefa",
+    "device": "mps",
+    "parâmetros": 932778,
+    "p50_ms": 3.38,
+    "p95_ms": 5.72,
+    "media_ms": 3.66
+   },
+   {
+    "desenho": "2 modelos separados",
+    "device": "mps",
+    "parâmetros": 1859786,
+    "p50_ms": 5.72,
+    "p95_ms": 6.31,
+    "media_ms": 5.83
+   }
+  ],
+  "decisao": "MULTITAREFA: nenhuma cabeça perde mais que 0.02 ao compartilhar (Δcena_macro_f1 = -0.020 ± 0.014; Δdefeitos_macro_f1 = +0.017 ± 0.045; Δlegivel_auroc = +0.036 ± 0.013); usa 932,778 parâmetros em vez de 1,859,786 e a latência em CPU cai 50% (39.5 → 19.9 ms p50)"
+ },
+ "curva_dados": {
+  "V0 logística|50": {
+   "cena_macro_f1": 0.399,
+   "defeitos_macro_f1": 0.434,
+   "legivel_auroc": 0.793
+  },
+  "V0 logística|100": {
+   "cena_macro_f1": 0.442,
+   "defeitos_macro_f1": 0.48,
+   "legivel_auroc": 0.803
+  },
+  "V0 logística|163": {
+   "cena_macro_f1": 0.335,
+   "defeitos_macro_f1": 0.498,
+   "legivel_auroc": 0.816
+  },
+  "V1 extração|50": {
+   "cena_macro_f1": 0.504,
+   "defeitos_macro_f1": 0.469,
+   "legivel_auroc": 0.873
+  },
+  "V1 extração|100": {
+   "cena_macro_f1": 0.552,
+   "defeitos_macro_f1": 0.482,
+   "legivel_auroc": 0.858
+  },
+  "V1 extração|163": {
+   "cena_macro_f1": 0.58,
+   "defeitos_macro_f1": 0.499,
+   "legivel_auroc": 0.873
+  }
+ }
+}

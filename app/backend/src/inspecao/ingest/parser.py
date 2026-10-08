@@ -40,7 +40,7 @@ def limpar(valor: str | None) -> str | None:
 def dividir_medidores(bruto: str | None) -> list[str]:
     """Separa a coluna de medidor por barra.
 
-    Chega a 8 medidores em uma linha e aceita alfanumerico (ex.: F50081),
+    Chega a 8 medidores em uma linha e aceita alfanumerico (ex.: F00001),
     por isso o retorno e sempre lista de texto, nunca inteiro.
     """
     valor = limpar(bruto)

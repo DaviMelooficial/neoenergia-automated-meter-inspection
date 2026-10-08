@@ -41,12 +41,12 @@ def test_valor_real_sobrevive():
 
 
 def test_medidor_simples():
-    assert dividir_medidores("3231111165") == ["3231111165"]
+    assert dividir_medidores("1000000001") == ["1000000001"]
 
 
 def test_medidor_alfanumerico_nao_vira_int():
-    medidores = dividir_medidores("5256269114/F50081")
-    assert medidores == ["5256269114", "F50081"]
+    medidores = dividir_medidores("1000000004/F00001")
+    assert medidores == ["1000000004", "F00001"]
     assert all(isinstance(m, str) for m in medidores)
 
 
@@ -86,8 +86,8 @@ def test_posicao_nao_numerica_e_sinalizada():
 
 def test_le_linhas_e_numera_a_partir_de_dois():
     csv = montar_csv(
-        "3231111165;29;NA;PSP_EXTRATLEITIMPL_200526_0352_20000000007102969765_001.jpg",
-        "3245112423/3223285413;5140;T181;NA",
+        "1000000001;29;NA;PSP_EXTRATLEITIMPL_200526_0352_10000000000000000001_001.jpg",
+        "1000000002/1000000003;5140;T181;NA",
     )
     linhas = list(ler_csv(csv))
 
@@ -99,7 +99,7 @@ def test_le_linhas_e_numera_a_partir_de_dois():
     assert linhas[1].linha_csv == 3
     assert linhas[1].nota_codigo == "T181"
     assert linhas[1].foto_nome is None
-    assert linhas[1].medidores == ["3245112423", "3223285413"]
+    assert linhas[1].medidores == ["1000000002", "1000000003"]
 
 
 def test_cabecalho_diferente_falha_cedo():
@@ -117,16 +117,16 @@ def test_bom_utf8_no_cabecalho_e_tolerado():
 
 
 def test_nome_de_foto_valido():
-    p = analisar_nome_foto("PSP_EXTRATLEITIMPL_200526_0352_20000000007102969765_001.jpg")
+    p = analisar_nome_foto("PSP_EXTRATLEITIMPL_200526_0352_10000000000000000001_001.jpg")
     assert p is not None
     assert p.data == "200526"
     assert p.hora == "0352"
-    assert p.id_externo == "20000000007102969765"
+    assert p.id_externo == "10000000000000000001"
     assert p.sequencia == 1
 
 
 def test_sequencia_vai_ate_oito():
-    p = analisar_nome_foto("PSP_EXTRATLEITIMPL_030726_0121_00000000000211734196_008.jpg")
+    p = analisar_nome_foto("PSP_EXTRATLEITIMPL_030726_0121_10000000000000000002_008.jpg")
     assert p is not None and p.sequencia == 8
 
 
@@ -135,7 +135,7 @@ def test_sequencia_vai_ate_oito():
     [
         "outra_coisa.jpg",
         "PSP_EXTRATLEITIMPL_200526_0352_123_001.jpg",  # id curto demais
-        "PSP_EXTRATLEITIMPL_200526_0352_20000000007102969765_001.png",
+        "PSP_EXTRATLEITIMPL_200526_0352_10000000000000000001_001.png",
     ],
 )
 def test_nome_fora_do_padrao(nome):

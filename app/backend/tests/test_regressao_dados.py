@@ -137,7 +137,7 @@ def test_multiplos_medidores(sessao):
 
 
 def test_medidor_alfanumerico_preservado(sessao):
-    """Identificadores como F50081 nao podem ter virado inteiro nem sumido."""
+    """Identificadores como F00001 nao podem ter virado inteiro nem sumido."""
     achados = sessao.scalars(
         select(LeituraMedidor.numero).where(LeituraMedidor.numero.op("~")("[A-Za-z]")).limit(5)
     ).all()

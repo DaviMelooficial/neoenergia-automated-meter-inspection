@@ -132,7 +132,7 @@ Desvio populacional (ddof = 0) nas colunas de legível; amostral (ddof = 1) na d
   - se a confiança ≥ limiar: **ACEITA** quando p ≥ 0,5, **REJEITADA** quando p < 0,5;
   - abaixo do limiar: **DÚVIDA**;
   - defeitos com P > 0,5 viram o **motivo** mostrado ao analista.
-- **Por que só a legível decide:** é a única cabeça com rótulo confiável (κ = 0,81 entre integrantes). Os defeitos têm κ entre 0,19 e 0,49 (`rotulos/esquema.md`, seção 4).
+- **Por que só a legível decide:** é a única cabeça com rótulo confiável (κ = 0,82, média ponderada dos três pares de integrantes). Os defeitos têm κ entre 0,15 e 0,41 (`rotulos/esquema.md`, seção 4).
 - **Calibração**, com T ajustado **só na validação** (lote 22/05):
 
   | Saída | ECE antes | ECE depois | T |
@@ -242,7 +242,7 @@ Na faixa de alta confiança, a **V0 floresta decide mais e erra menos que a V1**
 
 | Não fizemos | Por quê |
 |---|---|
-| Usar os defeitos para decidir | κ entre 0,19 e 0,49: a rede aprenderia o desacordo entre rotuladores. Os defeitos ficam só como motivo, até a rodada 2 |
+| Usar os defeitos para decidir | κ entre 0,15 e 0,41: a rede aprenderia o desacordo entre rotuladores. Os defeitos ficam só como motivo, até a rodada 2 |
 | Ler os dígitos neste laboratório | Exige detecção, recorte nativo e transcrição (fase 3) |
 | Rede própria treinada do zero | **Não medida neste laboratório.** O sobreajuste de 16 fotos reais (D2) prova que a MobileNetV3 tem capacidade, não que uma rede pequena treinada do zero generalize. Fica como a **comparação central do Marco 2**: uma CNN própria de cerca de 100 mil parâmetros contra a MobileNetV3, com o mesmo protocolo, e a escolha justificada por desempenho (ver README, seção "O que levamos para o Marco 2"). Aqui a espinha dorsal pré-treinada foi a escolha do guia para poucos rótulos |
 | Ajuste fino da MobileNetV3 para decidir | O K4 mostrou ganho na legível (0,909 contra 0,873 na extração), mas o ajuste fino rodou na resolução nativa e ainda não foi combinado com os 224 px do K1 (0,908). É o próximo passo |

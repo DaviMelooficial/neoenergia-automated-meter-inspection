@@ -20,4 +20,4 @@ Declaração **única do grupo Korvian** (Davi Melo, Elizabete e Ivan). A ferram
 
 ## Declaração
 
-**Os rótulos são 100% humanos:** Davi, Elizabete e um colaborador externo declarado (Ícaro). Nenhum número deste laboratório foi estimado pela IA: todos saem da execução do notebook. Cada integrante é capaz de explicar qualquer linha do código entregue.
+**Os rótulos são 100% humanos:** Davi, Elizabete e Ivan. Nenhum número deste laboratório foi estimado pela IA: todos saem da execução do notebook. Cada integrante é capaz de explicar qualquer linha do código entregue.

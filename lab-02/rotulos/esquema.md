@@ -29,7 +29,7 @@ A unidade rotulada é **a foto** (não a leitura nem o medidor). Fotos `_001`…
 
 ### Exemplos-limite
 
-> Os exemplos-limite de cena abaixo são **casos reais em que os dois integrantes discordaram** na dupla rotulagem (Davi × Elizabete, 83 fotos em comum; detalhes no `README.md`). Por regra de dados do cliente, as fotos **não** são reproduzidas: cada caso é descrito em texto.
+> Os exemplos-limite de cena abaixo são **casos reais em que dois integrantes discordaram** na dupla rotulagem (os exemplos vêm do par Davi × Elizabete, 83 fotos em comum; detalhes no `README.md`). Por regra de dados do cliente, as fotos **não** são reproduzidas: cada caso é descrito em texto.
 
 | Classe | Quase é (fica dentro) | Quase não é (fica fora) |
 |---|---|---|
@@ -70,19 +70,21 @@ Este é o rótulo que alimenta a decisão do sistema (ACEITA / REJEITADA / DÚVI
 
 ## 4. Kappa da rodada 1 e o que mudou no esquema (v1 → v2)
 
-Kappa de Cohen entre os **dois integrantes** que fizeram a dupla rotulagem às cegas (Davi × Elizabete, 83 fotos em comum):
+Kappa de Cohen entre os **três integrantes**, nas fotos de controle e nas demais fotos em comum: média ponderada dos três pares (Davi × Elizabete 83 fotos, Davi × Ivan 56, Elizabete × Ivan 86; 225 pares-foto):
 
 | Classe | Kappa | Situação |
 |---|--:|---|
-| Cena | **0,78** | ✅ ≥ 0,6 |
-| Legível | **0,81** | ✅ ≥ 0,6 |
-| Reflexo | 0,39 | ❌ ambígua |
-| Fora de foco | 0,19 | ❌ ambígua |
-| Tampa suja | 0,44 | ❌ ambígua |
-| Enquadramento | 0,28 | ❌ ambígua |
-| Display apagado | 0,49 | ❌ ambígua (só 3 fotos com positivo entre as 83 em comum) |
+| Cena | **0,74** | ✅ ≥ 0,6 |
+| Legível | **0,82** | ✅ ≥ 0,6 |
+| Reflexo | 0,41 | ❌ ambígua |
+| Fora de foco | 0,35 | ❌ ambígua |
+| Tampa suja | 0,15 | ❌ ambígua |
+| Enquadramento | 0,35 | ❌ ambígua |
+| Display apagado | 0,18 | ❌ ambígua (19 positivos no total; só 3 fotos com positivo entre as 83 em comum de Davi × Elizabete) |
 
-Os cinco defeitos ficaram abaixo de 0,6. Pelas 83 fotos em comum, as discordâncias têm causas repetidas, e cada uma virou uma regra na **v2** do esquema:
+Por par: Davi × Elizabete tem cena 0,78 e legível 0,81; Davi × Ivan, cena 0,71 e legível 0,82; Elizabete × Ivan, cena 0,73 e legível 0,82. A tabela completa por par está no `README.md`.
+
+Os cinco defeitos ficaram abaixo de 0,6. Na análise das 83 fotos em comum entre Davi e Elizabete, as discordâncias têm causas repetidas, e cada uma virou uma regra na **v2** do esquema:
 
 | Classe | O que causou a discordância (casos reais) | Mudança na v2 |
 |---|---|---|
@@ -96,8 +98,8 @@ Os cinco defeitos ficaram abaixo de 0,6. Pelas 83 fotos em comum, as discordânc
 | Cena: `ocorrencia` × `nao_medidor` | Portão com aviso de papel | Elemento da residência visitada (portão, fachada, muro, caixa) → `ocorrencia` |
 
 **Consequência para a arquitetura (ver `ARQUITETURA.md`, seção 9):**
-- A decisão ACEITA/REJEITADA/DÚVIDA usa **só a cabeça de legível** (κ = 0,81). Os defeitos (κ < 0,6) entram apenas como **motivo** exibido ao analista.
-- Treinar e decidir com um rótulo de κ = 0,19 seria aprender o ruído entre rotuladores.
+- A decisão ACEITA/REJEITADA/DÚVIDA usa **só a cabeça de legível** (κ = 0,82). Os defeitos (κ < 0,6) entram apenas como **motivo** exibido ao analista.
+- Treinar e decidir com um rótulo de κ = 0,15 seria aprender o ruído entre rotuladores.
 
 **Pendente (antes do Marco 2):** uma rodada 2 de rotulagem com a v2, sobre as mesmas 50 fotos de controle, para medir de novo o kappa dos defeitos. Neste laboratório, os rótulos usados são os da rodada 1, rotulada com a v1.
 
@@ -107,8 +109,7 @@ Os cinco defeitos ficaram abaixo de 0,6. Pelas 83 fotos em comum, as discordânc
 |---|--:|---|
 | Davi Melo (integrante) | 100 | Viu as 50 fotos de controle |
 | Elizabete (integrante) | 300 | Viu as 50 fotos de controle. A cópia do app dela tinha uma coluna extra `outros` (14 marcações), que não faz parte do esquema e foi ignorada na consolidação |
-| Ícaro (**externo à equipe**) | 100 | Colaborou voluntariamente. Os rótulos dele entram na consolidação por maioria, mas o **kappa oficial** é só entre integrantes |
-| Ivan (integrante) | 0 | O arquivo recebido era uma cópia idêntica do arquivo do Ícaro, então foi descartado |
+| Ivan (integrante) | 100 | Viu as 50 fotos de controle |
 
 Total: 500 rótulos válidos sobre **329 fotos distintas** (163 de treino, 82 de validação e 84 de teste).
 

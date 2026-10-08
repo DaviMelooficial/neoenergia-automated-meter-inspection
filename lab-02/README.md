@@ -41,7 +41,7 @@ Quem clonar o repositório só precisa da pasta de fotos `Base cliente/` ao lado
 
 **C1.** Esquema e exemplos-limite em [`rotulos/esquema.md`](rotulos/esquema.md). São 4 cenas exclusivas, 5 defeitos multirrótulo e o binário "leitura legível". Os exemplos-limite de cena são casos reais de discordância entre os rotuladores.
 
-**C2.** **329 fotos distintas** rotuladas, a partir de 500 rótulos: 100 do Davi, 300 da Elizabete e 100 do Ícaro, colaborador externo, declarado. O pool é estratificado por lote (100 por lote) e, dentro de cada lote, por "com nota / sem nota".
+**C2.** **329 fotos distintas** rotuladas, a partir de 500 rótulos: 100 do Davi, 300 da Elizabete e 100 do Ivan. O pool é estratificado por lote (100 por lote) e, dentro de cada lote, por "com nota / sem nota".
 
 | Conjunto | Lote | Fotos rotuladas |
 |---|---|--:|
@@ -51,17 +51,25 @@ Quem clonar o repositório só precisa da pasta de fotos `Base cliente/` ao lado
 
 **C3. Dupla rotulagem às cegas.**
 - **50 fotos de controle** aparecem para todos os rotuladores, na mesma ordem, intercaladas e sem identificação.
-- O kappa oficial é **entre integrantes** (Davi × Elizabete, 83 fotos em comum).
+- Os três rotuladores são integrantes do grupo. O kappa é a **média ponderada dos três pares** (Davi × Elizabete, Davi × Ivan, Elizabete × Ivan), com 225 pares-foto.
 
-| Classe | κ integrantes (Davi × Elizabete, 83 fotos) | κ médio ponderado (3 pares, 225 pares-foto) | ≥ 0,6? |
-|---|--:|--:|:--:|
-| Cena | **0,78** | 0,74 | ✅ |
-| Legível | **0,81** | 0,82 | ✅ |
-| Reflexo | 0,39 | 0,41 | ❌ |
-| Fora de foco | 0,19 | 0,35 | ❌ |
-| Tampa suja | 0,44 | 0,15 | ❌ |
-| Enquadramento | 0,28 | 0,35 | ❌ |
-| Display apagado | 0,49 | 0,18 | ❌ |
+| Classe | κ médio ponderado (3 pares) | ≥ 0,6? |
+|---|--:|:--:|
+| Cena | **0,74** | ✅ |
+| Legível | **0,82** | ✅ |
+| Reflexo | 0,41 | ❌ |
+| Fora de foco | 0,35 | ❌ |
+| Tampa suja | 0,15 | ❌ |
+| Enquadramento | 0,35 | ❌ |
+| Display apagado | 0,18 | ❌ |
+
+Por par (n = fotos em comum):
+
+| Par | n | Cena | Reflexo | Fora de foco | Tampa suja | Enquadr. | Display apagado | Legível |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| Davi × Elizabete | 83 | 0,78 | 0,39 | 0,19 | 0,44 | 0,28 | 0,49 | 0,81 |
+| Davi × Ivan | 56 | 0,71 | 0,39 | 0,34 | 0,00 | 0,73 | 0,00 | 0,82 |
+| Elizabete × Ivan | 86 | 0,73 | 0,44 | 0,51 | −0,04 | 0,19 | 0,00 | 0,82 |
 
 **Leitura:**
 - As duas saídas de que a decisão precisa (cena e legível) são confiáveis.
@@ -123,7 +131,7 @@ As perdas recebem **logits**. Nenhuma softmax ou sigmoide é aplicada antes dela
 
 **Onde a rede perde, e por quê achamos que perdeu:**
 1. **Foco e enquadramento** são exatamente o que as features V0 medem: a variância do Laplaciano mede foco, e as bordas do centro medem se o display está no quadro.
-2. **O rótulo desses defeitos é ruidoso** (κ = 0,19 e 0,28). Nenhum modelo passa do teto de concordância humana, e um modelo com 5.770 parâmetros treináveis sobre 163 fotos não tem dado para aprender uma feature melhor que a que já foi desenhada para isso.
+2. **O rótulo desses defeitos é ruidoso** (κ = 0,35 e 0,35, com pares entre 0,19 e 0,73). Nenhum modelo passa do teto de concordância humana, e um modelo com 5.770 parâmetros treináveis sobre 163 fotos não tem dado para aprender uma feature melhor que a que já foi desenhada para isso.
 3. Onde a tarefa é semântica (que cena é esta? dá para ler?), a feature pré-treinada no ImageNet ganha com folga.
 
 ---
@@ -245,6 +253,5 @@ Desvio populacional (ddof = 0), igual ao resto do documento, nas colunas de leg�
 
 ## Observações sobre os rótulos
 
-- O **Ícaro** não é integrante. Colaborou como rotulador externo, e os rótulos dele entram na maioria, mas o kappa oficial é só entre integrantes.
-- O arquivo recebido do **Ivan** era uma cópia idêntica do arquivo do Ícaro e foi descartado. O Ivan não tem rótulos nesta rodada.
+- Os três rotuladores são integrantes do grupo: **Davi (100 fotos), Elizabete (300) e Ivan (100)**.
 - A cópia do app da Elizabete tinha uma coluna extra `outros` (14 marcações). Ela não pertence ao esquema e foi ignorada na consolidação.

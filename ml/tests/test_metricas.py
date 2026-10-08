@@ -79,3 +79,14 @@ def test_curva_cobertura_risco_e_limiar():
 
 def test_limite_superior_regra_dos_tres():
     assert limite_superior(0, 150) == pytest.approx(3 / 150, rel=0.05)
+
+
+def test_temperatura_no_limite_quando_saida_nao_discrimina():
+    from mlinsp.calibracao import t_no_limite
+
+    rng = np.random.default_rng(1)
+    y = rng.integers(0, 2, 400)
+    logits = rng.normal(0, 5, 400)  # ruido puro, confiante: so achatar ajuda
+    T = ajustar_temperatura(logits, y, "sigmoide")
+    assert t_no_limite(T)
+    assert not t_no_limite(1.0)

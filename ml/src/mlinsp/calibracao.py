@@ -52,15 +52,27 @@ def _nll_sigmoide(T: float, logits, y):
     return np.mean(np.logaddexp(0, z) - y * z)
 
 
+LIMITES_T = (0.05, 20.0)
+
+
 def ajustar_temperatura(logits: np.ndarray, y: np.ndarray, tipo: str = "softmax") -> float:
-    """T > 0 que minimiza a NLL em (logits, y). Busca em log T no intervalo [0,05; 20]."""
+    """T > 0 que minimiza a NLL em (logits, y). Busca em log T dentro de LIMITES_T.
+
+    T no limite superior quer dizer que a NLL so cai achatando tudo para o uniforme: a saida
+    nao discrimina melhor que chutar a frequencia (ver `t_no_limite`)."""
     y = np.asarray(y).astype(int)
     if len(y) == 0:
         return 1.0
     fn = _nll_softmax if tipo == "softmax" else _nll_sigmoide
-    r = minimize_scalar(lambda lt: fn(np.exp(lt), logits, y), bounds=(np.log(0.05), np.log(20)),
+    r = minimize_scalar(lambda lt: fn(np.exp(lt), logits, y), bounds=(np.log(LIMITES_T[0]), np.log(LIMITES_T[1])),
                         method="bounded")
     return float(np.exp(r.x))
+
+
+def t_no_limite(T: float, folga: float = 0.02) -> bool:
+    """True se T ficou a menos de 2% (em log) de um dos limites da busca."""
+    lo, hi = np.log(LIMITES_T[0]), np.log(LIMITES_T[1])
+    return bool(np.log(T) <= lo + folga or np.log(T) >= hi - folga)
 
 
 def diagrama_confiabilidade(ax, confianca, acerto, n_bins: int = 10, titulo: str = "",

@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotulador de medidores</title>
+<style>
+  :root {
+    --fundo: #f4f5f7; --cartao: #ffffff; --texto: #1d2330; --suave: #5f6878; --borda: #d5d9e0;
+    --azul: #1f5fbf; --azul-claro: #e3edfb; --verde: #1d7a46; --verde-claro: #e2f4ea;
+    --laranja: #b25e00; --laranja-claro: #fdf0df; --vermelho: #c0392b; --vermelho-claro: #fbe6e3;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 16px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         background: var(--fundo); color: var(--texto); }
+  .tela { display: none; height: 100%; }
+  .tela.ativa { display: flex; }
+  kbd { display: inline-block; min-width: 1.6em; padding: 1px 6px; border: 1px solid var(--borda);
+        border-bottom-width: 2px; border-radius: 5px; background: #fff; color: var(--texto);
+        font: 600 13px/1.3 ui-monospace, Menlo, Consolas, monospace; text-align: center; }
+
+  /* Inicio e fim */
+  .centro { margin: auto; width: min(460px, 100% - 32px); background: var(--cartao);
+            border: 1px solid var(--borda); border-radius: 14px; padding: 28px; }
+  .centro h1 { margin: 0 0 6px; font-size: 24px; }
+  .centro p { color: var(--suave); margin: 0 0 18px; }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; }
+  input { width: 100%; font-size: 18px; padding: 10px 12px; border: 1px solid var(--borda);
+          border-radius: 8px; }
+  input:focus { outline: 2px solid var(--azul); border-color: var(--azul); }
+  .info { min-height: 1.4em; margin-top: 6px; color: var(--suave); font-size: 14px; }
+  .botao-principal { width: 100%; margin-top: 20px; padding: 13px; font-size: 18px; font-weight: 600;
+                     color: #fff; background: var(--azul); border: 0; border-radius: 9px; cursor: pointer; }
+  .botao-principal:disabled { opacity: .5; cursor: default; }
+  .aviso { background: var(--vermelho-claro); color: var(--vermelho); padding: 10px 12px;
+           border-radius: 8px; margin-bottom: 12px; display: none; }
+  .caminho { font: 14px ui-monospace, Menlo, Consolas, monospace; background: var(--fundo);
+             padding: 10px; border-radius: 8px; word-break: break-all; color: var(--texto); }
+
+  /* Rotulagem */
+  #tela-rotular { flex-direction: column; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 18px; background: var(--cartao);
+           border-bottom: 1px solid var(--borda); }
+  header .quem { font-weight: 600; }
+  .progresso { flex: 1; }
+  .progresso .texto { font-size: 14px; color: var(--suave); display: flex; justify-content: space-between; }
+  .barra { height: 8px; background: var(--fundo); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+  .barra div { height: 100%; width: 0; background: var(--azul); transition: width .2s; }
+  .modo-correcao { display: none; background: var(--laranja-claro); color: var(--laranja);
+                   padding: 3px 10px; border-radius: 6px; font-weight: 600; font-size: 14px; }
+  .modo-correcao.on { display: inline-block; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 460px; gap: 16px; padding: 12px 16px;
+         min-height: 0; }
+  .foto { display: flex; align-items: center; justify-content: center; background: #20242c;
+          border-radius: 12px; min-height: 0; position: relative; }
+  /* Altura fixa da area util: a foto (360x480) e ampliada mantendo 3:4. */
+  .foto img { height: calc(100vh - 100px); max-width: 100%; aspect-ratio: 3 / 4; object-fit: contain;
+              cursor: zoom-in; }
+  .foto .dica { position: absolute; bottom: 10px; right: 12px; color: #c9ced8; font-size: 13px; }
+  .painel { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .grupo { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 10px 12px; }
+  .grupo h2 { margin: 0 0 7px; font-size: 14px; text-transform: uppercase; letter-spacing: .04em;
+              color: var(--suave); }
+  .grupo h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .grupo.falta { border-color: var(--vermelho); background: var(--vermelho-claro); animation: tremer .3s; }
+  @keyframes tremer { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+  .opcoes { display: grid; gap: 8px; }
+  .opcoes.duas { grid-template-columns: 1fr 1fr; }
+  .op { display: flex; align-items: center; gap: 10px; text-align: left; width: 100%; padding: 8px 10px;
+        font: inherit; color: var(--texto); background: #fff; border: 2px solid var(--borda);
+        border-radius: 9px; cursor: pointer; }
+  .op:hover { border-color: #9aa3b2; }
+  .op .t { font-weight: 600; display: block; }
+  .op .s { font-size: 13px; color: var(--suave); display: block; }
+  .op.sel { border-color: var(--azul); background: var(--azul-claro); }
+  .op.def.sel { border-color: var(--laranja); background: var(--laranja-claro); }
+  .op.sim.sel { border-color: var(--verde); background: var(--verde-claro); }
+  .op.nao.sel { border-color: var(--vermelho); background: var(--vermelho-claro); }
+  .op:disabled { opacity: .4; cursor: not-allowed; }
+  .acoes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .acoes button { padding: 10px 6px; font: inherit; font-size: 14px; border: 1px solid var(--borda);
+                  border-radius: 9px; background: #fff; cursor: pointer; }
+  .acoes .salvar { grid-column: 1 / -1; padding: 11px; font-size: 17px; font-weight: 600; color: #fff;
+                   background: var(--azul); border: 0; }
+  .atalhos-extra { font-size: 13px; color: var(--suave); text-align: center; }
+
+  /* Sobreposicoes */
+  .sobre { display: none; position: fixed; inset: 0; background: rgba(15, 18, 24, .85); z-index: 10; }
+  .sobre.on { display: flex; }
+  #zoom { overflow: auto; }
+  #zoom img { margin: auto; height: 96vh; aspect-ratio: 3 / 4; object-fit: contain; cursor: zoom-in;
+              transition: transform .15s; }
+  #zoom img.perto { transform: scale(2.2); cursor: zoom-out; }
+  #zoom .fechar { position: fixed; top: 14px; right: 18px; color: #fff; font-size: 14px; }
+  #ajuda .caixa { margin: auto; width: min(680px, 100% - 32px); max-height: 90vh; overflow-y: auto;
+                  background: var(--cartao); border-radius: 14px; padding: 22px 26px; }
+  #ajuda h3 { margin: 16px 0 6px; }
+  #ajuda dl { margin: 0; }
+  #ajuda dt { font-weight: 600; margin-top: 8px; }
+  #ajuda dd { margin: 2px 0 0 0; color: var(--suave); }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    .foto img { height: 60vh; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 1. Inicio -->
+<section id="tela-inicio" class="tela ativa">
+  <form class="centro" id="form-inicio" autocomplete="off">
+    <h1>Rotulador de medidores</h1>
+    <p>Grupo Korvian · Lab 2. Seus rótulos são salvos a cada foto.</p>
+    <div class="aviso" id="aviso-manifesto">As fotos não foram encontradas nesta pasta. Peça a pasta completa ao Davi.</div>
+    <label for="nome">Seu nome</label>
+    <input id="nome" placeholder="ex.: Maria Souza" required>
+    <div class="info" id="info-nome"></div>
+    <label for="quantidade">Quantas fotos quer rotular agora?</label>
+    <input id="quantidade" type="number" min="1" value="40" required>
+    <button class="botao-principal" id="comecar" type="submit">Começar</button>
+  </form>
+</section>
+
+<!-- 2. Rotulagem -->
+<section id="tela-rotular" class="tela">
+  <header>
+    <span class="quem" id="quem"></span>
+    <span class="modo-correcao" id="modo-correcao">Corrigindo foto anterior</span>
+    <div class="progresso">
+      <div class="texto"><span id="prog-sessao"></span><span id="prog-total"></span></div>
+      <div class="barra"><div id="barra"></div></div>
+    </div>
+  </header>
+  <main>
+    <div class="foto">
+      <img id="img" alt="Foto do medidor">
+      <span class="dica">clique ou <kbd>Z</kbd> para ampliar</span>
+    </div>
+    <div class="painel">
+      <div class="grupo" id="g-cena">
+        <h2>Cena <small>(escolha uma)</small></h2>
+        <div class="opcoes duas">
+          <button class="op" data-cena="digital"><kbd>1</kbd><span><span class="t">Digital</span><span class="s">eletrônico, com display</span></span></button>
+          <button class="op" data-cena="eletromecanico"><kbd>2</kbd><span><span class="t">Eletromecânico</span><span class="s">roletes ou ponteiros/disco</span></span></button>
+          <button class="op" data-cena="ocorrencia"><kbd>3</kbd><span><span class="t">Cena de ocorrência</span><span class="s">caixa, fachada, portão… sem o medidor visível</span></span></button>
+          <button class="op" data-cena="nao_medidor"><kbd>4</kbd><span><span class="t">Não é medidor</span><span class="s">chão, pessoa, papel, foto preta</span></span></button>
+        </div>
+      </div>
+      <div class="grupo" id="g-defeitos">
+        <h2>Defeitos <small>(opcional, pode marcar vários)</small></h2>
+        <div class="opcoes duas">
+          <button class="op def" data-def="reflexo"><kbd>Q</kbd><span class="t">Reflexo</span></button>
+          <button class="op def" data-def="fora_de_foco"><kbd>W</kbd><span class="t">Fora de foco</span></button>
+          <button class="op def" data-def="tampa_suja"><kbd>E</kbd><span class="t">Tampa suja/embaçada</span></button>
+          <button class="op def" data-def="enquadramento"><kbd>R</kbd><span class="t">Enquadramento ruim</span></button>
+          <button class="op def" data-def="display_apagado"><kbd>T</kbd><span class="t">Display apagado</span></button>
+        </div>
+      </div>
+      <div class="grupo" id="g-legivel">
+        <h2>Leitura legível? <small>(consigo ler todos os dígitos)</small></h2>
+        <div class="opcoes duas">
+          <button class="op sim" data-leg="1"><kbd>S</kbd><span class="t">Sim</span></button>
+          <button class="op nao" data-leg="0"><kbd>N</kbd><span class="t">Não</span></button>
+        </div>
+      </div>
+      <div class="acoes">
+        <button class="salvar" id="b-salvar">Salvar e próxima <kbd>Enter</kbd></button>
+        <button id="b-voltar">Voltar <kbd>⌫</kbd></button>
+        <button id="b-pular">Pular <kbd>X</kbd></button>
+        <button id="b-ajuda">Definições <kbd>?</kbd></button>
+      </div>
+      <div class="atalhos-extra">⌫ = tecla Backspace (apagar). No Mac é a tecla <b>delete</b>.</div>
+    </div>
+  </main>
+</section>
+
+<!-- 3. Fim -->
+<section id="tela-fim" class="tela">
+  <div class="centro">
+    <h1>Obrigado!</h1>
+    <p id="fim-resumo"></p>
+    <p>Quando terminar tudo o que for fazer, compacte (zip) esta pasta e envie ao Davi:</p>
+    <div class="caminho" id="fim-pasta"></div>
+    <p style="margin-top:14px">Não comente as fotos com os colegas até todos terminarem.</p>
+    <button class="botao-principal" id="mais">Rotular mais fotos</button>
+  </div>
+</section>
+
+<div class="sobre" id="zoom"><span class="fechar"><kbd>Z</kbd> ou <kbd>Esc</kbd> para fechar · clique para aproximar</span><img id="img-zoom" alt="Foto ampliada"></div>
+
+<div class="sobre" id="ajuda"><div class="caixa">
+  <h2 style="margin-top:0">Definições <small style="font-weight:400;color:var(--suave)">(<kbd>?</kbd> ou <kbd>Esc</kbd> fecha)</small></h2>
+  <h3>Cena (uma por foto)</h3>
+  <dl>
+    <dt>1 · Digital</dt><dd>Medidor eletrônico: a leitura aparece num display (LCD/LED), com números desenhados por segmentos.</dd>
+    <dt>2 · Eletromecânico</dt><dd>Medidor mecânico: roletes numerados que giram (ciclométrico) ou relógios de ponteiro; costuma ter um disco metálico giratório.</dd>
+    <dt>3 · Cena de ocorrência</dt><dd>Foto tirada para registrar um problema de acesso: aparece a caixa, o padrão de entrada, a fachada, o portão ou um cadeado, mas o medidor não está visível.</dd>
+    <dt>4 · Não é medidor</dt><dd>Nada ligado ao medidor: chão, pessoa, documento, tela, foto preta ou totalmente borrada.</dd>
+  </dl>
+  <h3>Defeitos (marque todos que atrapalham a leitura)</h3>
+  <dl>
+    <dt>Q · Reflexo</dt><dd>Brilho de luz ou do flash sobre o vidro cobrindo parte do display ou dos números.</dd>
+    <dt>W · Fora de foco</dt><dd>Imagem tremida ou desfocada: os números ficam borrados.</dd>
+    <dt>E · Tampa suja/embaçada</dt><dd>Vidro ou tampa da caixa sujos, riscados, opacos ou com umidade por cima do medidor.</dd>
+    <dt>R · Enquadramento ruim</dt><dd>Display cortado pela borda, medidor muito longe/pequeno ou foto muito torta.</dd>
+    <dt>T · Display apagado</dt><dd>Medidor digital com o display sem nada aceso ou ilegível por estar desligado.</dd>
+  </dl>
+  <h3>Leitura legível</h3>
+  <dl>
+    <dt>S · Sim</dt><dd>Você consegue ler, com segurança, todos os dígitos da leitura de consumo.</dd>
+    <dt>N · Não</dt><dd>Falta algum dígito ou há dúvida em algum. Em "Cena de ocorrência" e "Não é medidor" fica Não automaticamente.</dd>
+  </dl>
+  <h3>Em caso de dúvida</h3>
+  <dl><dd>Escolha o que melhor descreve a foto e siga. Use <kbd>X</kbd> (pular) só se a foto não abrir ou for impossível decidir.</dd></dl>
+</div></div>
+
+<script>
+"use strict";
+const DEFEITOS = ["reflexo", "fora_de_foco", "tampa_suja", "enquadramento", "display_apagado"];
+const TECLA_CENA = {"1": "digital", "2": "eletromecanico", "3": "ocorrencia", "4": "nao_medidor"};
+const SEM_LEITURA = ["ocorrencia", "nao_medidor"];  // cenas em que legivel e sempre Nao
+const TECLA_DEF = {q: "reflexo", w: "fora_de_foco", e: "tampa_suja", r: "enquadramento", t: "display_apagado"};
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+const st = {
+  nome: "", meta: 0,
+  historico: [],   // fotos gravadas nesta sessao, em ordem
+  pos: null,       // indice no historico quando corrigindo; null = foto nova
+  atual: null,     // {arquivo, cena, defeitos, legivel, legivelAuto, segundosAntes}
+  inicio: 0, feitas: 0, total: 0, pasta: "", enviando: false,  // inicio = quando a foto atual abriu
+};
+
+async function api(caminho, corpo) {
+  const opts = corpo ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(corpo)} : {};
+  const r = await fetch(caminho, opts);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.erro || "erro");
+  return j;
+}
+
+function mostrar(id) {
+  $$(".tela").forEach((t) => t.classList.toggle("ativa", t.id === id));
+}
+
+// ---------- inicio ----------
+let espera;
+$("#nome").addEventListener("input", () => {
+  clearTimeout(espera);
+  espera = setTimeout(async () => {
+    const nome = $("#nome").value.trim();
+    if (!nome) { $("#info-nome").textContent = ""; return; }
+    try {
+      const e = await api("/api/estado?nome=" + encodeURIComponent(nome));
+      $("#info-nome").textContent = e.feitas
+        ? `Você já rotulou ${e.feitas} foto(s). Faltam ${e.restantes} de ${e.total}.`
+        : `Primeira vez com este nome. São ${e.total} fotos no total.`;
+      $("#quantidade").max = Math.max(1, e.restantes);
+    } catch (err) { $("#info-nome").textContent = ""; }
+  }, 250);
+});
+
+$("#form-inicio").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const nome = $("#nome").value.trim();
+  const meta = parseInt($("#quantidade").value, 10);
+  if (!nome || !(meta > 0)) return;
+  const e = await api("/api/sessao", {nome});
+  Object.assign(st, {nome: e.nome, meta, historico: [], pos: null, feitas: e.feitas, total: e.total, pasta: e.pasta});
+  $("#quem").textContent = e.nome;
+  if (e.restantes === 0) return fim(true);
+  mostrar("tela-rotular");
+  carregarNova();
+});
+
+// ---------- fluxo ----------
+async function carregarNova() {
+  if (st.historico.length >= st.meta) return fim(false);
+  const r = await api("/api/proxima?nome=" + encodeURIComponent(st.nome));
+  st.feitas = r.feitas;
+  if (!r.arquivo) return fim(true);
+  abrir(r.arquivo, null);
+}
+
+async function abrirDoHistorico() {
+  const arquivo = st.historico[st.pos];
+  const r = await api(`/api/rotulo?nome=${encodeURIComponent(st.nome)}&arquivo=${encodeURIComponent(arquivo)}`);
+  abrir(arquivo, r.rotulo);
+}
+
+function abrir(arquivo, rotulo) {
+  st.atual = {
+    arquivo,
+    cena: rotulo && !rotulo.pulada ? rotulo.cena : null,
+    defeitos: Object.fromEntries(DEFEITOS.map((d) => [d, !!(rotulo && !rotulo.pulada && rotulo.defeitos[d])])),
+    legivel: rotulo && !rotulo.pulada ? rotulo.legivel : null,
+    // legivel=0 imposto pela cena 3/4 (e nao escolhido pela pessoa)
+    legivelAuto: !!(rotulo && !rotulo.pulada && SEM_LEITURA.includes(rotulo.cena)),
+    segundosAntes: rotulo ? rotulo.segundos : 0,
+  };
+  st.inicio = performance.now();
+  const src = "/img/" + encodeURIComponent(arquivo);
+  $("#img").src = src;
+  $("#img-zoom").src = src;
+  $$(".grupo").forEach((g) => g.classList.remove("falta"));
+  desenhar();
+}
+
+function desenhar() {
+  const a = st.atual;
+  $$("[data-cena]").forEach((b) => b.classList.toggle("sel", b.dataset.cena === a.cena));
+  const semDefeitos = a.cena === "nao_medidor";
+  $$("[data-def]").forEach((b) => {
+    b.classList.toggle("sel", !!a.defeitos[b.dataset.def]);
+    b.disabled = semDefeitos;
+  });
+  const legTravado = a.cena === "nao_medidor" || a.cena === "ocorrencia";
+  $$("[data-leg]").forEach((b) => {
+    b.classList.toggle("sel", a.legivel === Number(b.dataset.leg));
+    b.disabled = legTravado && b.dataset.leg === "1";
+  });
+  const corrigindo = st.pos !== null;
+  $("#modo-correcao").classList.toggle("on", corrigindo);
+  const n = corrigindo ? st.pos + 1 : st.historico.length + 1;
+  $("#prog-sessao").textContent = `Foto ${n} de ${st.meta} nesta sessão`;
+  $("#prog-total").textContent = `Total feito: ${st.feitas} de ${st.total}`;
+  $("#barra").style.width = (100 * st.historico.length / st.meta) + "%";
+}
+
+function escolherCena(cena) {
+  const a = st.atual;
+  a.cena = cena;
+  if (cena === "nao_medidor") DEFEITOS.forEach((d) => (a.defeitos[d] = false));
+  if (SEM_LEITURA.includes(cena)) {
+    a.legivel = 0;
+    a.legivelAuto = true;
+  } else if (a.legivelAuto) {
+    // Saiu de ocorrencia/nao_medidor: o "Nao" foi da regra, entao a pessoa escolhe de novo.
+    a.legivel = null;
+    a.legivelAuto = false;
+  }
+  $("#g-cena").classList.remove("falta");
+  desenhar();
+}
+
+function alternarDefeito(d) {
+  if (st.atual.cena === "nao_medidor") return;
+  st.atual.defeitos[d] = !st.atual.defeitos[d];
+  desenhar();
+}
+
+function escolherLegivel(v) {
+  const c = st.atual.cena;
+  if (v === 1 && (c === "nao_medidor" || c === "ocorrencia")) return;
+  st.atual.legivel = v;
+  st.atual.legivelAuto = false;
+  $("#g-legivel").classList.remove("falta");
+  desenhar();
+}
+
+async function salvar(pulada) {
+  if (st.enviando || !st.atual) return;
+  const a = st.atual;
+  if (!pulada) {
+    const faltaCena = !a.cena, faltaLeg = a.legivel === null;
+    $("#g-cena").classList.toggle("falta", faltaCena);
+    $("#g-legivel").classList.toggle("falta", faltaLeg);
+    if (faltaCena || faltaLeg) return;
+  }
+  st.enviando = true;
+  try {
+    const segundos = a.segundosAntes + (performance.now() - st.inicio) / 1000;
+    const r = await api("/api/rotulo", {
+      nome: st.nome, arquivo: a.arquivo, pulada: !!pulada, cena: a.cena,
+      defeitos: Object.fromEntries(DEFEITOS.map((d) => [d, a.defeitos[d] ? 1 : 0])), legivel: a.legivel, segundos,
+    });
+    st.feitas = r.feitas;
+    if (st.pos === null) {
+      st.historico.push(a.arquivo);
+      await carregarNova();
+    } else {
+      st.pos += 1;
+      if (st.pos < st.historico.length) await abrirDoHistorico();
+      else { st.pos = null; await carregarNova(); }
+    }
+  } catch (err) {
+    alert("Não consegui salvar: " + err.message + "\nConfira se a janela do rotulador continua aberta.");
+  } finally {
+    st.enviando = false;
+  }
+}
+
+async function voltar() {
+  if (st.enviando) return;
+  if (st.pos === null) {
+    if (!st.historico.length) return;
+    st.pos = st.historico.length - 1;
+  } else if (st.pos > 0) {
+    st.pos -= 1;
+  } else return;
+  await abrirDoHistorico();
+}
+
+function fim(acabouPool) {
+  $("#fim-resumo").textContent = acabouPool
+    ? `Você rotulou todas as ${st.total} fotos. Total feito: ${st.feitas}.`
+    : `Você fez ${st.historico.length} foto(s) nesta sessão. Total feito: ${st.feitas} de ${st.total}.`;
+  $("#fim-pasta").textContent = st.pasta;
+  $("#mais").style.display = acabouPool ? "none" : "";
+  mostrar("tela-fim");
+}
+
+$("#mais").addEventListener("click", () => {
+  $("#nome").value = st.nome;
+  $("#nome").dispatchEvent(new Event("input"));
+  mostrar("tela-inicio");
+  $("#quantidade").focus();
+});
+
+// ---------- ampliar e ajuda ----------
+function alternar(id) { $(id).classList.toggle("on"); if (id === "#zoom") $("#img-zoom").classList.remove("perto"); }
+$("#img").addEventListener("click", () => alternar("#zoom"));
+$("#img-zoom").addEventListener("click", (ev) => {
+  const img = ev.currentTarget, r = img.getBoundingClientRect();
+  if (!img.classList.contains("perto")) {
+    img.style.transformOrigin = `${(ev.clientX - r.left) / r.width * 100}% ${(ev.clientY - r.top) / r.height * 100}%`;
+  }
+  img.classList.toggle("perto");
+  ev.stopPropagation();
+});
+$("#zoom").addEventListener("click", () => alternar("#zoom"));
+$("#ajuda").addEventListener("click", (ev) => { if (ev.target.id === "ajuda") alternar("#ajuda"); });
+
+// ---------- botoes ----------
+$$("[data-cena]").forEach((b) => b.addEventListener("click", () => escolherCena(b.dataset.cena)));
+$$("[data-def]").forEach((b) => b.addEventListener("click", () => alternarDefeito(b.dataset.def)));
+$$("[data-leg]").forEach((b) => b.addEventListener("click", () => escolherLegivel(Number(b.dataset.leg))));
+$("#b-salvar").addEventListener("click", () => salvar(false));
+$("#b-pular").addEventListener("click", () => salvar(true));
+$("#b-voltar").addEventListener("click", voltar);
+$("#b-ajuda").addEventListener("click", () => alternar("#ajuda"));
+// Botoes nao devem guardar foco: Enter/Espaco ficam so com os atalhos.
+$$("#tela-rotular button").forEach((b) => b.addEventListener("mouseup", () => b.blur()));
+
+// ---------- teclado ----------
+document.addEventListener("keydown", (ev) => {
+  if (!$("#tela-rotular").classList.contains("ativa") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const k = ev.key.toLowerCase();
+  const zoomAberto = $("#zoom").classList.contains("on"), ajudaAberta = $("#ajuda").classList.contains("on");
+  if (k === "escape") { $("#zoom").classList.remove("on"); $("#ajuda").classList.remove("on"); return; }
+  if (k === "z") { ev.preventDefault(); return alternar("#zoom"); }
+  if (k === "?" || k === "/") { ev.preventDefault(); return alternar("#ajuda"); }
+  if (zoomAberto || ajudaAberta) return;
+  if (TECLA_CENA[k]) escolherCena(TECLA_CENA[k]);
+  else if (TECLA_DEF[k]) alternarDefeito(TECLA_DEF[k]);
+  else if (k === "s") escolherLegivel(1);
+  else if (k === "n") escolherLegivel(0);
+  else if (k === "enter") salvar(false);
+  else if (k === "backspace" || k === "delete") voltar();
+  else if (k === "x") salvar(true);
+  else return;
+  ev.preventDefault();
+});
+
+api("/api/config").then((c) => {
+  if (!c.pronto) { $("#aviso-manifesto").style.display = "block"; $("#comecar").disabled = true; }
+});
+$("#nome").focus();
+</script>
+</body>
+</html>

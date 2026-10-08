@@ -1,0 +1,52 @@
+item,métrica,valor
+rótulos,fonte,humanos (rotulador)
+rótulos,fotos rotuladas / rotuladores,329 / 3
+rótulos,rotuladas treino / validação / teste,163 / 82 / 84
+C3,kappa cena / legível,0.744 / 0.817
+C4,id_externo e medidores em comum entre conjuntos,0
+B2,parâmetros totais / treináveis (extração),"932,778 / 5,770"
+D1,"CE inicial (ln 4 = 1,386) / BCE inicial (ln 2 = 0,693)",1.386 / 0.693
+D2,sobreajuste 16 fotos: perda inicial → final,2.770 → 0.0099 (42 passos)
+D3,V1 extração (MobileNetV3 480×360): cena macro-F1 | defeitos macro-F1 | legível AUROC,0.576 ± 0.010 | 0.491 ± 0.008 | 0.873 ± 0.004
+D3,V0 + regressão logística: cena macro-F1 | defeitos macro-F1 | legível AUROC,0.335 ± 0.000 | 0.498 ± 0.000 | 0.816 ± 0.000
+D3,V0 + floresta aleatória: cena macro-F1 | defeitos macro-F1 | legível AUROC,0.365 ± 0.015 | 0.404 ± 0.004 | 0.782 ± 0.006
+E1,"ECE cena (top-1, softmax): antes → depois (T)",0.156 → 0.143 (T=1.90)
+E1,ECE legível (sigmoide): antes → depois (T),0.106 → 0.068 (T=1.98)
+E2,meta,cobertura >= 30% com risco <= 2%
+E2,validação: limiar | cobertura | risco,0.944 | 15.9% | 0.000
+E2,teste: cobertura | risco | limite sup. 95%,14.5% | 0.083 | 0.339
+E2,teste: ACEITA errada | REJEITADA errada,1 | 0
+K1,latência nativa 480×360 cpu: p50 / p95 (ms),19.4 / 19.7
+K1,latência nativa 480×360 mps: p50 / p95 (ms),3.1 / 3.7
+K1,latência nativa 480×360 mps lote 64 (por foto): p50 / p95 (ms),1.7 / 1.7
+K1,latência 224 letterbox cpu: p50 / p95 (ms),8.7 / 9.0
+K1,latência 224 letterbox mps: p50 / p95 (ms),3.0 / 3.3
+K1,latência 224 letterbox mps lote 64 (por foto): p50 / p95 (ms),0.5 / 0.5
+K1,V1 extração 480×360 (nativa): defeitos macro-F1 | F1 fora_de_foco | legível AUROC,0.491 ± 0.008 | 0.552 ± 0.010 | 0.873 ± 0.004
+K1,V1 extração 224 letterbox: defeitos macro-F1 | F1 fora_de_foco | legível AUROC,0.496 ± 0.013 | 0.566 ± 0.009 | 0.908 ± 0.001
+K1,decisão,qualidade usa 224 porque nenhuma métrica de qualidade melhora mais que 0.02 na nativa (Δdefeitos_macro_f1 = -0.005 ± 0.006; Δf1_fora_de_foco = -0.013 ± 0.018; Δlegivel_auroc = -0.035 ± 0.005) e a latência em CPU cai 55% (19.4 → 8.7 ms p50)
+K2,fontes limpas rotuladas | exemplos sintéticos,37 | 185
+K2,AUROC reflexo: real | só sintético,0.684 ± 0.002 | 0.486 ± 0.004
+K2,AUROC fora_de_foco: real | só sintético,0.738 ± 0.002 | 0.735 ± 0.008
+K2,AUROC tampa_suja: real | só sintético,0.781 ± 0.009 | 0.625 ± 0.028
+K2,AUROC enquadramento: real | só sintético,0.682 ± 0.008 | 0.450 ± 0.005
+K2,AUROC display_apagado: real | só sintético,n/d | n/d
+K2,AUROC legivel: real | só sintético,0.875 ± 0.003 | 0.611 ± 0.012
+K3,V0 Laplaciano puro: cobertura val | teste (risco ≤ 2%),2.4% | 0.0%
+K3,V0 logística (12 features): cobertura val | teste (risco ≤ 2%),4.9% | 0.0%
+K3,V0 floresta (12 features): cobertura val | teste (risco ≤ 2%),19.5% | 16.9%
+K3,V1 MobileNetV3 (calibrada): cobertura val | teste (risco ≤ 2%),15.9% | 14.5%
+K4,multitarefa (cena+qualidade): cena macro-F1 | defeitos macro-F1 | legível AUROC,0.570 ± 0.015 | 0.460 ± 0.054 | 0.909 ± 0.003
+K4,separado: só cena: cena macro-F1 | defeitos macro-F1 | legível AUROC,0.590 ± 0.024 | n/d | n/d
+K4,separado: só qualidade: cena macro-F1 | defeitos macro-F1 | legível AUROC,n/d | 0.443 ± 0.013 | 0.873 ± 0.012
+K4,multitarefa cpu: parâmetros | p50 ms,"932,778 | 19.9"
+K4,2 modelos separados cpu: parâmetros | p50 ms,"1,859,786 | 39.5"
+K4,multitarefa mps: parâmetros | p50 ms,"932,778 | 3.4"
+K4,2 modelos separados mps: parâmetros | p50 ms,"1,859,786 | 5.7"
+K4,decisão,"MULTITAREFA: nenhuma cabeça perde mais que 0.02 ao compartilhar (Δcena_macro_f1 = -0.020 ± 0.014; Δdefeitos_macro_f1 = +0.017 ± 0.045; Δlegivel_auroc = +0.036 ± 0.013); usa 932,778 parâmetros em vez de 1,859,786 e a latência em CPU cai 50% (39.5 → 19.9 ms p50)"
+Bônus,V0 logística n=50: legível AUROC,0.793 ± 0.011
+Bônus,V0 logística n=100: legível AUROC,0.803 ± 0.023
+Bônus,V0 logística n=163: legível AUROC,0.816 ± 0.000
+Bônus,V1 extração n=50: legível AUROC,0.873 ± 0.008
+Bônus,V1 extração n=100: legível AUROC,0.858 ± 0.008
+Bônus,V1 extração n=163: legível AUROC,0.873 ± 0.003

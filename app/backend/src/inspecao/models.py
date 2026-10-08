@@ -121,7 +121,7 @@ class LeituraMedidor(Base):
     leitura_id: Mapped[int] = mapped_column(
         ForeignKey("leituras.id", ondelete="CASCADE"), index=True
     )
-    # Texto, nunca inteiro: existem identificadores alfanumericos como F50081.
+    # Texto, nunca inteiro: existem identificadores alfanumericos como F00001.
     numero: Mapped[str] = mapped_column(String(60), index=True)
     ordem: Mapped[int] = mapped_column(Integer)
 

@@ -106,9 +106,12 @@ def main():
     def eh_controle(arquivo):
         return hashlib.sha256(arquivo.encode("utf-8")).hexdigest() in hashes_controle
 
-    colunas = list(linhas[0].keys())
+    # Cabeçalho fixo do esquema (não o da primeira linha lida): uma cópia modificada do app
+    # com coluna extra não muda o arquivo de saída, venha ela em que ordem vier.
+    colunas = ["nome_arquivo", "lote", "rotulador"] + CLASSES + ["pulada", "segundos_na_foto", "gravado_em"]
     with open(os.path.join(PASTA_SAIDA, "todos_os_rotulos.csv"), "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=colunas)
+        # extrasaction="ignore": descarta colunas fora do esquema (ex.: "outros").
+        w = csv.DictWriter(f, fieldnames=colunas, extrasaction="ignore")
         w.writeheader()
         w.writerows(linhas)
 

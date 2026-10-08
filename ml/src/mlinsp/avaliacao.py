@@ -114,7 +114,7 @@ def treinar_baseline(x_tr: np.ndarray, alvos_tr: dict[str, np.ndarray], tipo: st
             m = modelos["cena"][0]
             proba = np.full((len(x), len(CENAS)), 1e-6)
             proba[:, m.classes_] = m.predict_proba(x)
-            out["cena"] = np.log(proba)
+            out["cena"] = np.log(np.clip(proba, 1e-6, 1))
         else:
             out["cena"] = np.zeros((len(x), len(CENAS)))
         defe = np.full((len(x), len(DEFEITOS)), -10.0)  # sem modelo: defeito ausente

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo tipos-front \
-        api-dev worker-dev front-dev test lint up down logs reset health
+        api-dev worker-dev front-dev test lint up down logs reset health lab02
 
 help:  ## lista os alvos disponiveis
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -89,8 +89,15 @@ test:  ## roda os testes de backend e frontend
 
 lint:  ## roda os linters
 	cd app/backend && uv run ruff check src tests
-	cd ml && uv run ruff check src
+	cd ml && uv run ruff check src tests
 	cd app/frontend && npm run lint
+
+# ---------------------------------------------------------------------------
+# Lab 2 (Deep Learning)
+# ---------------------------------------------------------------------------
+
+lab02:  ## consolida os rotulos e executa lab-02/lab02.ipynb do zero (saidas no .ipynb)
+	bash lab-02/executar.sh
 
 # ---------------------------------------------------------------------------
 # Stack completa

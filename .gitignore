@@ -262,3 +262,7 @@ rotulador/saida/
 rotulador/manifesto.csv
 *.zip
 rotulador/controle.dat
+
+# Lab 2: features cacheadas (vetores derivados das fotos do cliente) e checkpoints.
+lab-02/cache/
+lab-02/.ipynb_checkpoints/

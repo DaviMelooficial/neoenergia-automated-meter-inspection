@@ -15,6 +15,7 @@ Declaração **única do grupo Korvian** (Davi Melo, Elizabete e Ivan). A ferram
 
 - **Dado do cliente vazando por caminhos indiretos:** valores reais em comentários de código e em testes, e prints de tela com uma foto de cliente. Uma revisão cruzando os números do repositório com a base real pegou esses casos. Os valores foram trocados por fictícios.
 - **Afirmação sem medida:** a IA escreveu números de parâmetros por modelo separado (K4) que o notebook não mede. Ficou só a soma medida (1.859.786), conferida com o `resumo.csv`.
+- **Afirmação sem medida (rede do zero):** a IA escreveu na ficha que treinar do zero "sobreajusta" com 163 fotos, sem que isso tivesse sido testado. Trocamos por uma declaração de que essa comparação não foi medida e é o item central do Marco 2.
 - **Rótulo fraco otimista:** a primeira versão do K2 usava fotos não verificadas como "limpas". Isso inflaria a queda medida no rótulo fraco.
 
 ## Declaração

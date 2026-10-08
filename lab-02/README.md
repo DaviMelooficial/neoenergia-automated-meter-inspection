@@ -240,7 +240,8 @@ Desvio populacional (ddof = 0), igual ao resto do documento, nas colunas de leg�
 1. **Rodada 2 de rotulagem** com o esquema v2, sobre as mesmas 50 fotos de controle, para reavaliar o kappa dos defeitos.
 2. **Mais rótulos de cena** (eletromecânico e ocorrência são raros).
 3. **Juntar V0 e V1:** as features V0 entram como entrada extra da cabeça de legível. No K3 a V0 floresta ganha na alta confiança, e a V1 ganha no AUROC global.
-4. Configuração final: **multitarefa em 224**. Essa combinação ainda não foi medida junta: o K4 rodou na nativa, e a cobertura × risco do E2/K3 foi medida com a V1 em **480×360**. A curva em 224 (onde o AUROC de legível é 0,908) é a primeira medida do Marco 2.
+4. **Rede própria do zero, a comparação central do projeto.** Este laboratório usou a MobileNetV3 pré-treinada, como o guia indica para poucos rótulos, e **não mediu uma rede treinada do zero**. No Marco 2, projetamos uma CNN própria pequena (cerca de 100 mil parâmetros: 4 blocos conv-BN-ReLU-pool, pooling global e as mesmas 3 cabeças) e a comparamos com a MobileNetV3, no mesmo protocolo (partição por lote, 3 sementes, entrada 224). A escolha entre as duas será justificada por **desempenho medido**: macro-F1 de cena, AUROC de legível, parâmetros, latência e a curva de dados (50, 100, 163 rótulos). Mesmo que a rede própria perca para a pré-treinada, a curva diz se a diferença fecha com mais rótulos.
+5. Configuração final: **multitarefa em 224**. Essa combinação ainda não foi medida junta: o K4 rodou na nativa, e a cobertura × risco do E2/K3 foi medida com a V1 em **480×360**. A curva em 224 (onde o AUROC de legível é 0,908) é a primeira medida do Marco 2.
 
 ## Observações sobre os rótulos
 

@@ -80,7 +80,14 @@ duas categorias (prefixo `DISCREPANCIA` no `obs` do gabarito):
 
 **A conferência foi feita pelo agente de IA (Claude)**, lendo os recortes ampliados, e não por um
 integrante do grupo. Antes de citar qualquer número fora deste spike, o grupo precisa revisar o
-gabarito por amostragem, a começar pelas 7 discrepâncias e pelas 6 fotos ambíguas.
+gabarito por amostragem, a começar por esta lista (ids da coluna `id_amostra`):
+
+- as 7 discrepâncias: #11, 17, 40, 48, 51, 80, 102;
+- as 6 fotos ambíguas, marcadas como ilegíveis: #12, 35, 55, 65, 72, 74;
+- as 7 fotos resolvidas com a leitura registrada ao lado: os displays de duas linhas #15, 32, 52
+  e 81, e as trocas de 7 por 1 #18, 85 e 141;
+- a foto #8, cujo display mostra `99999`, possível padrão de teste do display, e que conta como
+  acerto do recorte + EasyOCR.
 
 Por que 58 fotos "legíveis" saíram como ilegíveis:
 
@@ -181,6 +188,14 @@ Limitações:
   não para comparar as abordagens de EasyOCR entre si (10,9% contra 12,0% é empate).
 - **Eletromecânico com n = 9**, todos de ciclômetro. Nenhum medidor de ponteiro entrou na amostra
   de legíveis. O 0% nessa cena é indicativo, não uma estimativa.
+- **Foto #8 (`99999`).** O `obs` marca o display como possível padrão de teste, mas a foto entrou
+  no gabarito e conta como acerto do recorte + EasyOCR. Sem ela, o melhor resultado cai para
+  10/91 = 11,0%.
+- **Ancoragem parcial no CSV em 7 fotos.** A leitura cega foi corrigida com a registrada ao lado
+  em 7 fotos: nos 4 displays de duas linhas (#15, 32, 52, 81), a linha registrada é a de cima, e
+  nas 3 trocas de 7 por 1 (#18, 85, 141) o dígito foi relido no zoom. O dígito é inequívoco no zoom,
+  mas a escolha foi guiada pela leitura registrada, então essas 7 fotos dependem em parte de
+  `posicao_lida`. Elas estão na lista de revisão humana.
 - **Gabarito conferido por IA**, não por pessoa (ver acima). As 58 ilegíveis foram excluídas de
   forma conservadora. Um leitor humano mais tolerante incluiria algumas delas, e elas seriam as
   mais difíceis para o OCR, o que só baixaria os números.

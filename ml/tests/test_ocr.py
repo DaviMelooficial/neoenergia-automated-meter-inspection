@@ -84,6 +84,28 @@ def test_escolher_leitura_prefere_texto_alto_e_filtra_tamanho():
     assert ocr.escolher_leitura([C("1234", 0.2, 10), C("5678", 0.8, 10)]) == "5678"
 
 
+def test_cotas_maiores_restos():
+    tam = pd.Series({"l1": 46, "l2": 42, "l3": 48, "l4": 23})
+    cota = ocr.cotas_maiores_restos(tam, 100)
+    assert cota.sum() == 100
+    # partes exatas 28,93 / 26,42 / 30,19 / 14,47: pisos 28/26/30/14, a sobra de 2 vai para l1 e l4
+    assert cota.to_dict() == {"l1": 29, "l2": 26, "l3": 30, "l4": 15}
+    assert (cota <= tam).all()
+    assert ocr.cotas_maiores_restos(tam, 1000).to_dict() == tam.to_dict()  # n acima do total
+    # empate no resto: ordem do indice
+    assert ocr.cotas_maiores_restos(pd.Series({"a": 1, "b": 1, "c": 1}), 2).to_dict() == {
+        "a": 1, "b": 1, "c": 0}
+
+
+def test_escolher_leitura_por_confianca():
+    C = ocr.Candidato
+    cands = [C("012345", 0.4, 25), C("6789", 0.9, 8)]
+    assert ocr.escolher_leitura(cands, "altura") == "012345"
+    assert ocr.escolher_leitura(cands, "confianca") == "6789"
+    with pytest.raises(ValueError):
+        ocr.escolher_leitura(cands, "outro")
+
+
 def test_recortes_e_caixa():
     img = np.arange(100 * 200).reshape(100, 200)
     assert ocr.recorte_central(img, 0.5).shape == (50, 100)

@@ -8,7 +8,7 @@ mais `recorte_easyocr` (mesmo recorte, reconhecimento do EasyOCR), que separa o 
 deteccao do erro de leitura tambem para o EasyOCR.
 
 As metricas comparam a parte inteira da leitura, sem zeros a esquerda: o leiturista registra
-`2961` para um display que mostra `002961.5`.
+`1234` para um display que mostra `001234.5`.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ MIN_DIGITOS, MAX_DIGITOS = 4, 7
 def normalizar_leitura(texto: str | None) -> str:
     """Parte inteira so com digitos e sem zeros a esquerda. '' se nao houver digito.
 
-    '002961.5' -> '2961'; '0000' -> '0'; 'abc' -> ''.
+    '001234.5' -> '1234'; '0000' -> '0'; 'abc' -> ''.
     """
     if not texto:
         return ""
@@ -69,7 +69,7 @@ def comparar(previsto: str | None, gabarito: str) -> dict:
         "exato": p == g,
         "ultimos4": bool(p) and p.zfill(4)[-4:] == g.zfill(4)[-4:],
         "distancia": distancia_edicao(p, g),
-        # display digital com a casa decimal lida como inteira: '29615' para '2961'
+        # display digital com a casa decimal lida como inteira: '12345' para '1234'
         "digito_a_mais": len(p) == len(g) + 1 and p.startswith(g),
     }
 
@@ -111,6 +111,21 @@ def resumir(resultados: pd.DataFrame, por: list[str] | None = None) -> pd.DataFr
     return pd.DataFrame(linhas)
 
 
+def cotas_maiores_restos(tamanhos: pd.Series, n: int) -> pd.Series:
+    """Divide `n` entre os grupos proporcionalmente ao tamanho (metodo dos maiores restos).
+
+    Cada grupo leva o piso da sua parte; a sobra vai, uma unidade por grupo, para os maiores
+    restos (empate no resto: ordem do indice). `n` maior que o total vira o total.
+    """
+    n = min(n, int(tamanhos.sum()))
+    bruto = tamanhos / tamanhos.sum() * n
+    cota = np.floor(bruto).astype(int)
+    sobra = n - int(cota.sum())
+    for grupo in (bruto - cota).sort_values(ascending=False, kind="stable").index[:sobra]:
+        cota[grupo] += 1
+    return cota
+
+
 @dataclass(slots=True)
 class Candidato:
     texto: str
@@ -122,7 +137,10 @@ def _digitos_inteiros(texto: str) -> str:
     return re.sub(r"\D", "", re.split(r"[.,]", texto.strip(), maxsplit=1)[0])
 
 
-def escolher_leitura(candidatos: list[Candidato]) -> str:
+CRITERIOS = ("altura", "confianca")
+
+
+def escolher_leitura(candidatos: list[Candidato], criterio: str = "altura") -> str:
     """Escolhe, entre os textos achados na foto, o que tem cara de leitura.
 
     So entram textos com MIN_DIGITOS..MAX_DIGITOS digitos na parte inteira (sai a tensao
@@ -130,14 +148,19 @@ def escolher_leitura(candidatos: list[Candidato]) -> str:
     leitura sao os maiores do mostrador (o codigo '03' do LCD e menor). Empate vai para a
     maior confianca. '' se nenhum servir.
 
-    Altura em vez de confianca: nas 98 fotos conferidas do M9 a regra por altura acertou
-    10 contra 5 da regra por confianca no EasyOCR da foto inteira.
+    `criterio="confianca"` inverte a ordem (confianca, depois altura). A comparacao entre os
+    dois criterios sai de `scripts/m9_ocr.py criterios`; a altura foi escolhida nas mesmas fotos
+    da avaliacao do M9, entao o numero do EasyOCR com ela e otimista.
     """
+    if criterio not in CRITERIOS:
+        raise ValueError(f"criterio deve ser um de {CRITERIOS}: {criterio!r}")
     validos = [c for c in candidatos
                if MIN_DIGITOS <= len(_digitos_inteiros(c.texto)) <= MAX_DIGITOS]
     if not validos:
         return ""
-    return max(validos, key=lambda c: (c.altura, c.confianca)).texto
+    if criterio == "altura":
+        return max(validos, key=lambda c: (c.altura, c.confianca)).texto
+    return max(validos, key=lambda c: (c.confianca, c.altura)).texto
 
 
 # ---------------------------------------------------------------------------
@@ -241,16 +264,22 @@ class LeitorEasyOCR:
         return [Candidato(str(texto), float(conf), _altura_caixa(caixa))
                 for caixa, texto, conf in achados]
 
-    def ler_foto(self, rgb: np.ndarray) -> str:
-        return escolher_leitura(self.candidatos(rgb))
-
-    def ler_recorte(self, rgb: np.ndarray, caixa: tuple[int, int, int, int]) -> str:
-        """Recorte manual ampliado ate 64 px de altura; mesma escolha da foto inteira."""
+    def candidatos_recorte(self, rgb: np.ndarray,
+                           caixa: tuple[int, int, int, int]) -> list[Candidato]:
+        """Candidatos no recorte manual, ampliado ate 64 px de altura."""
         recorte = recortar_caixa(rgb, caixa)
         escala = max(1.0, 64 / recorte.shape[0])
         if escala > 1.0:
             recorte = cv2.resize(recorte, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
-        return escolher_leitura(self.candidatos(recorte))
+        return self.candidatos(recorte)
+
+    def ler_foto(self, rgb: np.ndarray, criterio: str = "altura") -> str:
+        return escolher_leitura(self.candidatos(rgb), criterio)
+
+    def ler_recorte(self, rgb: np.ndarray, caixa: tuple[int, int, int, int],
+                    criterio: str = "altura") -> str:
+        """Recorte manual; mesma escolha da foto inteira."""
+        return escolher_leitura(self.candidatos_recorte(rgb, caixa), criterio)
 
 
 def _altura_caixa(pontos) -> float:

@@ -6,6 +6,7 @@
     # conferencia manual: preencher leitura_conferida e recorte em reports/ocr_gabarito.csv
     uv run --group ocr python scripts/m9_ocr.py conferir     # leitura vista x registrada
     uv run --group ocr python scripts/m9_ocr.py rodar        # 4 abordagens + metricas
+    uv run --group ocr python scripts/m9_ocr.py criterios    # altura x confianca no EasyOCR
 
 O gabarito e o resultado por foto tem leituras reais de medidor e ficam fora do git
 (.gitignore); so `reports/ocr_metricas.csv` (agregado) e versionado.
@@ -94,11 +95,7 @@ def amostrar(args) -> None:
     pool["lap_var_centro"] = feats["lap_var_centro"].round(1)
 
     # Cota por lote proporcional ao tamanho do pool do lote (maiores restos levam a sobra).
-    tam = pool.groupby("lote").size()
-    bruto = tam / tam.sum() * min(args.n, len(pool))
-    cota = np.floor(bruto).astype(int)
-    for lote in (bruto - cota).sort_values(ascending=False).index[: min(args.n, len(pool)) - cota.sum()]:
-        cota[lote] += 1
+    cota = ocr.cotas_maiores_restos(pool.groupby("lote").size(), args.n)
     # Dentro do lote, a heuristica V0 desempata a legibilidade: saem as menos nitidas.
     escolhidas = pd.concat([
         g.sort_values("lap_var_centro", ascending=False).head(cota[lote])
@@ -203,7 +200,7 @@ def rodar(args) -> None:
     import torch
 
     torch.set_num_threads(args.threads)
-    os.environ.setdefault("OMP_THREAD_LIMIT", "1")  # Tesseract: medir 1 nucleo por foto
+    os.environ["OMP_THREAD_LIMIT"] = "1"  # Tesseract: medir 1 nucleo por foto
     base = _base(args.base)
     gab = pd.read_csv(GABARITO, dtype=str, keep_default_na=False)
     gab = gab[gab["conferencia"].isin(["confere", "diverge"])]
@@ -246,6 +243,31 @@ def rodar(args) -> None:
     print(f"por foto -> {POR_FOTO} (fora do git); agregado -> {METRICAS}")
 
 
+def criterios(args) -> None:
+    """Acerto exato do EasyOCR por criterio de escolha do candidato (altura x confianca).
+
+    Roda nas mesmas fotos do `rodar`: e o numero que levou a escolher a altura, portanto
+    medido no proprio conjunto de avaliacao (selecao otimista, ver o relatorio).
+    """
+    import torch
+
+    torch.set_num_threads(args.threads)
+    base = _base(args.base)
+    gab = pd.read_csv(GABARITO, dtype=str, keep_default_na=False)
+    gab = gab[gab["conferencia"].isin(["confere", "diverge"])]
+    leitor = ocr.LeitorEasyOCR()
+    acertos = {(fonte, c): 0 for fonte in ("foto", "recorte") for c in ocr.CRITERIOS}
+    for r in gab.itertuples():
+        rgb = _rgb(_caminho(base, r.arquivo))
+        cands = {"foto": leitor.candidatos(rgb),
+                 "recorte": leitor.candidatos_recorte(rgb, ocr.ler_caixa(r.recorte))}
+        for (fonte, c) in acertos:
+            acertos[(fonte, c)] += ocr.comparar(ocr.escolher_leitura(cands[fonte], c),
+                                                r.leitura_conferida)["exato"]
+    for (fonte, c), n in acertos.items():
+        print(f"easyocr {fonte:8s} criterio={c:10s} acerto exato {n}/{len(gab)}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base", help='pasta com os lotes (padrao: M9_BASE ou "Base cliente/")')
@@ -262,6 +284,9 @@ def main() -> None:
     b.set_defaults(fn=pranchas)
     c = sub.add_parser("conferir")
     c.set_defaults(fn=conferir)
+    e = sub.add_parser("criterios")
+    e.add_argument("--threads", type=int, default=1)
+    e.set_defaults(fn=criterios)
     d = sub.add_parser("rodar")
     d.add_argument("--threads", type=int, default=1)
     d.set_defaults(fn=rodar)

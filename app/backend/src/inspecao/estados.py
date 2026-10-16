@@ -32,11 +32,17 @@ TRANSICOES: dict[StatusLeitura, frozenset[StatusLeitura]] = {
             StatusLeitura.FILA_HUMANA,
         }
     ),
+    # -> TRIAGEM_QUALIDADE: re-decisao automatica (recalcular_decisao, troca de
+    # detector). So a partir dos estados em ESTADOS_REDECIDIVEIS.
     StatusLeitura.FILA_HUMANA: frozenset(
-        {StatusLeitura.APROVADA_HUMANO, StatusLeitura.REPROVADA_HUMANO}
+        {
+            StatusLeitura.APROVADA_HUMANO,
+            StatusLeitura.REPROVADA_HUMANO,
+            StatusLeitura.TRIAGEM_QUALIDADE,
+        }
     ),
+    StatusLeitura.REJEITADA_QUALIDADE: frozenset({StatusLeitura.TRIAGEM_QUALIDADE}),
     # Estados finais: nenhuma saida.
-    StatusLeitura.REJEITADA_QUALIDADE: frozenset(),
     StatusLeitura.AUTO_APROVADA: frozenset(),
     StatusLeitura.AUTO_REJEITADA: frozenset(),
     StatusLeitura.APROVADA_HUMANO: frozenset(),
@@ -46,6 +52,13 @@ TRANSICOES: dict[StatusLeitura, frozenset[StatusLeitura]] = {
 
 ESTADOS_FINAIS: frozenset[StatusLeitura] = frozenset(
     estado for estado, saidas in TRANSICOES.items() if not saidas
+)
+
+# Estados em que a ultima palavra foi da maquina e nenhum humano decidiu ainda:
+# mudar a politica ou o detector pode reabrir a leitura (volta para triagem e
+# sai de novo pela politica). Decisao humana nunca e reaberta.
+ESTADOS_REDECIDIVEIS: frozenset[StatusLeitura] = frozenset(
+    {StatusLeitura.FILA_HUMANA, StatusLeitura.REJEITADA_QUALIDADE}
 )
 
 

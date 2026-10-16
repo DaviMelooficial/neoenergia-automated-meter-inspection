@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo tipos-front \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos fila-resumo tipos-front \
         api-dev worker-dev front-dev test lint up down logs reset health lab02
 
 help:  ## lista os alvos disponiveis
@@ -66,8 +66,11 @@ api-dev:  ## sobe a api no host com reload
 worker-dev:  ## sobe o worker no host
 	cd app/backend && uv run python -m inspecao.jobs.worker
 
-triagem-todos:  ## enfileira a triagem de qualidade para todas as leituras em "recebida"
+triagem-todos:  ## enfileira triagem: leituras em "recebida" e as sem resultado do detector atual
 	cd app/backend && uv run python -m inspecao.jobs.cli reprocessar --todos
+
+recalcular-todos:  ## reaplica a politica aos resultados gravados, sem reabrir imagem (POLITICA=politica@v1)
+	cd app/backend && uv run python -m inspecao.jobs.cli recalcular --todos $(if $(POLITICA),--politica $(POLITICA),)
 
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo

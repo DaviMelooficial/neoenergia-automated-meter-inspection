@@ -78,7 +78,7 @@ class TipoJob(StrEnum):
     VALIDACAO_LEITURA = "validacao_leitura"
     REPROCESSAR_LOTE = "reprocessar_lote"
     INGERIR_LOTE = "ingerir_lote"
-    # recalcular_decisao entra no marco M5 (T-M5-06), junto com a politica calibrada.
+    RECALCULAR_DECISAO = "recalcular_decisao"
 
 
 class DecisaoHumana(StrEnum):

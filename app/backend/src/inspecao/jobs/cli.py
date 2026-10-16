@@ -2,6 +2,7 @@
 
 python -m inspecao.jobs.cli reprocessar --todos
 python -m inspecao.jobs.cli reprocessar --lote PSP_EXTRATLEITIMPL_200526_0352
+python -m inspecao.jobs.cli recalcular --todos --politica politica@v1
 python -m inspecao.jobs.cli resumo
 """
 
@@ -13,13 +14,14 @@ from sqlalchemy import select
 
 from inspecao.db import SessionLocal
 from inspecao.enums import TipoJob
+from inspecao.inference import politica as politica_mod
 from inspecao.jobs import fila
 from inspecao.models import Lote
 
 log = logging.getLogger(__name__)
 
 
-def reprocessar(nomes: list[str] | None) -> int:
+def _enfileirar_por_lote(nomes: list[str] | None, tipo: TipoJob, extra: dict) -> int:
     with SessionLocal() as sessao:
         consulta = select(Lote).order_by(Lote.nome)
         if nomes:
@@ -29,10 +31,19 @@ def reprocessar(nomes: list[str] | None) -> int:
             log.error("nenhum lote encontrado")
             return 1
         for lote in lotes:
-            fila.enfileirar(sessao, TipoJob.REPROCESSAR_LOTE, {"lote_id": lote.id})
-            log.info("reprocessar_lote enfileirado para %s", lote.nome)
+            fila.enfileirar(sessao, tipo, {"lote_id": lote.id, **extra})
+            log.info("%s enfileirado para %s", tipo.value, lote.nome)
         sessao.commit()
     return 0
+
+
+def reprocessar(nomes: list[str] | None) -> int:
+    return _enfileirar_por_lote(nomes, TipoJob.REPROCESSAR_LOTE, {})
+
+
+def recalcular(nomes: list[str] | None, versao: str) -> int:
+    politica_mod.obter(versao)  # falha aqui, nao no worker, se a versao nao existe
+    return _enfileirar_por_lote(nomes, TipoJob.RECALCULAR_DECISAO, {"politica": versao})
 
 
 def resumo() -> int:
@@ -46,16 +57,24 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description="Fila de jobs")
     sub = ap.add_subparsers(dest="comando", required=True)
-    rp = sub.add_parser("reprocessar", help="enfileira triagem para as leituras em recebida")
-    rp.add_argument("--lote", action="append", help="nome do lote (repetivel)")
-    rp.add_argument("--todos", action="store_true")
+    rp = sub.add_parser(
+        "reprocessar", help="enfileira triagem (recebida, ou sem resultado do detector atual)"
+    )
+    rc = sub.add_parser("recalcular", help="reaplica uma politica sem reabrir imagem")
+    for p in (rp, rc):
+        p.add_argument("--lote", action="append", help="nome do lote (repetivel)")
+        p.add_argument("--todos", action="store_true")
+    rc.add_argument("--politica", default=politica_mod.POLITICA_ATUAL.versao)
     sub.add_parser("resumo", help="contagem de jobs por tipo e status")
     args = ap.parse_args(argv)
 
-    if args.comando == "reprocessar":
+    if args.comando in ("reprocessar", "recalcular"):
         if not args.lote and not args.todos:
             ap.error("informe --lote NOME ou --todos")
-        return reprocessar(None if args.todos else args.lote)
+        nomes = None if args.todos else args.lote
+        if args.comando == "reprocessar":
+            return reprocessar(nomes)
+        return recalcular(nomes, args.politica)
     return resumo()
 
 

@@ -9,6 +9,7 @@ from inspecao.enums import StatusLeitura
 from inspecao.estados import (
     ESTADO_INICIAL,
     ESTADOS_FINAIS,
+    ESTADOS_REDECIDIVEIS,
     TRANSICOES,
     TransicaoInvalida,
     validar_transicao,
@@ -26,9 +27,9 @@ def test_estado_inicial_e_recebida_e_nao_e_final():
     assert ESTADO_INICIAL not in ESTADOS_FINAIS
 
 
-def test_estados_finais_sao_exatamente_os_seis_terminais():
+def test_estados_finais_sao_exatamente_os_cinco_terminais():
+    # rejeitada_qualidade deixou de ser final no M5: recalcular_decisao pode reabri-la.
     assert ESTADOS_FINAIS == {
-        StatusLeitura.REJEITADA_QUALIDADE,
         StatusLeitura.AUTO_APROVADA,
         StatusLeitura.AUTO_REJEITADA,
         StatusLeitura.APROVADA_HUMANO,
@@ -51,6 +52,14 @@ def test_transicoes_permitidas(de, para):
     validar_transicao(de, para)
 
 
+def test_so_decisao_da_maquina_volta_para_triagem():
+    """Reabrir para re-decisao vale para fila_humana e rejeitada_qualidade; decisao
+    humana e estados finais nunca voltam."""
+    voltam = {de for de, saidas in TRANSICOES.items() if StatusLeitura.TRIAGEM_QUALIDADE in saidas}
+    assert voltam == {StatusLeitura.RECEBIDA} | ESTADOS_REDECIDIVEIS
+    assert not ESTADOS_REDECIDIVEIS & ESTADOS_FINAIS
+
+
 @pytest.mark.parametrize(
     ("de", "para"),
     [
@@ -59,6 +68,8 @@ def test_transicoes_permitidas(de, para):
         (StatusLeitura.SEM_FOTO, StatusLeitura.TRIAGEM_QUALIDADE),  # sai de final
         (StatusLeitura.APROVADA_HUMANO, StatusLeitura.REPROVADA_HUMANO),  # muda veredito
         (StatusLeitura.FILA_HUMANA, StatusLeitura.AUTO_APROVADA),  # humano nao auto-decide
+        (StatusLeitura.FILA_HUMANA, StatusLeitura.REJEITADA_QUALIDADE),  # so via triagem
+        (StatusLeitura.APROVADA_HUMANO, StatusLeitura.TRIAGEM_QUALIDADE),  # humano nao reabre
     ],
 )
 def test_transicoes_proibidas(de, para):

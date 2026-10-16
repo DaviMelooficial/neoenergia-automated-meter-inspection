@@ -1,5 +1,5 @@
-"""Aceite do M3: com DetectorNulo, ingerir um lote e ver 100% das leituras com
-foto chegarem a `fila_humana`, com historico e resultado de inferencia."""
+"""Aceite do M3: com DetectorNulo e politica@v0, ingerir um lote e ver 100% das
+leituras com foto chegarem a `fila_humana`, com historico e resultado de inferencia."""
 
 import pytest
 from sqlalchemy import func, select
@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from inspecao.config import get_settings
 from inspecao.enums import StatusJob, StatusLeitura, TipoJob
 from inspecao.inference.detector import DetectorNulo
+from inspecao.inference.politica import POLITICA_V0
 from inspecao.jobs import fila
 from inspecao.jobs.handlers import Contexto, reprocessar_lote
 from inspecao.jobs.worker import processar_um
@@ -30,7 +31,9 @@ def esvaziar_fila(ctx, sessao) -> int:
 
 def test_fluxo_completo_com_detector_nulo(db_session, staging, tmp_path):
     resultado, lote, storage = ls.ingerir_sintetico(db_session, staging, tmp_path / "storage")
-    ctx = Contexto(settings=get_settings(), detector=DetectorNulo(), storage=storage)
+    ctx = Contexto(
+        settings=get_settings(), detector=DetectorNulo(), storage=storage, politica=POLITICA_V0
+    )
 
     processados = esvaziar_fila(ctx, db_session)
     assert processados == resultado.jobs_enfileirados == 5
@@ -73,7 +76,9 @@ def test_fluxo_completo_com_detector_nulo(db_session, staging, tmp_path):
 def test_triagem_repetida_e_inofensiva(db_session, staging, tmp_path):
     """Um job duplicado para uma leitura ja triada conclui sem transicionar de novo."""
     resultado, lote, storage = ls.ingerir_sintetico(db_session, staging, tmp_path / "storage")
-    ctx = Contexto(settings=get_settings(), detector=DetectorNulo(), storage=storage)
+    ctx = Contexto(
+        settings=get_settings(), detector=DetectorNulo(), storage=storage, politica=POLITICA_V0
+    )
     esvaziar_fila(ctx, db_session)
 
     leitura = db_session.scalar(
@@ -95,7 +100,9 @@ def test_triagem_repetida_e_inofensiva(db_session, staging, tmp_path):
 
 def test_reprocessar_lote_so_enfileira_quem_esta_em_recebida(db_session, staging, tmp_path):
     resultado, lote, storage = ls.ingerir_sintetico(db_session, staging, tmp_path / "storage")
-    ctx = Contexto(settings=get_settings(), detector=DetectorNulo(), storage=storage)
+    ctx = Contexto(
+        settings=get_settings(), detector=DetectorNulo(), storage=storage, politica=POLITICA_V0
+    )
     # Descarta os jobs da ingestao para simular um lote antigo sem fila.
     for job in fila.reivindicar(db_session, "limpeza", lote=100):
         fila.concluir(db_session, job)

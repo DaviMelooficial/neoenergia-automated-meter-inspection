@@ -6,11 +6,11 @@ sem tocar em imagem.
 
 | Implementacao       | Marco | Descricao                                          |
 | DetectorNulo        | M3    | devolve {}, tudo vai para a fila humana            |
-| DetectorHeuristico  | M5    | OpenCV, ver plano 04                               |
+| DetectorHeuristico  | M5    | OpenCV, ver plano 04 e inference/heuristics.py     |
 | DetectorOnnx        | M7    | modelo treinado via onnxruntime                    |
 """
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -19,9 +19,13 @@ from inspecao.config import Settings
 
 @runtime_checkable
 class Detector(Protocol):
+    """`avaliar` devolve o que vai para `resultados_inferencia.saida`: um score em
+    [0, 1] por classe de qualidade (chaves de `politica.CLASSES`) e, opcionalmente,
+    outras chaves de diagnostico, que a politica ignora."""
+
     nome: str  # ex.: "nulo@v0", "heuristica@v1", "qualidade@v2"
 
-    def avaliar(self, imagem: np.ndarray) -> dict[str, float]: ...
+    def avaliar(self, imagem: np.ndarray) -> dict[str, Any]: ...
 
 
 class DetectorNulo:
@@ -29,8 +33,29 @@ class DetectorNulo:
 
     nome = "nulo@v0"
 
-    def avaliar(self, imagem: np.ndarray) -> dict[str, float]:
+    def avaliar(self, imagem: np.ndarray) -> dict[str, Any]:
         return {}
+
+
+class DetectorHeuristico:
+    """Sinais classicos de OpenCV convertidos em scores de classe (plano 04, secao 2).
+
+    Sem estado e sem modelo: as escalas vivem em `inference.heuristics`. Grava
+    tambem os sinais brutos em `saida["sinais"]`, para auditoria e recalibracao.
+    """
+
+    nome = "heuristica@v1"
+
+    def avaliar(self, imagem: np.ndarray) -> dict[str, Any]:
+        from inspecao.inference import heuristics
+
+        return heuristics.avaliar(imagem)
+
+
+DETECTORES: dict[str, type[DetectorNulo] | type[DetectorHeuristico]] = {
+    "nulo": DetectorNulo,
+    "heuristica": DetectorHeuristico,
+}
 
 
 def carregar_detector(settings: Settings) -> Detector:
@@ -38,7 +63,12 @@ def carregar_detector(settings: Settings) -> Detector:
     if settings.modelo_qualidade_ativo:
         # DetectorOnnx entra no marco M7. Ate la, ativar o modelo e erro de config.
         raise RuntimeError("MODELO_QUALIDADE_ATIVO=true, mas DetectorOnnx so existe a partir do M7")
-    return DetectorNulo()
+    try:
+        return DETECTORES[settings.detector_qualidade]()
+    except KeyError:
+        raise RuntimeError(
+            f"DETECTOR_QUALIDADE={settings.detector_qualidade!r}; use um de {sorted(DETECTORES)}"
+        ) from None
 
 
 def decodificar(dados: bytes) -> np.ndarray:

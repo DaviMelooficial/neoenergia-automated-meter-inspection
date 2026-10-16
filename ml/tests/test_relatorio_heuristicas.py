@@ -1,0 +1,51 @@
+import json
+
+import numpy as np
+import pandas as pd
+
+from mlinsp.relatorio_heuristicas import (
+    CLASSES,
+    amostra_inspecao,
+    evidencia,
+    ler_exportacao,
+    tabela_limiar,
+)
+
+
+def _exportacao(tmp_path, n=400):
+    p = np.linspace(0, 1, n)
+    linhas = []
+    for i, v in enumerate(p):
+        saida = {c: 0.0 for c in CLASSES} | {"fora_de_foco": float(v), "sinais": {"tenengrad": 1.0}}
+        linhas.append({"arquivo": f"f{i:03d}.jpg", "lote": "L", "status": "fila_humana",
+                       "saida": json.dumps(saida), "latencia_ms": 3,
+                       "decisao_humana": "aprovada" if i == 5 else None})
+    caminho = tmp_path / "exp.csv"
+    pd.DataFrame(linhas).to_csv(caminho, index=False)
+    return ler_exportacao(caminho)
+
+
+def test_p_ruim_e_o_maior_score_entre_as_classes(tmp_path):
+    exp = _exportacao(tmp_path)
+    assert np.allclose(exp.p_ruim, exp.fora_de_foco)
+    assert set(exp.classe_max) == {"fora_de_foco"}  # empate em 0 fica com a 1a coluna
+
+
+def test_falso_positivo_e_rotulo_legivel_acima_do_limiar(tmp_path):
+    exp = _exportacao(tmp_path)
+    rot = pd.DataFrame({"legivel_algum": [1, 0], "legivel_todos": [0, 0], "n_rotuladores": [2, 1],
+                        "cenas": ["digital", "digital"]}, index=["f399.jpg", "f398.jpg"])
+    ev = evidencia(exp, rot)
+    assert set(ev.fonte) == {"rotulo_lab02", "fila_humana"}
+    tab = tabela_limiar(exp, ev).set_index("limiar")
+    assert tab.loc[1.0, "falsos_positivos"] == 1  # f399 tem p_ruim 1.0 e alguem leu
+    assert tab.loc[0.5, "auto_rejeitadas"] == (exp.p_ruim >= 0.5).sum()
+
+
+def test_amostra_tem_100_piores_e_100_limitrofes_sem_repetir(tmp_path):
+    exp = _exportacao(tmp_path)
+    am = amostra_inspecao(exp, limiar=0.9)
+    assert am.grupo.value_counts().to_dict() == {"pior": 100, "limitrofe": 100}
+    assert am.index.is_unique
+    assert am[am.grupo == "pior"].p_ruim.min() >= am[am.grupo == "limitrofe"].p_ruim.max()
+    assert (am.decisao_v1 == np.where(am.p_ruim >= 0.9, "rejeitar", "humano")).all()

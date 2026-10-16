@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos fila-resumo tipos-front \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo tipos-front \
         api-dev worker-dev front-dev test lint up down logs reset health lab02
 
 help:  ## lista os alvos disponiveis
@@ -71,6 +71,14 @@ triagem-todos:  ## enfileira triagem: leituras em "recebida" e as sem resultado 
 
 recalcular-todos:  ## reaplica a politica aos resultados gravados, sem reabrir imagem (POLITICA=politica@v1)
 	cd app/backend && uv run python -m inspecao.jobs.cli recalcular --todos $(if $(POLITICA),--politica $(POLITICA),)
+
+relatorio-heuristicas:  ## exporta os scores do banco e gera ml/reports/heuristicas_* (LIMIAR=limiar_rejeita da v1)
+	@test -n "$(LIMIAR)" || (echo 'uso: make relatorio-heuristicas LIMIAR=0.85'; exit 1)
+	@mkdir -p ml/artifacts
+	docker compose exec -T postgres psql -U $${POSTGRES_USER:-inspecao} -d $${POSTGRES_DB:-inspecao} \
+	  -v ON_ERROR_STOP=1 -q < ml/reports/heuristicas_exportacao.sql > ml/artifacts/heuristicas_exportacao.csv
+	cd ml && uv run python -m mlinsp.relatorio_heuristicas --exportacao artifacts/heuristicas_exportacao.csv \
+	  --base "../Base cliente" --limiar $(LIMIAR)
 
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo

@@ -47,7 +47,9 @@ def test_falhar_reagenda_com_backoff_e_depois_marca_erro(db_session):
     # Nao e reivindicavel agora: esta agendada para o futuro.
     assert fila.reivindicar(db_session, "w1", 1) == []
 
-    job.agendado_para = datetime.now(UTC)
+    # Relogio do banco, nao o do host: o claim compara com clock_timestamp() do
+    # Postgres, e o container pode estar alguns ms atras do host.
+    job.agendado_para = func.now()
     db_session.flush()
     (job,) = fila.reivindicar(db_session, "w1", 1)
     assert job.tentativas == 2

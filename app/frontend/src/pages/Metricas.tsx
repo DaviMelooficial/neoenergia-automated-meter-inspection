@@ -397,10 +397,14 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
         </Text>
       )}
       <Text size="xs" c="dimmed" data-testid="auditoria-auto">
-        Auto-aprovadas auditadas:{" "}
+        Decisões da máquina auditadas: auto-rejeitadas{" "}
+        {a.auto_rejeitadas.suprimido
+          ? `(menos de ${a.min_pares}, oculto)`
+          : `${num(a.auto_rejeitadas.n ?? 0)}, falso positivo ${pct(a.auto_rejeitadas.taxa_erro)}`}
+        ; auto-aprovadas{" "}
         {a.auto_aprovadas.suprimido
-          ? `menos de ${a.min_pares}, oculto`
-          : `${num(a.auto_aprovadas.n ?? 0)}, erro da máquina ${pct(a.auto_aprovadas.taxa_erro)}`}
+          ? `(menos de ${a.min_pares}, oculto)`
+          : `${num(a.auto_aprovadas.n ?? 0)}, erro ${pct(a.auto_aprovadas.taxa_erro)}`}
         .
       </Text>
       {a.serie.length > 0 ? (

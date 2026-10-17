@@ -41,9 +41,12 @@ export function Layout() {
               <NavLink to="/fila" style={estiloLink}>
                 Fila
               </NavLink>
-              <NavLink to="/auditoria" style={estiloLink}>
-                Auditoria
-              </NavLink>
+              {/* so o papel auditor audita (M8); supervisor e admin leem as metricas */}
+              {usuario?.papel === "auditor" && (
+                <NavLink to="/auditoria" style={estiloLink}>
+                  Auditoria
+                </NavLink>
+              )}
               {temPapel("supervisor") && (
                 <>
                   <NavLink to="/quarentena" style={estiloLink}>

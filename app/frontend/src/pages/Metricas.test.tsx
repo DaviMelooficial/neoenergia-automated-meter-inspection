@@ -137,6 +137,7 @@ const drift: MetricasDrift = {
     subida_discordancia: 0.1,
     subida_zona_cinzenta: 0.1,
     z_carta_p: 3,
+    min_lotes_phi: 5,
   },
   baseline: {
     lotes: [LOTE_A],
@@ -150,7 +151,8 @@ const drift: MetricasDrift = {
       confianca_media: 0.9,
       discordancia: 0.1,
     },
-    sobredispersao: { taxa_auto_rejeicao: 4.9 },
+    sobredispersao: { taxa_auto_rejeicao: 1 },
+    sobredispersao_estimada: { taxa_auto_rejeicao: 4.9 },
   },
   lotes: [
     lote(LOTE_A, true, 0.02, []),
@@ -203,7 +205,8 @@ const auditoria: ConcordanciaAuditoria = {
   taxa_configurada: 0.07,
   min_pares: 10,
   detalhe: true,
-  auto_aprovadas: { n: 0, reprovadas_pelo_revisor: 0, taxa_erro: null, suprimido: false },
+  auto_aprovadas: { n: 0, erros: 0, taxa_erro: null, suprimido: false },
+  auto_rejeitadas: { n: 12, erros: 1, taxa_erro: 1 / 12, suprimido: false },
   decisoes_na_fila: 100,
   sorteadas: 7,
   taxa_observada: 0.07,
@@ -312,6 +315,9 @@ describe("Metricas", () => {
     const cartao = within(painel).getByText("Concordância").parentElement!;
     expect(cartao).toHaveTextContent("75,0%");
     expect(within(painel).getByText("0,500")).toBeInTheDocument();
+    expect(within(painel).getByTestId("auditoria-auto")).toHaveTextContent(
+      "auto-rejeitadas 12, falso positivo 8,3%",
+    );
     expect(within(painel).getByRole("img", { name: "concordância acumulada por dia" })).toBeInTheDocument();
   });
 
@@ -332,7 +338,8 @@ describe("Metricas", () => {
         kappa_motivo: null,
         suprimido: true,
       },
-      auto_aprovadas: { n: null, reprovadas_pelo_revisor: null, taxa_erro: null, suprimido: true },
+      auto_aprovadas: { n: null, erros: null, taxa_erro: null, suprimido: true },
+      auto_rejeitadas: { n: null, erros: null, taxa_erro: null, suprimido: true },
       por_lote: [],
       serie: [],
     });

@@ -42,7 +42,6 @@ function item(id: number, restantes = 2): ItemAuditoria {
       url: `/api/fotos/${id}/arquivo`,
     },
     fotos: [],
-    inferencias: [],
     quarentena: [],
     reservado_ate: null,
     restantes,
@@ -105,14 +104,20 @@ describe("Auditoria", () => {
     expect(await screen.findByText("Nenhuma auditoria pendente para você")).toBeInTheDocument();
   });
 
-  it("recusa do servidor (403/409) avisa e carrega a proxima", async () => {
+  it("recusa unica do servidor (404) avisa e carrega a proxima", async () => {
     a.proxima.mockResolvedValueOnce(item(1)).mockResolvedValueOnce(item(5));
-    a.decidir.mockRejectedValueOnce(erro(403, "o primeiro revisor nao audita a propria decisao"));
+    a.decidir.mockRejectedValueOnce(erro(404, "auditoria indisponivel"));
     renderizar();
     await screen.findByText("auditoria #1");
     tecla("a");
-    expect(await screen.findByText("o primeiro revisor nao audita a propria decisao")).toBeInTheDocument();
+    expect(await screen.findByText("auditoria indisponivel")).toBeInTheDocument();
     await screen.findByText("auditoria #5");
+  });
+
+  it("papel sem auditoria (403) mostra o motivo", async () => {
+    a.proxima.mockRejectedValue(erro(403, "auditoria amostral e feita so pelo papel auditor"));
+    renderizar();
+    expect(await screen.findByText("auditoria amostral e feita so pelo papel auditor")).toBeInTheDocument();
   });
 
   it("pular devolve a reserva", async () => {

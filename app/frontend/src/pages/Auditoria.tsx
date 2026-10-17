@@ -36,7 +36,8 @@ function comoLeitura(item: ItemAuditoria): LeituraOut {
     nota: item.nota,
     fotos: item.fotos,
     historico: [],
-    inferencias: item.inferencias,
+    // O segundo revisor tambem fica cego a maquina: o item nao traz scores.
+    inferencias: [],
     // Sem ids no item cego: o painel so usa tipo e severidade; o id local e a posicao.
     quarentena: item.quarentena.map((q, i) => ({
       ...q,
@@ -127,7 +128,8 @@ export function Auditoria() {
         await carregar();
       } catch (err) {
         const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-        if (status === 409 || status === 403) {
+        // 404 e a recusa unica do servidor (nao existe, ja decidida, reservada por outro).
+        if (status === 404 || status === 403) {
           notifications.show({ color: "yellow", message: mensagemDeErro(err, "auditoria indisponível") });
           await carregar();
         } else {

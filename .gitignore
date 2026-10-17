@@ -266,3 +266,8 @@ rotulador/controle.dat
 # Lab 2: features cacheadas (vetores derivados das fotos do cliente) e checkpoints.
 lab-02/cache/
 lab-02/.ipynb_checkpoints/
+
+# M9 (spike de OCR): gabarito e resultado por foto tem leituras reais de medidor.
+# So o agregado ml/reports/ocr_metricas.csv e o veredito ocr_viabilidade.md sao versionados.
+ml/reports/ocr_gabarito.csv
+ml/reports/ocr_resultados_por_foto.csv

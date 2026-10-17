@@ -34,6 +34,9 @@ export function Layout() {
                   <NavLink to="/quarentena" style={estiloLink}>
                     Quarentena
                   </NavLink>
+                  <NavLink to="/rotulagem" style={estiloLink}>
+                    Rotulagem
+                  </NavLink>
                   <NavLink to="/metricas" style={estiloLink}>
                     Métricas
                   </NavLink>

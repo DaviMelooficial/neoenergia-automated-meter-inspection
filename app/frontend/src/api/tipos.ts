@@ -252,6 +252,9 @@ export interface paths {
         /**
          * Liberar
          * @description Devolve a reserva do proprio usuario ("pular"). Reserva alheia nao e tocada.
+         *
+         *     Com lock de linha: se a reserva venceu e outro auditor acabou de pegar o
+         *     item, a checagem de dono acontece ja com a linha travada e nada e apagado.
          */
         post: operations["liberar_fila_humana__leitura_id__liberar_post"];
         delete?: never;
@@ -365,6 +368,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rotulagem/proxima": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Proxima
+         * @description Proxima foto que este usuario ainda pode rotular nesta rodada.
+         *
+         *     A resposta so identifica a foto: nenhum rotulo alheio, decisao da maquina,
+         *     score, posicao lida nem nota do leiturista.
+         */
+        post: operations["proxima_rotulagem_proxima_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/consolidacao": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Consolidacao
+         * @description Kappa de Cohen por classe (media dos pares ponderada por n) e por par.
+         *
+         *     Padrao: rodada `lab02`. Juntar rodadas em que o mesmo rotulador votou duas
+         *     vezes na mesma foto devolve 422, porque inflaria a concordancia.
+         */
+        get: operations["consolidacao_rotulagem_consolidacao_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Exportar
+         * @description Uma linha por foto, rotulo por maioria; empate fica vazio. Mesmo arquivo do
+         *     `make rotulos-exportar`, que grava em `ml/artifacts/rotulos.csv`.
+         */
+        get: operations["exportar_rotulagem_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/{foto_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gravar
+         * @description Grava o rotulo do usuario atual. Um por foto e rodada; nao ha edicao.
+         */
+        post: operations["gravar_rotulagem__foto_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/usuarios": {
         parameters: {
             query?: never;
@@ -405,6 +495,33 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * Cena
+         * @description Exclusiva: uma cena por foto.
+         * @enum {string}
+         */
+        Cena: "digital" | "eletromecanico" | "ocorrencia" | "nao_medidor";
+        /** ConsolidacaoOut */
+        ConsolidacaoOut: {
+            /** Rodadas */
+            rodadas: components["schemas"]["RodadaRotulagem"][];
+            /** Limiar */
+            limiar: number;
+            /** Rotuladores */
+            rotuladores: string[];
+            /** Rotulos */
+            rotulos: number;
+            /** Fotos */
+            fotos: number;
+            /** Fotos Dupla Rotulagem */
+            fotos_dupla_rotulagem: number;
+            /** Fotos Com Empate */
+            fotos_com_empate: number;
+            /** Por Classe */
+            por_classe: components["schemas"]["KappaClasseOut"][];
+            /** Pares */
+            pares: components["schemas"]["KappaParOut"][];
+        };
+        /**
          * DecisaoHumana
          * @enum {string}
          */
@@ -416,6 +533,12 @@ export interface components {
             /** Observacao */
             observacao?: string | null;
         };
+        /**
+         * Defeito
+         * @description Multirrotulo: zero, um ou varios por foto. Cada um vira uma coluna booleana.
+         * @enum {string}
+         */
+        Defeito: "reflexo" | "fora_de_foco" | "tampa_suja" | "enquadramento" | "display_apagado";
         /** FotoOut */
         FotoOut: {
             /** Id */
@@ -434,6 +557,29 @@ export interface components {
             bytes: number;
             /** Url */
             url: string;
+        };
+        /**
+         * FotoRotulagemOut
+         * @description O que o rotulador recebe. Lista fechada (extra="forbid"): nada de leitura,
+         *     nota, medidor, score, decisao da maquina nem rotulo de outra pessoa. Cegueira
+         *     e regra de servidor; o teste de vazamento confere exatamente estes campos.
+         */
+        FotoRotulagemOut: {
+            /** Foto Id */
+            foto_id: number;
+            /** Url */
+            url: string;
+            /** Largura */
+            largura: number | null;
+            /** Altura */
+            altura: number | null;
+            /**
+             * Rodada
+             * @enum {string}
+             */
+            rodada: "a" | "b" | "desempate";
+            /** Restantes */
+            restantes: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -508,6 +654,33 @@ export interface components {
              * Format: date-time
              */
             criado_em: string;
+        };
+        /** KappaClasseOut */
+        KappaClasseOut: {
+            /** Classe */
+            classe: string;
+            /** Kappa */
+            kappa: number | null;
+            /**
+             * N
+             * @description pares-foto na media ponderada
+             */
+            n: number;
+            /** Passa */
+            passa: boolean;
+        };
+        /** KappaParOut */
+        KappaParOut: {
+            /** A */
+            a: string;
+            /** B */
+            b: string;
+            /** N */
+            n: number;
+            /** Kappa */
+            kappa: {
+                [key: string]: number | null;
+            };
         };
         /** LeituraOut */
         LeituraOut: {
@@ -703,6 +876,52 @@ export interface components {
              * Format: date-time
              */
             criado_em: string;
+        };
+        /**
+         * RodadaRotulagem
+         * @description `lab02` e importada do app `rotulador/`; `a`, `b` e `desempate` sao feitas na
+         *     tela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8).
+         * @enum {string}
+         */
+        RodadaRotulagem: "lab02" | "a" | "b" | "desempate" | "producao";
+        /**
+         * RotuloIn
+         * @description Esquema v2. As regras de consistencia sao recusadas (422), nao corrigidas.
+         */
+        RotuloIn: {
+            /**
+             * Rodada
+             * @enum {string}
+             */
+            rodada: "a" | "b" | "desempate";
+            cena: components["schemas"]["Cena"];
+            /** Defeitos */
+            defeitos?: components["schemas"]["Defeito"][];
+            /** Legivel */
+            legivel: boolean;
+            /** Segundos Na Foto */
+            segundos_na_foto?: number | null;
+        };
+        /**
+         * RotuloOut
+         * @description Devolve so o rotulo do proprio usuario, que ele acabou de gravar.
+         */
+        RotuloOut: {
+            /** Id */
+            id: number;
+            /** Foto Id */
+            foto_id: number;
+            rodada: components["schemas"]["RodadaRotulagem"];
+            cena: components["schemas"]["Cena"];
+            /** Defeitos */
+            defeitos: components["schemas"]["Defeito"][];
+            /** Legivel */
+            legivel: boolean;
+            /**
+             * Gravado Em
+             * Format: date-time
+             */
+            gravado_em: string;
         };
         /**
          * Severidade
@@ -1371,6 +1590,134 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    proxima_rotulagem_proxima_post: {
+        parameters: {
+            query?: {
+                rodada?: "a" | "b" | "desempate";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FotoRotulagemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consolidacao_rotulagem_consolidacao_get: {
+        parameters: {
+            query?: {
+                rodada?: components["schemas"]["RodadaRotulagem"][] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolidacaoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exportar_rotulagem_export_get: {
+        parameters: {
+            query?: {
+                rodada?: components["schemas"]["RodadaRotulagem"][] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description rotulos.csv consolidado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gravar_rotulagem__foto_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                foto_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RotuloIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotuloOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

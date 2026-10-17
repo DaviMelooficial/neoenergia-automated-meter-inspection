@@ -618,7 +618,7 @@
      "fila-humana"
     ],
     "summary": "Liberar",
-    "description": "Devolve a reserva do proprio usuario (\"pular\"). Reserva alheia nao e tocada.",
+    "description": "Devolve a reserva do proprio usuario (\"pular\"). Reserva alheia nao e tocada.\n\nCom lock de linha: se a reserva venceu e outro auditor acabou de pegar o\nitem, a checagem de dono acontece ja com a linha travada e nada e apagado.",
     "operationId": "liberar_fila_humana__leitura_id__liberar_post",
     "security": [
      {
@@ -983,6 +983,232 @@
     ]
    }
   },
+  "/rotulagem/proxima": {
+   "post": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Proxima",
+    "description": "Proxima foto que este usuario ainda pode rotular nesta rodada.\n\nA resposta so identifica a foto: nenhum rotulo alheio, decisao da maquina,\nscore, posicao lida nem nota do leiturista.",
+    "operationId": "proxima_rotulagem_proxima_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "rodada",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "a",
+        "b",
+        "desempate"
+       ],
+       "type": "string",
+       "default": "a",
+       "title": "Rodada"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FotoRotulagemOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/rotulagem/consolidacao": {
+   "get": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Consolidacao",
+    "description": "Kappa de Cohen por classe (media dos pares ponderada por n) e por par.\n\nPadrao: rodada `lab02`. Juntar rodadas em que o mesmo rotulador votou duas\nvezes na mesma foto devolve 422, porque inflaria a concordancia.",
+    "operationId": "consolidacao_rotulagem_consolidacao_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "rodada",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/RodadaRotulagem"
+         },
+         "maxItems": 5
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Rodada"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ConsolidacaoOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/rotulagem/export": {
+   "get": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Exportar",
+    "description": "Uma linha por foto, rotulo por maioria; empate fica vazio. Mesmo arquivo do\n`make rotulos-exportar`, que grava em `ml/artifacts/rotulos.csv`.",
+    "operationId": "exportar_rotulagem_export_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "rodada",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/RodadaRotulagem"
+         },
+         "maxItems": 5
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Rodada"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "rotulos.csv consolidado",
+      "content": {
+       "text/csv": {}
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/rotulagem/{foto_id}": {
+   "post": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Gravar",
+    "description": "Grava o rotulo do usuario atual. Um por foto e rodada; nao ha edicao.",
+    "operationId": "gravar_rotulagem__foto_id__post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "foto_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Foto Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RotuloIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RotuloOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/usuarios": {
    "get": {
     "tags": [
@@ -1117,6 +1343,82 @@
  },
  "components": {
   "schemas": {
+   "Cena": {
+    "type": "string",
+    "enum": [
+     "digital",
+     "eletromecanico",
+     "ocorrencia",
+     "nao_medidor"
+    ],
+    "title": "Cena",
+    "description": "Exclusiva: uma cena por foto."
+   },
+   "ConsolidacaoOut": {
+    "properties": {
+     "rodadas": {
+      "items": {
+       "$ref": "#/components/schemas/RodadaRotulagem"
+      },
+      "type": "array",
+      "title": "Rodadas"
+     },
+     "limiar": {
+      "type": "number",
+      "title": "Limiar"
+     },
+     "rotuladores": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Rotuladores"
+     },
+     "rotulos": {
+      "type": "integer",
+      "title": "Rotulos"
+     },
+     "fotos": {
+      "type": "integer",
+      "title": "Fotos"
+     },
+     "fotos_dupla_rotulagem": {
+      "type": "integer",
+      "title": "Fotos Dupla Rotulagem"
+     },
+     "fotos_com_empate": {
+      "type": "integer",
+      "title": "Fotos Com Empate"
+     },
+     "por_classe": {
+      "items": {
+       "$ref": "#/components/schemas/KappaClasseOut"
+      },
+      "type": "array",
+      "title": "Por Classe"
+     },
+     "pares": {
+      "items": {
+       "$ref": "#/components/schemas/KappaParOut"
+      },
+      "type": "array",
+      "title": "Pares"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rodadas",
+     "limiar",
+     "rotuladores",
+     "rotulos",
+     "fotos",
+     "fotos_dupla_rotulagem",
+     "fotos_com_empate",
+     "por_classe",
+     "pares"
+    ],
+    "title": "ConsolidacaoOut"
+   },
    "DecisaoHumana": {
     "type": "string",
     "enum": [
@@ -1158,6 +1460,18 @@
      "decisao"
     ],
     "title": "DecisaoIn"
+   },
+   "Defeito": {
+    "type": "string",
+    "enum": [
+     "reflexo",
+     "fora_de_foco",
+     "tampa_suja",
+     "enquadramento",
+     "display_apagado"
+    ],
+    "title": "Defeito",
+    "description": "Multirrotulo: zero, um ou varios por foto. Cada um vira uma coluna booleana."
    },
    "FotoOut": {
     "properties": {
@@ -1220,6 +1534,65 @@
      "url"
     ],
     "title": "FotoOut"
+   },
+   "FotoRotulagemOut": {
+    "properties": {
+     "foto_id": {
+      "type": "integer",
+      "title": "Foto Id"
+     },
+     "url": {
+      "type": "string",
+      "title": "Url"
+     },
+     "largura": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Largura"
+     },
+     "altura": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Altura"
+     },
+     "rodada": {
+      "type": "string",
+      "enum": [
+       "a",
+       "b",
+       "desempate"
+      ],
+      "title": "Rodada"
+     },
+     "restantes": {
+      "type": "integer",
+      "title": "Restantes"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "foto_id",
+     "url",
+     "largura",
+     "altura",
+     "rodada",
+     "restantes"
+    ],
+    "title": "FotoRotulagemOut",
+    "description": "O que o rotulador recebe. Lista fechada (extra=\"forbid\"): nada de leitura,\nnota, medidor, score, decisao da maquina nem rotulo de outra pessoa. Cegueira\ne regra de servidor; o teste de vazamento confere exatamente estes campos."
    },
    "HTTPValidationError": {
     "properties": {
@@ -1384,6 +1757,80 @@
      "criado_em"
     ],
     "title": "JobOut"
+   },
+   "KappaClasseOut": {
+    "properties": {
+     "classe": {
+      "type": "string",
+      "title": "Classe"
+     },
+     "kappa": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N",
+      "description": "pares-foto na media ponderada"
+     },
+     "passa": {
+      "type": "boolean",
+      "title": "Passa"
+     }
+    },
+    "type": "object",
+    "required": [
+     "classe",
+     "kappa",
+     "n",
+     "passa"
+    ],
+    "title": "KappaClasseOut"
+   },
+   "KappaParOut": {
+    "properties": {
+     "a": {
+      "type": "string",
+      "title": "A"
+     },
+     "b": {
+      "type": "string",
+      "title": "B"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "kappa": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "object",
+      "title": "Kappa"
+     }
+    },
+    "type": "object",
+    "required": [
+     "a",
+     "b",
+     "n",
+     "kappa"
+    ],
+    "title": "KappaParOut"
    },
    "LeituraOut": {
     "properties": {
@@ -2009,6 +2456,113 @@
      "criado_em"
     ],
     "title": "RevisaoOut"
+   },
+   "RodadaRotulagem": {
+    "type": "string",
+    "enum": [
+     "lab02",
+     "a",
+     "b",
+     "desempate",
+     "producao"
+    ],
+    "title": "RodadaRotulagem",
+    "description": "`lab02` e importada do app `rotulador/`; `a`, `b` e `desempate` sao feitas na\ntela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8)."
+   },
+   "RotuloIn": {
+    "properties": {
+     "rodada": {
+      "type": "string",
+      "enum": [
+       "a",
+       "b",
+       "desempate"
+      ],
+      "title": "Rodada"
+     },
+     "cena": {
+      "$ref": "#/components/schemas/Cena"
+     },
+     "defeitos": {
+      "items": {
+       "$ref": "#/components/schemas/Defeito"
+      },
+      "type": "array",
+      "maxItems": 5,
+      "title": "Defeitos"
+     },
+     "legivel": {
+      "type": "boolean",
+      "title": "Legivel"
+     },
+     "segundos_na_foto": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 3600.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Segundos Na Foto"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rodada",
+     "cena",
+     "legivel"
+    ],
+    "title": "RotuloIn",
+    "description": "Esquema v2. As regras de consistencia sao recusadas (422), nao corrigidas."
+   },
+   "RotuloOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "foto_id": {
+      "type": "integer",
+      "title": "Foto Id"
+     },
+     "rodada": {
+      "$ref": "#/components/schemas/RodadaRotulagem"
+     },
+     "cena": {
+      "$ref": "#/components/schemas/Cena"
+     },
+     "defeitos": {
+      "items": {
+       "$ref": "#/components/schemas/Defeito"
+      },
+      "type": "array",
+      "title": "Defeitos"
+     },
+     "legivel": {
+      "type": "boolean",
+      "title": "Legivel"
+     },
+     "gravado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Gravado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "foto_id",
+     "rodada",
+     "cena",
+     "defeitos",
+     "legivel",
+     "gravado_em"
+    ],
+    "title": "RotuloOut",
+    "description": "Devolve so o rotulo do proprio usuario, que ele acabou de gravar."
    },
    "Severidade": {
     "type": "string",

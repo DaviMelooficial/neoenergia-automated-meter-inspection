@@ -17,6 +17,14 @@ export type MotivoReprovacao = S["MotivoReprovacao"];
 export type Papel = S["Papel"];
 export type UsuarioIn = S["UsuarioIn"];
 export type UsuarioPatch = S["UsuarioPatch"];
+export type FotoRotulagemOut = S["FotoRotulagemOut"];
+export type RotuloIn = S["RotuloIn"];
+export type RotuloOut = S["RotuloOut"];
+export type ConsolidacaoOut = S["ConsolidacaoOut"];
+export type Cena = S["Cena"];
+export type Defeito = S["Defeito"];
+export type RodadaTela = RotuloIn["rodada"];
+export type RodadaRotulagem = S["RodadaRotulagem"];
 
 export const ORDEM_PAPEL: Record<Papel, number> = { auditor: 1, supervisor: 2, admin: 3 };
 
@@ -114,6 +122,23 @@ export interface LoteDrift {
 export const metricas = {
   qualidade: () => api.get<MetricasQualidade>("/metricas/qualidade").then((r) => r.data),
   drift: () => api.get<{ lotes: LoteDrift[] }>("/metricas/drift").then((r) => r.data.lotes),
+};
+
+// ------------------------------------------------------------------ rotulagem
+export const rotulagem = {
+  proxima: (rodada: RodadaTela) =>
+    api
+      .post<FotoRotulagemOut>("/rotulagem/proxima", null, { params: { rodada } })
+      .then((r) => r.data),
+  gravar: (fotoId: number, dados: RotuloIn) =>
+    api.post<RotuloOut>(`/rotulagem/${fotoId}`, dados).then((r) => r.data),
+  consolidacao: (rodadas: RodadaRotulagem[]) =>
+    api
+      .get<ConsolidacaoOut>("/rotulagem/consolidacao", {
+        params: { rodada: rodadas },
+        paramsSerializer: { indexes: null }, // rodada=a&rodada=b
+      })
+      .then((r) => r.data),
 };
 
 // ------------------------------------------------------------------ usuarios

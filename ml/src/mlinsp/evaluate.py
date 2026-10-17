@@ -7,7 +7,8 @@ Metricas por semente (media +- desvio) e da semente escolhida, sempre por classe
 - legivel: F1 de cada classe, macro-F1, PR-AUC (positivo = ilegivel), AUROC, matriz de
   confusao a 0,5 e acuracia com IC de Wilson;
 - rejeicao no limiar calibrado: rejeitadas, falsos positivos (algum rotulador leu),
-  precisao com IC de Wilson, e limite superior de 95% do erro (Clopper-Pearson);
+  precisao com IC bilateral de 95% de Wilson, e limite superior unilateral de 95% do erro
+  por Clopper-Pearson (com 0 erros em n: 1 - 0,05^(1/n));
 - cena: F1 por classe e macro-F1;
 - defeitos (informativo, kappa humano 0,15 a 0,41): F1 e AUROC contra a maioria humana.
 
@@ -55,6 +56,12 @@ LIMIAR_V1 = 0.85  # politica@v1 (app/backend/src/inspecao/inference/politica.py)
 COBERTURA_HEURISTICA_BASE = 0.0076
 LOTE_TESTE = "030726"
 N_BOOTSTRAP = 5000
+
+
+def concordancia(rej_modelo: np.ndarray, rej_heuristica: np.ndarray) -> dict:
+    return {"ambos_rejeitam": int((rej_modelo & rej_heuristica).sum()),
+            "so_modelo": int((rej_modelo & ~rej_heuristica).sum()),
+            "so_heuristica": int((~rej_modelo & rej_heuristica).sum())}
 
 
 def bootstrap_pareado(p_modelo: dict, rot_teste: pd.DataFrame, p_heuristica: pd.Series,
@@ -126,12 +133,13 @@ def metricas_legivel(p_ilegivel: np.ndarray, y_legivel: np.ndarray, limiar_class
 def rejeicao(p: np.ndarray, legivel_algum: np.ndarray, limiar: float | None) -> dict:
     if limiar is None:
         return {"rejeitadas": 0, "cobertura": 0.0, "falsos_positivos": 0, "precisao": None,
-                "precisao_ic95": None, "erro_sup95": None}
+                "precisao_ic95_wilson": None, "erro_sup95_clopper_pearson_unilateral": None}
     rej = p >= limiar
     n, fp = int(rej.sum()), int((rej & (legivel_algum == 1)).sum())
     return {"rejeitadas": n, "cobertura": n / len(p), "falsos_positivos": fp,
-            "precisao": (n - fp) / n if n else None, "precisao_ic95": wilson(n - fp, n),
-            "erro_sup95": seletiva.limite_superior(fp, n) if n else None}
+            "precisao": (n - fp) / n if n else None,
+            "precisao_ic95_wilson": wilson(n - fp, n),
+            "erro_sup95_clopper_pearson_unilateral": seletiva.limite_superior(fp, n) if n else None}
 
 
 def cobertura_maxima_zero_fp(p: np.ndarray, legivel_algum: np.ndarray) -> float:
@@ -289,11 +297,9 @@ def main(argv: list[str] | None = None) -> int:
         "por_lote": {lote: {"leituras": int((lotes == lote).sum()),
                             "rejeitadas": int(rej_base[lotes == lote].sum())}
                      for lote in sorted(set(lotes))},
-        "concordancia_com_heuristica_v1": {
-            "ambos_rejeitam": int((rej_base & rej_heu).sum()),
-            "so_modelo": int((rej_base & ~rej_heu).sum()),
-            "so_heuristica": int((~rej_base & rej_heu).sum()),
-        },
+        "concordancia_com_heuristica_v1": concordancia(rej_base, rej_heu),
+        "concordancia_com_heuristica_mesmo_protocolo": (
+            concordancia(rej_base, p_ruim_base >= lim_mesmo) if lim_mesmo is not None else None),
         "segundos_inferencia_mps": seg_base[escolhida],
         "nota": "a base inteira inclui as fotos de treino e validacao; ver cobertura_lote_teste",
     }

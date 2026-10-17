@@ -447,7 +447,8 @@ export interface paths {
         put?: never;
         /**
          * Gravar
-         * @description Grava o rotulo do usuario atual. Um por foto e rodada; nao ha edicao.
+         * @description Grava o rotulo do usuario atual. Cada rodada cega rotula cada foto uma vez,
+         *     de uma pessoa so; nao ha edicao. Recusa: 409 com texto constante.
          */
         post: operations["gravar_rotulagem__foto_id__post"];
         delete?: never;

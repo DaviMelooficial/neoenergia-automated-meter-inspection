@@ -416,6 +416,15 @@ class Rotulo(Base):
             unique=True,
             postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')",
         ),
+        # Cada rodada cega rotula cada foto uma vez: sem isso um segundo rotulador
+        # gravaria a mesma foto pelo id e desfaria o empate (fugindo do desempate).
+        Index(
+            "uq_rotulos_foto_rodada_cega",
+            "foto_id",
+            "rodada",
+            unique=True,
+            postgresql_where="rodada IN ('a', 'b', 'desempate')",
+        ),
         Index("ix_rotulos_rodada_foto", "rodada", "foto_id"),
     )
 

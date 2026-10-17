@@ -16,6 +16,7 @@ from inspecao.enums import Papel
 from inspecao.models import Foto, Leitura, Lote, ResultadoInferencia, RevisaoHumana, Rotulo
 from inspecao.rotulagem import importador
 from inspecao.rotulagem.consolidacao import DEFEITOS
+from inspecao.routers.rotulagem import FOTO_INDISPONIVEL
 from tests.usuarios_fixture import criar_usuario, login
 
 LOTE = "PSP_EXTRATLEITIMPL_010199_0000"
@@ -130,6 +131,8 @@ def test_migracao_reversivel():
     indices = {i["name"]: i for i in insp.get_indexes("rotulos")}
     assert indices["uq_rotulos_foto_rodada_usuario"]["unique"]
     assert indices["uq_rotulos_foto_rodada_externo"]["unique"]
+    por_rodada = indices["uq_rotulos_foto_rodada_cega"]
+    assert por_rodada["unique"] and por_rodada["column_names"] == ["foto_id", "rodada"]
     dupla = indices["uq_rotulos_foto_usuario_dupla_cega"]
     assert dupla["unique"] and dupla["column_names"] == ["foto_id", "usuario_id"]
     colunas = {c["name"]: c for c in insp.get_columns("rotulos")}
@@ -151,7 +154,9 @@ def test_mesmo_rotulador_nao_rotula_a_mesma_foto_duas_vezes_na_rodada(db_session
         _inserir(db_session, foto_id=foto, usuario_id=uid)
     # outra rodada fora da dupla-cega, ou outro rotulador, pode
     _inserir(db_session, foto_id=foto, usuario_id=uid, rodada="producao")
-    _inserir(db_session, foto_id=foto, usuario_id=contas["admin"].id)
+    _inserir(db_session, foto_id=foto, usuario_id=contas["admin"].id, rodada="producao")
+    with pytest.raises(IntegrityError):  # rodada cega: uma pessoa por foto
+        _inserir(db_session, foto_id=foto, usuario_id=contas["auditor"].id)
     _inserir(db_session, foto_id=foto, rotulador_externo="ext_x", rodada="lab02")
     with pytest.raises(IntegrityError):
         _inserir(db_session, foto_id=foto, rotulador_externo="ext_x", rodada="lab02")
@@ -380,6 +385,116 @@ def test_desempate_so_para_terceiro_e_so_fotos_divergentes(client, lab02, rotula
     assert r.status_code == 404
 
 
+def test_segundo_rotulador_na_mesma_foto_e_rodada_e_recusado(client, lab02, rotuladores):
+    """Pelo id direto, sem passar pelo /proxima: empilhar votos desfaria o empate."""
+    cab = {k: login(client, rotuladores[k]) for k in ("sup1", "sup2", "sup3")}
+    f1 = lab02[1].id
+    assert client.post(f"/rotulagem/{f1}", json=rotulo("a"), headers=cab["sup1"]).status_code == 201
+    for quem in ("sup2", "sup3"):
+        r = client.post(f"/rotulagem/{f1}", json=rotulo("a"), headers=cab[quem])
+        assert r.status_code == 409 and r.json()["detail"] == FOTO_INDISPONIVEL, quem
+    # o mesmo texto para o proprio usuario repetindo, e para foto fora da amostra
+    r = client.post(f"/rotulagem/{f1}", json=rotulo("a"), headers=cab["sup1"])
+    assert r.json()["detail"] == FOTO_INDISPONIVEL
+    r = client.post(f"/rotulagem/{lab02[5].id}", json=rotulo("a"), headers=cab["sup2"])
+    assert r.status_code == 409 and r.json()["detail"] == FOTO_INDISPONIVEL
+
+
+def test_desempate_aceita_um_terceiro_voto_so(client, db_session, lab02, rotuladores):
+    sup4 = criar_usuario(db_session, "sup4@teste.com.br", Papel.SUPERVISOR)
+    cab = {k: login(client, rotuladores[k]) for k in ("sup1", "sup2", "sup3")}
+    cab["sup4"] = login(client, sup4)
+    f2 = lab02[2].id
+    client.post(f"/rotulagem/{f2}", json=rotulo("a"), headers=cab["sup1"])
+    client.post(f"/rotulagem/{f2}", json=rotulo("b", "digital", False), headers=cab["sup2"])
+    assert (
+        client.post(f"/rotulagem/{f2}", json=rotulo("desempate"), headers=cab["sup3"]).status_code
+        == 201
+    )
+    r = client.post(
+        f"/rotulagem/{f2}", json=rotulo("desempate", "digital", False), headers=cab["sup4"]
+    )
+    assert r.status_code == 409 and r.json()["detail"] == FOTO_INDISPONIVEL
+    r = client.post("/rotulagem/proxima", params={"rodada": "desempate"}, headers=cab["sup4"])
+    assert r.status_code == 404
+
+
+def test_corrida_entre_duas_conexoes_e_barrada_pelo_indice():
+    """Duas gravacoes simultaneas da mesma foto e rodada, por usuarios distintos, em
+    conexoes separadas: a segunda espera a primeira e falha no indice unico."""
+    import threading
+
+    from sqlalchemy import delete, insert
+
+    from inspecao.db import engine
+    from inspecao.models import Usuario
+
+    lote_nome = "PSP_EXTRATLEITIMPL_020199_0000"
+    with engine.begin() as c:
+        lote_id = c.execute(
+            insert(Lote)
+            .values(nome=lote_nome, csv_nome="x.csv", checksum_csv="0" * 64)
+            .returning(Lote.id)
+        ).scalar_one()
+        foto_id = c.execute(
+            insert(Foto)
+            .values(
+                lote_id=lote_id,
+                nome_arquivo=f"{lote_nome}_corrida.jpg",
+                id_externo="1",
+                sequencia=0,
+                caminho_storage="x",
+                bytes=1,
+                sha256="0" * 64,
+            )
+            .returning(Foto.id)
+        ).scalar_one()
+        uids = [
+            c.execute(
+                insert(Usuario)
+                .values(
+                    nome=f"corrida{i}",
+                    email=f"corrida{i}@teste.com.br",
+                    senha_hash="x",
+                    papel="supervisor",
+                )
+                .returning(Usuario.id)
+            ).scalar_one()
+            for i in (1, 2)
+        ]
+    valores = {"rodada": "a", "cena": "digital", "legivel": True} | dict.fromkeys(DEFEITOS, False)
+    erro: list[BaseException] = []
+    try:
+        c1, c2 = engine.connect(), engine.connect()
+        t1 = c1.begin()
+        c1.execute(insert(Rotulo).values(foto_id=foto_id, usuario_id=uids[0], **valores))
+
+        def segunda():
+            t2 = c2.begin()
+            try:
+                c2.execute(insert(Rotulo).values(foto_id=foto_id, usuario_id=uids[1], **valores))
+                t2.commit()
+            except BaseException as e:  # noqa: BLE001 - capturado para o assert
+                erro.append(e)
+                t2.rollback()
+
+        th = threading.Thread(target=segunda)
+        th.start()
+        th.join(timeout=1.0)
+        assert th.is_alive(), "a segunda gravacao deveria esperar a primeira"
+        t1.commit()
+        th.join(timeout=10)
+        assert not th.is_alive()
+        assert len(erro) == 1 and isinstance(erro[0], IntegrityError)
+        assert "uq_rotulos_foto_rodada_cega" in str(erro[0])
+        c1.close()
+        c2.close()
+    finally:
+        with engine.begin() as c:
+            c.execute(delete(Lote).where(Lote.id == lote_id))  # cascata: fotos e rotulos
+            c.execute(delete(Usuario).where(Usuario.id.in_(uids)))
+
+
 # ------------------------------------------------------------------ gravar
 
 
@@ -532,43 +647,69 @@ def test_admin_nao_rotula_nas_rodadas_cegas(client, lab02, rotuladores, rodada):
     )
 
 
-def test_ordem_do_proxima_e_propria_de_cada_rotulador(
-    client, db_session, fotos, rotuladores, tmp_path
+def _ordem_esperada(fotos, usuario_id: int, salt: str) -> list[int]:
+    chave = lambda fid: (hashlib.md5(f"{salt}:{fid}:{usuario_id}".encode()).hexdigest(), fid)  # noqa: E731
+    return sorted((f.id for f in fotos.values()), key=chave)
+
+
+def _sequencia(client, cab, rodada: str, n: int) -> list[int]:
+    vistas = []
+    for _ in range(n):
+        r = client.post("/rotulagem/proxima", params={"rodada": rodada}, headers=cab)
+        assert r.status_code == 200, r.text
+        # sem gravar, a mesma foto volta: a ordem e estavel entre chamadas
+        again = client.post("/rotulagem/proxima", params={"rodada": rodada}, headers=cab)
+        assert again.json()["foto_id"] == r.json()["foto_id"]
+        vistas.append(r.json()["foto_id"])
+        g = client.post(f"/rotulagem/{vistas[-1]}", json=rotulo(rodada), headers=cab)
+        assert g.status_code == 201, g.text
+    return vistas
+
+
+def test_ordem_do_proxima_e_propria_de_cada_rotulador_e_usa_o_salt(
+    client, db_session, fotos, rotuladores, tmp_path, monkeypatch
 ):
-    """Com a mesma ordem para todos, sup1 saberia qual foto sup2 vai receber. Com
-    md5(foto:usuario), a sequencia de cada um e estavel e diferente da do outro."""
+    """A ordem e md5(salt:foto:usuario) com o salt secreto do servidor: cada rotulador
+    tem a sua, e sem o salt ela nao e calculavel. O teste le o salt da configuracao
+    (que so o servidor tem) e confirma que trocar o salt troca a ordem entregue."""
+    from inspecao.config import get_settings
+
     caminho = tmp_path / "rotulos.csv"
     escrever_csv(caminho, [linha(i, "ext_x", "digital") for i in fotos])  # amostra de 6
     importador.importar(db_session, caminho)
     db_session.flush()
+    salt = get_settings().salt_da_rotulagem()
+    assert salt
 
-    # sem gravar, o /proxima repete a mesma foto: estavel por usuario
-    for quem in ("sup1", "sup2"):
-        cab = login(client, rotuladores[quem])
-        ids = {
-            client.post("/rotulagem/proxima", params={"rodada": "a"}, headers=cab).json()["foto_id"]
-            for _ in range(3)
-        }
-        assert len(ids) == 1, quem
+    cab1, cab2 = login(client, rotuladores["sup1"]), login(client, rotuladores["sup2"])
+    # sup1 rotula tudo na a e sup2 tudo na b: cada um percorre a amostra inteira
+    assert _sequencia(client, cab1, "a", 6) == _ordem_esperada(fotos, rotuladores["sup1"].id, salt)
+    assert _sequencia(client, cab2, "b", 6) == _ordem_esperada(fotos, rotuladores["sup2"].id, salt)
 
-    esperadas = {
-        quem: sorted(
-            (f.id for f in fotos.values()),
-            key=lambda fid, uid=rotuladores[quem].id: (
-                hashlib.md5(f"{fid}:{uid}".encode()).hexdigest(),
-                fid,
-            ),
-        )
-        for quem in ("sup1", "sup2")
-    }
-    assert esperadas["sup1"] != esperadas["sup2"]
-    primeira = {
-        quem: client.post(
-            "/rotulagem/proxima", params={"rodada": "a"}, headers=login(client, rotuladores[quem])
-        ).json()["foto_id"]
-        for quem in ("sup1", "sup2")
-    }
-    assert primeira == {quem: esperadas[quem][0] for quem in ("sup1", "sup2")}
+
+def test_trocar_o_salt_troca_a_ordem(client, db_session, fotos, rotuladores, tmp_path, monkeypatch):
+    from inspecao.config import get_settings
+
+    caminho = tmp_path / "rotulos.csv"
+    escrever_csv(caminho, [linha(i, "ext_x", "digital") for i in fotos])
+    importador.importar(db_session, caminho)
+    db_session.flush()
+    cab, uid = login(client, rotuladores["sup3"]), rotuladores["sup3"].id
+    for salt in ("salt-um-de-teste-0001", "salt-dois-de-teste-02", "salt-tres-de-teste-3"):
+        monkeypatch.setattr(get_settings(), "rotulagem_salt", salt)
+        r = client.post("/rotulagem/proxima", params={"rodada": "a"}, headers=cab)
+        assert r.json()["foto_id"] == _ordem_esperada(fotos, uid, salt)[0], salt
+
+
+def test_salt_da_rotulagem_obrigatorio_fora_de_dev():
+    from inspecao.config import SALT_ROTULAGEM_EXEMPLO, Settings
+
+    base = {"ambiente": "producao", "jwt_secret": "s" * 40, "admin_senha_inicial": "p" * 20}
+    for salt in ("", "curto", SALT_ROTULAGEM_EXEMPLO):
+        with pytest.raises(ValueError, match="ROTULAGEM_SALT"):
+            Settings(**base, rotulagem_salt=salt)
+    assert Settings(**base, rotulagem_salt="r" * 32).salt_da_rotulagem() == "r" * 32
+    assert Settings(ambiente="dev", rotulagem_salt="").salt_da_rotulagem()  # dev: valor fixo
 
 
 def test_rodadas_cegas_se_excluem_por_rotulador_e_foto(client, db_session, lab02, rotuladores):
@@ -623,7 +764,8 @@ def test_colisao_em_a_e_b_nao_derruba_o_desempate(client, db_session, lab02, rot
         _inserir(db_session, foto_id=lab02[1].id, rotulador_externo="ext_z", rodada=rodada)
     cab = login(client, rotuladores["sup3"])
     r = client.post("/rotulagem/proxima", params={"rodada": "desempate"}, headers=cab)
-    assert r.status_code == 409 and "ext_z" in r.text
+    assert r.status_code == 409 and r.json()["detail"] == FOTO_INDISPONIVEL
+    assert "ext_z" not in r.text
     r = client.post(f"/rotulagem/{lab02[1].id}", json=rotulo("desempate"), headers=cab)
     assert r.status_code == 409
 

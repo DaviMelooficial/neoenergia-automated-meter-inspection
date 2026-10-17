@@ -51,20 +51,34 @@ DESVIOS = """\
    dessas rodadas. Decidir pelo voto passado não bastava: com n pequeno, o kappa por par
    antes e depois do próprio voto revela o voto do outro, e o terceiro do desempate, que
    nunca votou em a/b, leria os votos antes de receber a foto divergente. A ordem do
-   `/proxima` é própria de cada rotulador (md5 de "foto:usuário"), para que um não saiba
-   qual foto o outro vai receber.
+   `/proxima` é própria de cada rotulador e não calculável: md5 de salt secreto do
+   servidor (`ROTULAGEM_SALT`, obrigatório fora de dev), foto e usuário.
+   A escrita segue a mesma regra da leitura: cada rodada cega rotula cada foto uma vez,
+   de uma pessoa só. O `POST /rotulagem/{id}` recusa com 409 (texto constante) a foto que
+   já tem rótulo naquela rodada, e o índice único parcial `uq_rotulos_foto_rodada_cega`
+   barra a corrida entre duas gravações.
 8. **A migração `c3e1a7d9f204` foi editada no lugar** antes de sair do branch (coluna
-   `controle` e índice `uq_rotulos_foto_usuario_dupla_cega`). Banco que já aplicou uma
+   `controle` e índices `uq_rotulos_foto_usuario_dupla_cega` e
+   `uq_rotulos_foto_rodada_cega`). Banco que já aplicou uma
    versão anterior dela precisa de `alembic downgrade 1840bea5fdb9` e `upgrade head`
    (os rótulos da tabela se perdem; reimportar com `make rotulos-importar`).
 
 ## Risco residual
 
-A cegueira é garantida nos endpoints de rotulagem, não no papel: o supervisor também é
-auditor e acessa `/leituras` e `/fila-humana`, onde vê posição lida, nota do leiturista,
-score e decisões. Um rotulador que abrir a mesma foto por lá deixa de ser cego. Mitigação
-possível: rotuladores sem papel de auditor no período das rodadas, ou separar o papel de
-rotulador.
+- **Todo rotulador é também auditor.** No RBAC atual a hierarquia é
+  `ADMIN > SUPERVISOR > AUDITOR` (`enums.py`), e quem rotula (supervisor) acessa
+  `/leituras` e `/fila-humana`, onde vê posição lida, nota do leiturista, score e decisões
+  da mesma foto. A cegueira vale nos endpoints de rotulagem, não no papel. A única
+  mitigação real é um papel de rotulador separado da hierarquia: **pendente de decisão do
+  Davi.**
+- **Ancoragem no Lab 2.** `lab-02/rotulos/rotulos.csv` está versionado: quem tem acesso ao
+  repositório vê o rótulo anterior das mesmas 329 fotos que formam a amostra das rodadas
+  A e B.
+- **Troca de papel no meio da rodada não é barrada.** Promover um rotulador a admin (que
+  vê o kappa) ou rebaixar um admin (que passa a rotular) é risco procedimental: a regra
+  vale para o papel no momento da chamada.
+- **`restantes` revela que houve voto, não o conteúdo.** O contador do `/proxima` cai
+  quando outra pessoa vota numa foto da rodada.
 """
 
 

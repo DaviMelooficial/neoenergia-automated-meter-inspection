@@ -49,9 +49,11 @@ def upgrade() -> None:
     op.create_index('uq_rotulos_foto_rodada_externo', 'rotulos', ['foto_id', 'rodada', 'rotulador_externo'], unique=True, postgresql_where='rotulador_externo IS NOT NULL')
     op.create_index('uq_rotulos_foto_rodada_usuario', 'rotulos', ['foto_id', 'rodada', 'usuario_id'], unique=True, postgresql_where='usuario_id IS NOT NULL')
     op.create_index('uq_rotulos_foto_usuario_dupla_cega', 'rotulos', ['foto_id', 'usuario_id'], unique=True, postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')")
+    op.create_index('uq_rotulos_foto_rodada_cega', 'rotulos', ['foto_id', 'rodada'], unique=True, postgresql_where="rodada IN ('a', 'b', 'desempate')")
 
 
 def downgrade() -> None:
+    op.drop_index('uq_rotulos_foto_rodada_cega', table_name='rotulos', postgresql_where="rodada IN ('a', 'b', 'desempate')")
     op.drop_index('uq_rotulos_foto_usuario_dupla_cega', table_name='rotulos', postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')")
     op.drop_index('uq_rotulos_foto_rodada_usuario', table_name='rotulos', postgresql_where='usuario_id IS NOT NULL')
     op.drop_index('uq_rotulos_foto_rodada_externo', table_name='rotulos', postgresql_where='rotulador_externo IS NOT NULL')

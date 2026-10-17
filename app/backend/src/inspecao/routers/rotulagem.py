@@ -7,10 +7,10 @@ diferenca, o voto de outra pessoa. Regra em `servico.pode_ver_consolidacao` e
 `servico.pode_rotular`.
 """
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,8 +30,10 @@ from inspecao.schemas import (
     RotuloOut,
 )
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/rotulagem", tags=["rotulagem"])
 DB = Annotated[Session, Depends(get_db)]
+FOTO_INDISPONIVEL = "foto indisponivel para voce nesta rodada"
 ADMIN_NAO_ROTULA = "admin ve o kappa das rodadas cegas e por isso nao rotula nelas"
 Rodadas = Annotated[list[RodadaRotulagem] | None, Query(max_length=5)]
 
@@ -65,7 +67,8 @@ def proxima(db: DB, usuario: Supervisor, rodada: RodadaTela = "a") -> FotoRotula
         foto, restantes = servico.proxima_foto(db, usuario.id, RodadaRotulagem(rodada))
     except servico.ColisaoDeRotulador as erro:
         # Dado inconsistente em a/b (so por escrita fora da API): sem desempate ate corrigir.
-        raise _colisao(erro, status.HTTP_409_CONFLICT) from erro
+        log.error("colisao de rotulador nas rodadas a/b: %s", erro)
+        raise HTTPException(status.HTTP_409_CONFLICT, FOTO_INDISPONIVEL) from erro
     if foto is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "nada a rotular nesta rodada")
     return FotoRotulagemOut(
@@ -132,29 +135,22 @@ def exportar(db: DB, _: Admin, rodada: Rodadas = None) -> Response:
 
 @router.post("/{foto_id}", response_model=RotuloOut, status_code=status.HTTP_201_CREATED)
 def gravar(foto_id: int, dados: RotuloIn, db: DB, usuario: Supervisor) -> RotuloOut:
-    """Grava o rotulo do usuario atual. Um por foto e rodada; nao ha edicao."""
+    """Grava o rotulo do usuario atual. Cada rodada cega rotula cada foto uma vez,
+    de uma pessoa so; nao ha edicao. Recusa: 409 com texto constante."""
     rodada = RodadaRotulagem(dados.rodada)
     if not servico.pode_rotular(usuario, rodada):
         raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_NAO_ROTULA)
     if db.get(Foto, foto_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "foto nao encontrada")
-    ja_tem = db.scalar(
-        select(Rotulo.id).where(
-            Rotulo.foto_id == foto_id,
-            Rotulo.rodada == rodada.value,
-            Rotulo.usuario_id == usuario.id,
-        )
-    )
-    if ja_tem is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "voce ja rotulou esta foto nesta rodada")
+    # Toda recusa tem o mesmo texto: "ja tem voto de outra pessoa", "voce votou na
+    # outra rodada" e "fora da amostra" nao podem ser distinguidos por quem rotula.
     try:
         elegivel = servico.foto_elegivel(db, usuario.id, rodada, foto_id)
     except servico.ColisaoDeRotulador as erro:
-        raise _colisao(erro, status.HTTP_409_CONFLICT) from erro
+        log.error("colisao de rotulador nas rodadas a/b: %s", erro)
+        raise HTTPException(status.HTTP_409_CONFLICT, FOTO_INDISPONIVEL) from erro
     if not elegivel:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "foto fora do que voce pode rotular nesta rodada"
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, FOTO_INDISPONIVEL)
 
     rotulo = Rotulo(
         foto_id=foto_id,
@@ -169,11 +165,9 @@ def gravar(foto_id: int, dados: RotuloIn, db: DB, usuario: Supervisor) -> Rotulo
     try:
         db.commit()
     except IntegrityError as erro:
-        # Corrida com outra aba do mesmo usuario: os indices unicos parciais barram o
-        # segundo voto na mesma rodada e o voto em outra rodada cega da mesma foto.
+        # Corrida entre duas gravacoes: os indices unicos parciais barram o segundo
+        # rotulo da foto na rodada e o voto do mesmo usuario em outra rodada cega.
         db.rollback()
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "voce ja rotulou esta foto nesta ou em outra rodada cega"
-        ) from erro
+        raise HTTPException(status.HTTP_409_CONFLICT, FOTO_INDISPONIVEL) from erro
     db.refresh(rotulo)
     return _rotulo_saida(rotulo)

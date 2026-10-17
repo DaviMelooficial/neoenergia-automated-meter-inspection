@@ -32,6 +32,9 @@ def _descobrir_raiz() -> Path:
 
 RAIZ_REPO = _descobrir_raiz()
 
+# Valor do .env.example: serve em dev, e recusado fora de dev como os demais exemplos.
+SALT_ROTULAGEM_EXEMPLO = "9b846d587d76561b49133bcbd9da8808"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -74,6 +77,11 @@ class Settings(BaseSettings):
     # so desligue em ambiente onde isso nao vale.
     cookie_secure: bool = True
 
+    # Rotulagem (M6). Salt secreto da ordem de entrega do /rotulagem/proxima: sem ele,
+    # md5(foto:usuario) com ids sequenciais deixaria um rotulador calcular a ordem do
+    # outro. Vazio so em dev (cai num valor fixo); fora de dev a API nao sobe.
+    rotulagem_salt: str = ""
+
     # Workers
     worker_concurrency: int = 4
     worker_poll_segundos: int = 2
@@ -90,8 +98,10 @@ class Settings(BaseSettings):
             "trocar_em_producao",
             "trocar_em_producao_use_openssl_rand_hex_32",
             "trocar_no_primeiro_login",
+            SALT_ROTULAGEM_EXEMPLO,
         }
     )
+    SALT_ROTULAGEM_DEV: ClassVar[str] = "rotulagem-dev-sem-salt"
 
     @model_validator(mode="after")
     def _proibir_placeholders_fora_de_dev(self) -> "Settings":
@@ -103,6 +113,7 @@ class Settings(BaseSettings):
                 for nome, valor in (
                     ("JWT_SECRET", self.jwt_secret),
                     ("ADMIN_SENHA_INICIAL", self.admin_senha_inicial),
+                    ("ROTULAGEM_SALT", self.rotulagem_salt),
                 )
                 if valor in self.PLACEHOLDERS_INSEGUROS or len(valor) < 16
             ]
@@ -111,6 +122,9 @@ class Settings(BaseSettings):
                     f"AMBIENTE={self.ambiente}: defina valores fortes para {', '.join(inseguros)}"
                 )
         return self
+
+    def salt_da_rotulagem(self) -> str:
+        return self.rotulagem_salt or self.SALT_ROTULAGEM_DEV
 
     def caminho_absoluto(self, caminho: Path) -> Path:
         """Resolve um caminho relativo contra a raiz do repositorio."""

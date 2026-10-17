@@ -4,14 +4,17 @@ Amostra de rotulagem: enquanto a amostra estratificada de T-M6-02 nao existe, a
 amostra das rodadas `a` e `b` e o conjunto de fotos rotuladas no Lab 2 (`lab02`,
 329 fotos). E sobre ele que o esquema v2 precisa ser remedido.
 
-Regras de cada rodada (garantidas aqui, nao na interface):
+Regras das rodadas cegas, valendo na leitura (`/proxima`) e na escrita (POST),
+com um indice unico parcial no banco atras de cada uma:
+- cada rodada rotula cada foto uma vez: foto com rotulo naquela rodada, de
+  qualquer pessoa, nao e entregue nem aceita (`uq_rotulos_foto_rodada_cega`);
 - `a`, `b` e `desempate` se excluem por usuario e foto: quem votou numa nao vota
-  nas outras (indice unico parcial no banco, alem do filtro daqui).
-- `a` e `b`: foto da amostra ainda sem rotulo naquela rodada.
+  nas outras (`uq_rotulos_foto_usuario_dupla_cega`);
+- `a` e `b`: foto da amostra;
 - `desempate`: foto com rotulo em `a` e em `b` cuja maioria empata em alguma
-  classe, ainda sem desempate, para um terceiro. O desempate e um terceiro voto
-  cego: a resposta tambem nao traz as versoes divergentes (desvio consciente da
-  regra 4 do doc 05, secao 4, pendente de decisao).
+  classe. E um terceiro voto cego: a resposta tambem nao traz as versoes
+  divergentes (desvio consciente da regra 4 do doc 05, secao 4, pendente de
+  decisao).
 
 Cegueira tambem vale para os agregados, e a regra e simples: o kappa e a
 consolidacao de qualquer consulta que inclua `a`, `b` ou `desempate` sao so de
@@ -20,8 +23,9 @@ terceiro do desempate nunca votou em a/b, consultaria a+b e depois receberia a
 foto divergente ja sabendo os votos; quem votou na a compararia `lab02+b` com o
 `rotulos.csv` versionado.
 
-A ordem do `/proxima` e propria de cada rotulador (md5 de foto e usuario): com
-uma ordem unica, um rotulador saberia qual foto o outro vai receber.
+A ordem do `/proxima` e propria de cada rotulador: md5 de salt secreto do
+servidor (`ROTULAGEM_SALT`), foto e usuario. Com uma ordem unica, ou com md5 sem
+salt sobre ids sequenciais, um rotulador calcularia qual foto o outro recebe.
 """
 
 import csv
@@ -32,6 +36,7 @@ from dataclasses import dataclass
 from sqlalchemy import and_, exists, func, select
 from sqlalchemy.orm import Session
 
+from inspecao.config import get_settings
 from inspecao.enums import ORDEM_PAPEL, Papel, RodadaRotulagem
 from inspecao.models import Foto, Lote, Rotulo, Usuario
 from inspecao.rotulagem.consolidacao import (
@@ -100,32 +105,30 @@ def fotos_divergentes(db: Session) -> list[int]:
 
 
 def condicao_elegivel(db: Session, usuario_id: int, rodada: RodadaRotulagem):
-    """Foto que este usuario pode rotular nesta rodada (sem olhar quem ja rotulou)."""
+    """Foto que este usuario pode rotular nesta rodada. A mesma condicao filtra o
+    `/proxima` e valida o POST: a regra nao depende de por onde o rotulo chega."""
     outras = [r for r in RODADAS_DA_TELA if r is not rodada]
     if rodada is RodadaRotulagem.DESEMPATE:
         candidatas = Foto.id.in_(fotos_divergentes(db))
     else:
         candidatas = _tem_rotulo_na_rodada(AMOSTRA)
-    return and_(candidatas, ~_rotulou(usuario_id, outras))
+    return and_(candidatas, ~_tem_rotulo_na_rodada(rodada), ~_rotulou(usuario_id, outras))
 
 
 def proxima_foto(db: Session, usuario_id: int, rodada: RodadaRotulagem) -> tuple[Foto | None, int]:
     """Proxima foto da rodada e quantas ainda restam para este usuario.
 
-    Fica de fora a foto que ja tem rotulo nesta rodada, de qualquer pessoa: cada
-    rodada rotula cada foto uma vez. A ordem e pelo md5 de "foto:usuario": estavel
-    entre chamadas, intercala os lotes e e diferente para cada rotulador.
+    A ordem e o md5 de "salt:foto:usuario", com o salt secreto do servidor: estavel
+    entre chamadas, intercala os lotes, e diferente e nao calculavel para cada
+    rotulador. `restantes` cai quando outra pessoa vota numa foto da rodada.
     """
-    filtro = and_(
-        condicao_elegivel(db, usuario_id, rodada),
-        ~_tem_rotulo_na_rodada(rodada),
-        ~_rotulou(usuario_id, [rodada]),
-    )
+    filtro = condicao_elegivel(db, usuario_id, rodada)
+    salt = get_settings().salt_da_rotulagem()
     restantes = db.scalar(select(func.count()).select_from(Foto).where(filtro)) or 0
     foto = db.scalars(
         select(Foto)
         .where(filtro)
-        .order_by(func.md5(func.concat(Foto.id, ":", usuario_id)), Foto.id)
+        .order_by(func.md5(func.concat(salt, ":", Foto.id, ":", usuario_id)), Foto.id)
         .limit(1)
     ).first()
     return foto, restantes

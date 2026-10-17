@@ -354,4 +354,9 @@ def test_ambiente_producao_recusa_placeholders():
         Settings(ambiente="producao", jwt_secret="trocar_em_producao", admin_senha_inicial="x" * 20)
     with pytest.raises(ValueError, match="JWT_ALG"):
         Settings(jwt_alg="none")
-    Settings(ambiente="producao", jwt_secret="s" * 40, admin_senha_inicial="p" * 20)  # ok
+    Settings(
+        ambiente="producao",
+        jwt_secret="s" * 40,
+        admin_senha_inicial="p" * 20,
+        rotulagem_salt="r" * 32,
+    )  # ok

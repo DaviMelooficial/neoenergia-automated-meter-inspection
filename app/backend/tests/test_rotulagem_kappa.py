@@ -159,5 +159,11 @@ def test_relatorio_kappa_md_traz_gate_desvios_e_aceite_pendente():
         "T-M6-02",
         "o kappa das rodadas cegas é só para admin, e admin\n   não rotula nelas",
         "editada no lugar",
+        "uq_rotulos_foto_rodada_cega",
+        "ROTULAGEM_SALT",
+        "papel de rotulador separado",
+        "Ancoragem",
+        "Troca de papel",
+        "`restantes` revela que houve voto",
     ):
         assert trecho in md, trecho

@@ -4,11 +4,14 @@ import { useState } from "react";
 
 import { mensagemDeErro } from "../api/client";
 import { rotulagem, type ConsolidacaoOut, type RodadaRotulagem } from "../api/servicos";
+import { useAuth } from "../auth/AuthContext";
 
-const CONJUNTOS: { value: string; label: string; rodadas: RodadaRotulagem[] }[] = [
-  { value: "lab02", label: "Lab 2 (importado)", rodadas: ["lab02"] },
-  { value: "ab", label: "Rodadas A + B", rodadas: ["a", "b"] },
-  { value: "abd", label: "A + B + desempate", rodadas: ["a", "b", "desempate"] },
+// `cega`: rodada ainda em curso. O servidor so mostra o kappa dela para admin (ou
+// para quem nao votou nela); a tela oferece a opcao so para admin.
+const CONJUNTOS: { value: string; label: string; rodadas: RodadaRotulagem[]; cega: boolean }[] = [
+  { value: "lab02", label: "Lab 2 (importado)", rodadas: ["lab02"], cega: false },
+  { value: "ab", label: "Rodadas A + B", rodadas: ["a", "b"], cega: true },
+  { value: "abd", label: "A + B + desempate", rodadas: ["a", "b", "desempate"], cega: true },
 ];
 
 const fmt = (k: number | null | undefined) =>
@@ -26,12 +29,16 @@ function Gate({ kappa, passa, limiar }: { kappa: number | null; passa: boolean; 
 
 /**
  * Kappa de Cohen por classe, media dos pares de rotuladores ponderada pelo n de
- * fotos em comum, com o gate do M6 sinalizado. So agregados: nenhum rotulo por foto,
- * entao pode ficar visivel para quem ainda esta rotulando.
+ * fotos em comum, com o gate do M6 sinalizado. Mesmo sem rotulo por foto, o kappa
+ * de uma rodada em curso vaza por diferenca: com n pequeno, comparar o painel
+ * antes e depois do proprio voto revela o voto do outro. Por isso as rodadas
+ * cegas so aparecem para admin; o servidor tambem recusa (403).
  */
 export function PainelKappa() {
+  const { temPapel } = useAuth();
+  const disponiveis = CONJUNTOS.filter((c) => !c.cega || temPapel("admin"));
   const [conjunto, setConjunto] = useState("lab02");
-  const rodadas = CONJUNTOS.find((c) => c.value === conjunto)!.rodadas;
+  const rodadas = disponiveis.find((c) => c.value === conjunto)!.rodadas;
   const { data, isLoading, error } = useQuery<ConsolidacaoOut>({
     queryKey: ["rotulagem", "consolidacao", conjunto],
     queryFn: () => rotulagem.consolidacao(rodadas),
@@ -41,12 +48,14 @@ export function PainelKappa() {
     <Stack gap="sm">
       <Group justify="space-between">
         <Title order={4}>Concordância entre rotuladores</Title>
-        <SegmentedControl
-          size="xs"
-          value={conjunto}
-          onChange={setConjunto}
-          data={CONJUNTOS.map(({ value, label }) => ({ value, label }))}
-        />
+        {disponiveis.length > 1 && (
+          <SegmentedControl
+            size="xs"
+            value={conjunto}
+            onChange={setConjunto}
+            data={disponiveis.map(({ value, label }) => ({ value, label }))}
+          />
+        )}
       </Group>
       {isLoading && <Loader size="sm" />}
       {error && (

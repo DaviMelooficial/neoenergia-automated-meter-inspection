@@ -29,6 +29,7 @@ import {
   LEGIVEL,
   legivelImposto,
   RASCUNHO_VAZIO,
+  segundosNaFoto,
   type RascunhoRotulo,
 } from "../components/esquemaRotulagem";
 import { PainelKappa } from "../components/PainelKappa";
@@ -154,7 +155,7 @@ function Rotular() {
         cena: rascunho.cena!,
         defeitos: rascunho.defeitos,
         legivel: rascunho.legivel!,
-        segundos_na_foto: Math.round((Date.now() - inicio.current) / 100) / 10,
+        segundos_na_foto: segundosNaFoto(inicio.current, Date.now()),
       });
       setGravadas((n) => n + 1);
       await carregar(rodada);

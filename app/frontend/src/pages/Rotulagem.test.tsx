@@ -9,7 +9,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { AxiosError, type AxiosResponse } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConsolidacaoOut, FotoRotulagemOut } from "../api/servicos";
+import { ORDEM_PAPEL, type ConsolidacaoOut, type FotoRotulagemOut, type Papel } from "../api/servicos";
+import { AuthContext, type EstadoAuth } from "../auth/AuthContext";
 
 vi.mock("../api/servicos", async (importar) => {
   const real = await importar<typeof import("../api/servicos")>();
@@ -52,14 +53,32 @@ const CONSOLIDACAO: ConsolidacaoOut = {
   pares: [{ a: "x", b: "y", n: 4, kappa: { cena: 0.744, tampa_suja: 0.148, display_apagado: null } }],
 };
 
-function renderizar() {
+function renderizar(papel: Papel = "supervisor") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const auth: EstadoAuth = {
+    usuario: {
+      id: 7,
+      nome: "Rotuladora",
+      email: "r@teste.com.br",
+      papel,
+      ativo: true,
+      precisa_trocar_senha: false,
+      criado_em: new Date().toISOString(),
+    },
+    carregando: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    recarregar: vi.fn(),
+    temPapel: (m) => ORDEM_PAPEL[papel] >= ORDEM_PAPEL[m],
+  };
   return render(
     <MantineProvider>
       <Notifications />
-      <QueryClientProvider client={client}>
-        <Rotulagem />
-      </QueryClientProvider>
+      <AuthContext.Provider value={auth}>
+        <QueryClientProvider client={client}>
+          <Rotulagem />
+        </QueryClientProvider>
+      </AuthContext.Provider>
     </MantineProvider>,
   );
 }
@@ -179,8 +198,42 @@ describe("Rotulagem", () => {
     await screen.findByText("foto #2");
   });
 
-  it("painel de kappa sinaliza o gate de 0,6 por classe", async () => {
-    renderizar();
+  it("tempo na foto acima do teto do servidor vai nulo, e o rotulo grava", async () => {
+    const agora = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      renderizar();
+      await screen.findByText("foto #1");
+      agora.mockReturnValue(1_000_000 + 12_340);
+      tecla("1");
+      tecla("s");
+      tecla("Enter");
+      await screen.findByText("foto #2");
+      expect(mock.gravar.mock.calls[0][1].segundos_na_foto).toBe(12.3);
+
+      agora.mockReturnValue(1_000_000 + 12_340 + 3_700_000); // aba esquecida por 1 h
+      tecla("1");
+      tecla("s");
+      tecla("Enter");
+      await screen.findByText("foto #3");
+      expect(mock.gravar.mock.calls[1][1].segundos_na_foto).toBeNull();
+    } finally {
+      agora.mockRestore();
+    }
+  });
+
+  it("supervisor so ve o kappa do lab02: rodadas cegas ficam fora do painel", async () => {
+    renderizar("supervisor");
+    await screen.findByText("foto #1");
+    fireEvent.click(screen.getByRole("tab", { name: "Kappa por classe" }));
+    await screen.findByTestId("kappa-cena");
+    expect(screen.queryByText("Rodadas A + B")).not.toBeInTheDocument();
+    expect(screen.queryByText("A + B + desempate")).not.toBeInTheDocument();
+    expect(mock.consolidacao).toHaveBeenCalledTimes(1);
+    expect(mock.consolidacao).toHaveBeenCalledWith(["lab02"]);
+  });
+
+  it("painel de kappa sinaliza o gate de 0,6 por classe (admin ve as rodadas cegas)", async () => {
+    renderizar("admin");
     await screen.findByText("foto #1");
     fireEvent.click(screen.getByRole("tab", { name: "Kappa por classe" }));
     const cena = await screen.findByTestId("kappa-cena");

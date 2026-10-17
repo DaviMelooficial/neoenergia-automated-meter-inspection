@@ -402,8 +402,9 @@ export interface paths {
          * Consolidacao
          * @description Kappa de Cohen por classe (media dos pares ponderada por n) e por par.
          *
-         *     Padrao: rodada `lab02`. Juntar rodadas em que o mesmo rotulador votou duas
-         *     vezes na mesma foto devolve 422, porque inflaria a concordancia.
+         *     Padrao: rodada `lab02`. Rodadas cegas: 403 para quem votou em alguma delas
+         *     (exceto admin). Juntar rodadas em que o mesmo rotulador votou duas vezes na
+         *     mesma foto devolve 422, porque inflaria a concordancia.
          */
         get: operations["consolidacao_rotulagem_consolidacao_get"];
         put?: never;

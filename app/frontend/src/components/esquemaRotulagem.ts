@@ -134,3 +134,12 @@ export function escolherLegivel(r: RascunhoRotulo, legivel: boolean): RascunhoRo
 export function completo(r: RascunhoRotulo): boolean {
   return r.cena !== null && r.legivel !== null;
 }
+
+// Teto do servidor para `segundos_na_foto`. Acima disso (aba esquecida aberta) o
+// tempo nao mede nada: vai nulo em vez de travar a gravacao com 422.
+const TETO_SEGUNDOS = 3600;
+
+export function segundosNaFoto(inicioMs: number, agoraMs: number): number | null {
+  const segundos = Math.round((agoraMs - inicioMs) / 100) / 10;
+  return segundos >= 0 && segundos <= TETO_SEGUNDOS ? segundos : null;
+}

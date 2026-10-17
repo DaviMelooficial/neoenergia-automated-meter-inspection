@@ -11,14 +11,17 @@ Metricas por semente (media +- desvio) e da semente escolhida, sempre por classe
 - cena: F1 por classe e macro-F1;
 - defeitos (informativo, kappa humano 0,15 a 0,41): F1 e AUROC contra a maioria humana.
 
-V0 = heuristica@v1 (p_ruim gravado no banco, exportado pelo make relatorio-heuristicas):
-mesmo conjunto rotulado, limiar de macro-F1 escolhido na validacao, e a politica@v1 (0,85)
-para a rejeicao. Cobertura da rejeicao tambem na base inteira (11.419 leituras com foto).
+Heuristica = heuristica@v1 (p_ruim gravado no banco, exportado pelo make
+relatorio-heuristicas): mesmo conjunto rotulado, limiar de macro-F1 escolhido na validacao.
+A rejeicao dela sai em dois protocolos: a politica@v1 em operacao (0,85, escolhida no M5 por
+inspecao visual) e o MESMO protocolo do modelo (zero FP na validacao), que e a comparacao
+justa. Cobertura tambem na base inteira (11.419 leituras com foto, inclui treino e
+validacao) e so no lote de teste. Bootstrap pareado no teste para as diferencas.
 
 Criterio de entrada (decisao do Davi, 2026-10-16), os tres juntos:
-  E1 macro-F1 de legivel no teste > a da V0 no mesmo conjunto;
+  E1 macro-F1 de legivel no teste > a da heuristica no mesmo conjunto;
   E2 zero falso positivo no teste com o limiar calibrado na validacao;
-  E3 cobertura de rejeicao na base inteira >= a da V0 (0,76%).
+  E3 cobertura de rejeicao na base inteira >= a da heuristica na politica@v1 (0,76%).
 """
 
 from __future__ import annotations
@@ -44,11 +47,48 @@ from sklearn.metrics import (
 )
 
 from mlinsp import modelo, qualidade, seletiva
+from mlinsp.calibrate import limiar_zero_fp
 from mlinsp.dados import CENAS, DEFEITOS
 from mlinsp.relatorio_heuristicas import ler_exportacao
 
 LIMIAR_V1 = 0.85  # politica@v1 (app/backend/src/inspecao/inference/politica.py)
-COBERTURA_V0_BASE = 0.0076
+COBERTURA_HEURISTICA_BASE = 0.0076
+LOTE_TESTE = "030726"
+N_BOOTSTRAP = 5000
+
+
+def bootstrap_pareado(p_modelo: dict, rot_teste: pd.DataFrame, p_heuristica: pd.Series,
+                      limiar_heuristica: float, n: int = N_BOOTSTRAP, seed: int = 0) -> dict:
+    """Reamostra as fotos do teste (as mesmas para os dois) e mede modelo - heuristica em
+    macro-F1 (modelo a 0,5, heuristica no limiar de macro-F1 da validacao), AUROC e PR-AUC.
+    Devolve, por semente, os quantis 2,5/50/97,5% e P(delta <= 0)."""
+    comum = rot_teste.index.intersection(p_heuristica.index)
+    y_leg = rot_teste.loc[comum, "legivel"].to_numpy()
+    ok = ~np.isnan(y_leg)
+    y = (1 - y_leg[ok]).astype(int)
+    ph = p_heuristica.loc[comum].to_numpy()[ok]
+    pos = rot_teste.index.get_indexer(comum)
+    rng = np.random.default_rng(seed)
+    amostras = [i for i in (rng.integers(0, len(y), len(y)) for _ in range(n))
+                if 0 < y[i].sum() < len(i)]
+    saida = {}
+    for s, p in p_modelo.items():
+        pm = p[pos][ok]
+        deltas = {"macro_f1": [], "auroc": [], "pr_auc": []}
+        for i in amostras:
+            yy = y[i]
+            deltas["macro_f1"].append(
+                f1_score(yy, pm[i] >= 0.5, average="macro", labels=[0, 1], zero_division=0)
+                - f1_score(yy, ph[i] >= limiar_heuristica, average="macro", labels=[0, 1],
+                           zero_division=0))
+            deltas["auroc"].append(roc_auc_score(yy, pm[i]) - roc_auc_score(yy, ph[i]))
+            deltas["pr_auc"].append(
+                average_precision_score(yy, pm[i]) - average_precision_score(yy, ph[i]))
+        saida[s] = {k: {"q2.5_50_97.5": np.round(np.percentile(v, [2.5, 50, 97.5]), 3).tolist(),
+                        "p_delta_menor_ou_igual_0": round(float(np.mean(np.array(v) <= 0)), 3)}
+                    for k, v in deltas.items()}
+    saida["reamostras"] = len(amostras)
+    return saida
 
 
 def wilson(k: int, n: int, z: float = 1.959964) -> list[float] | None:
@@ -193,75 +233,107 @@ def main(argv: list[str] | None = None) -> int:
     escolhida = cal["semente_escolhida"]
     sel = por_semente[escolhida]
 
-    # ---- V0 no mesmo conjunto (fotos rotuladas que estao no banco)
-    v0 = {}
-    for s in ("validacao", "teste"):
-        r = rot[s].join(exp["p_ruim"], how="inner")
-        v0[s] = r
-    t_v0 = melhor_limiar_macro_f1(v0["validacao"]["p_ruim"].to_numpy(),
-                                  v0["validacao"]["legivel"].to_numpy())
-    te_v0 = v0["teste"]
-    m_v0 = {
-        "n_teste_no_banco": len(te_v0),
-        "limiar_macro_f1_validacao": t_v0,
-        "legivel": metricas_legivel(te_v0["p_ruim"].to_numpy(), te_v0["legivel"].to_numpy(), t_v0),
-        "rejeicao_politica_v1": rejeicao(te_v0["p_ruim"].to_numpy(),
-                                         te_v0["legivel_algum"].to_numpy(), LIMIAR_V1),
-        "cobertura_max_zero_fp": cobertura_maxima_zero_fp(
-            te_v0["p_ruim"].to_numpy(), te_v0["legivel_algum"].to_numpy()),
-        "cobertura_base": float((exp["p_ruim"] >= LIMIAR_V1).mean()),
+    # ---- heuristica@v1 no mesmo conjunto (fotos rotuladas que estao no banco)
+    heu = {s: rot[s].join(exp["p_ruim"], how="inner") for s in ("validacao", "teste")}
+    t_heu = melhor_limiar_macro_f1(heu["validacao"]["p_ruim"].to_numpy(),
+                                   heu["validacao"]["legivel"].to_numpy())
+    te_heu = heu["teste"]
+    p_heu, la_heu = te_heu["p_ruim"].to_numpy(), te_heu["legivel_algum"].to_numpy()
+    # Mesmo protocolo do modelo: limiar de zero FP na validacao, arredondado para cima.
+    lim_mesmo = limiar_zero_fp(heu["validacao"]["p_ruim"].to_numpy(),
+                               heu["validacao"]["legivel_algum"].to_numpy())["limiar"]
+    lotes = exp["lote"].to_numpy()
+    no_teste = np.char.find(lotes.astype(str), LOTE_TESTE) >= 0
+    p_ruim_base = exp["p_ruim"].to_numpy()
+
+    def cobertura_base(rej: np.ndarray) -> dict:
+        return {"rejeitadas": int(rej.sum()), "cobertura": float(rej.mean()),
+                "cobertura_lote_teste": float(rej[no_teste].mean())}
+
+    m_heu = {
+        "n_teste_no_banco": len(te_heu),
+        "limiar_macro_f1_validacao": t_heu,
+        "legivel": metricas_legivel(p_heu, te_heu["legivel"].to_numpy(), t_heu),
+        "rejeicao_politica_v1": {
+            "limiar": LIMIAR_V1, **rejeicao(p_heu, la_heu, LIMIAR_V1),
+            "base": cobertura_base(p_ruim_base >= LIMIAR_V1)},
+        "rejeicao_mesmo_protocolo": {
+            "limiar": lim_mesmo, **rejeicao(p_heu, la_heu, lim_mesmo),
+            "base": cobertura_base(p_ruim_base >= lim_mesmo) if lim_mesmo is not None else None},
+        "cobertura_max_zero_fp": cobertura_maxima_zero_fp(p_heu, la_heu),
     }
 
-    # ---- modelo escolhido na base inteira (mesmas 11.419 leituras da exportacao)
+    # ---- cada semente na base inteira (mesmas 11.419 leituras da exportacao)
     device = modelo.escolher_device()
-    m = modelo.ModeloTriagem(pretreinado=False)
-    m.load_state_dict(torch.load(dir_art / f"modelo_s{escolhida}.pt", map_location="cpu"))
     part = qualidade.base_particionada(args.base)
     caminhos = list(part.loc[exp.index, "caminho"])
-    t0 = time.perf_counter()
-    p_base = p_ilegivel_base(m, caminhos, cal["temperatura_legivel"], device)
-    seg_base = time.perf_counter() - t0
+    p_base_sem, seg_base = {}, {}
+    for s_txt, c in cal["por_semente"].items():
+        m = modelo.ModeloTriagem(pretreinado=False)
+        m.load_state_dict(torch.load(dir_art / f"modelo_s{s_txt}.pt", map_location="cpu"))
+        t0 = time.perf_counter()
+        p_base_sem[int(s_txt)] = p_ilegivel_base(m, caminhos, c["temperatura_legivel"], device)
+        seg_base[int(s_txt)] = round(time.perf_counter() - t0, 1)
+        del m
     limiar = cal["limiar"]
-    rej_base = (p_base >= limiar) if limiar is not None else np.zeros(len(p_base), bool)
-    lotes = exp["lote"].to_numpy()
+    p_base = p_base_sem[escolhida]
+
+    def rejeita(p: np.ndarray, lim) -> np.ndarray:
+        return (p >= lim) if lim is not None else np.zeros(len(p), bool)
+
+    rej_base = rejeita(p_base, limiar)
+    rej_heu = p_ruim_base >= LIMIAR_V1
     base = {
         "leituras": len(p_base),
-        "rejeitadas": int(rej_base.sum()),
-        "cobertura": float(rej_base.mean()),
+        **cobertura_base(rej_base),
         "por_lote": {lote: {"leituras": int((lotes == lote).sum()),
                             "rejeitadas": int(rej_base[lotes == lote].sum())}
                      for lote in sorted(set(lotes))},
-        "concordancia_com_v0": {
-            "ambos_rejeitam": int((rej_base & (exp["p_ruim"].to_numpy() >= LIMIAR_V1)).sum()),
-            "so_modelo": int((rej_base & (exp["p_ruim"].to_numpy() < LIMIAR_V1)).sum()),
-            "so_v0": int((~rej_base & (exp["p_ruim"].to_numpy() >= LIMIAR_V1)).sum()),
+        "concordancia_com_heuristica_v1": {
+            "ambos_rejeitam": int((rej_base & rej_heu).sum()),
+            "so_modelo": int((rej_base & ~rej_heu).sum()),
+            "so_heuristica": int((~rej_base & rej_heu).sum()),
         },
-        "segundos_inferencia_mps": round(seg_base, 1),
+        "segundos_inferencia_mps": seg_base[escolhida],
+        "nota": "a base inteira inclui as fotos de treino e validacao; ver cobertura_lote_teste",
     }
     pd.DataFrame({"arquivo": exp.index, "lote": lotes, "p_ilegivel": p_base,
-                  "p_ruim_v0": exp["p_ruim"].to_numpy()}).to_csv(
-        dir_art / "p_ilegivel_base.csv", index=False)
+                  "p_ruim_heuristica": p_ruim_base}).to_csv(dir_art / "p_ilegivel_base.csv", index=False)
 
-    # ---- criterio de entrada
-    e1 = sel["legivel"]["macro_f1"] > m_v0["legivel"]["macro_f1"]
-    e2 = limiar is not None and sel["rejeicao"]["falsos_positivos"] == 0
-    e3 = base["cobertura"] >= COBERTURA_V0_BASE
-    entrada = {"E1_macro_f1_maior_que_v0": bool(e1), "E2_zero_fp_no_teste": bool(e2),
-               "E3_cobertura_base_maior_ou_igual_v0": bool(e3),
-               "entra": bool(e1 and e2 and e3)}
+    # ---- criterio de entrada, por semente (a escolhida decide; as outras mostram a variancia)
+    def criterio(s: int) -> dict:
+        e1 = por_semente[s]["legivel"]["macro_f1"] > m_heu["legivel"]["macro_f1"]
+        lim_s = cal["por_semente"][str(s)]["limiar"]
+        e2 = lim_s is not None and por_semente[s]["rejeicao"]["falsos_positivos"] == 0
+        cob = float(rejeita(p_base_sem[s], lim_s).mean())
+        e3 = cob >= COBERTURA_HEURISTICA_BASE
+        return {"E1_macro_f1_maior_que_heuristica": bool(e1), "E2_zero_fp_no_teste": bool(e2),
+                "E3_cobertura_base_maior_ou_igual_heuristica": bool(e3),
+                "cobertura_base": cob, "entra": bool(e1 and e2 and e3)}
+
+    criterio_sementes = {s: criterio(s) for s in sorted(por_semente)}
+    entrada = criterio_sementes[escolhida]
+
+    # ---- bootstrap pareado no teste: modelo (cada semente) menos heuristica
+    bootstrap = bootstrap_pareado(
+        {s: por_semente[s]["_p_teste"] for s in por_semente},
+        rot["teste"], te_heu["p_ruim"], t_heu)
 
     # ---- figura: cobertura x risco da rejeicao no teste
     fig, ax = plt.subplots(figsize=(7, 4.2))
     te = rot["teste"]
     cob, risco = curva_rejeicao(sel["_p_teste"], te["legivel_algum"].to_numpy())
     ax.step(cob, risco, where="post", label=f"{qualidade.VERSAO} (semente {escolhida})")
-    cob0, risco0 = curva_rejeicao(te_v0["p_ruim"].to_numpy(), te_v0["legivel_algum"].to_numpy())
-    ax.step(cob0, risco0, where="post", label="heuristica@v1 (V0)")
+    cob0, risco0 = curva_rejeicao(p_heu, la_heu)
+    ax.step(cob0, risco0, where="post", label="heuristica@v1")
     if limiar is not None:
         ax.axvline(sel["rejeicao"]["cobertura"], color="C0", ls=":", lw=1,
                    label="modelo no limiar calibrado")
-    ax.axvline(m_v0["rejeicao_politica_v1"]["cobertura"], color="C1", ls=":", lw=1,
-               label="V0 na politica@v1 (0,85)")
+    ax.axvline(m_heu["rejeicao_politica_v1"]["cobertura"], color="C1", ls=":", lw=1,
+               label="heuristica na politica@v1 (0,85)")
+    if lim_mesmo is not None:
+        ax.axvline(m_heu["rejeicao_mesmo_protocolo"]["cobertura"], color="C1", ls="--", lw=1,
+                   label=f"heuristica no mesmo protocolo ({lim_mesmo:.3f})")
     ax.set_xlabel("fracao do teste auto-rejeitada")
     ax.set_ylabel("falso positivo entre as rejeitadas")
     ax.set_xlim(0, 1)
@@ -289,12 +361,16 @@ def main(argv: list[str] | None = None) -> int:
     qualidade.salvar_json(dir_rep / "avaliacao.json", {
         "rodada": args.rodada, "semente_escolhida": escolhida, "limiar_rejeita": limiar,
         "modelo_por_semente": por_semente, "modelo_media_desvio": resumo_sementes,
-        "v0": m_v0, "base_inteira": base, "criterio_entrada": entrada,
+        "heuristica": m_heu, "base_inteira": base, "criterio_entrada": entrada,
+        "criterio_entrada_por_semente": criterio_sementes, "bootstrap_pareado": bootstrap,
     })
     print(json.dumps({"entrada": entrada, "modelo": {
         "macro_f1": sel["legivel"]["macro_f1"], "rejeicao": sel["rejeicao"],
         "base": {k: base[k] for k in ("rejeitadas", "cobertura")}},
-        "v0": {"macro_f1": m_v0["legivel"]["macro_f1"], "rejeicao": m_v0["rejeicao_politica_v1"]},
+        "heuristica": {"macro_f1": m_heu["legivel"]["macro_f1"],
+                       "politica_v1": m_heu["rejeicao_politica_v1"],
+                       "mesmo_protocolo": m_heu["rejeicao_mesmo_protocolo"]},
+        "por_semente": criterio_sementes, "bootstrap": bootstrap,
         "sementes": resumo_sementes}, indent=1, default=str))
     return 0
 

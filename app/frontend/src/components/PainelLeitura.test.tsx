@@ -11,7 +11,9 @@ function entrada(status: string, detalhe: Record<string, unknown> | null): Histo
   return { status, ator: "modelo:heuristica@v1", confianca: null, detalhe, criado_em: "" };
 }
 
-function leitura(historico: Historico[]): LeituraOut {
+type Inferencia = LeituraOut["inferencias"][number];
+
+function leitura(historico: Historico[], inferencias: Inferencia[] = []): LeituraOut {
   return {
     id: 1,
     lote: "PSP_EXTRATLEITIMPL_200526_0352",
@@ -27,7 +29,7 @@ function leitura(historico: Historico[]): LeituraOut {
     nota: null,
     fotos: [],
     historico,
-    inferencias: [],
+    inferencias,
     quarentena: [],
     revisoes: [],
   };
@@ -52,5 +54,38 @@ describe("PainelLeitura", () => {
     );
     expect(screen.getByText(/Na fila por: humano · politica@v2/)).toBeInTheDocument();
     expect(screen.queryByText(/politica@v0/)).not.toBeInTheDocument();
+  });
+
+  it("modelo treinado: mostra ilegivel como o score que decide e os defeitos como informativos", () => {
+    const saida = { ilegivel: 0.97, fora_de_foco: 0.8, glare: 0.1, cena: { digital: 0.9 } };
+    render(
+      <MantineProvider>
+        <PainelLeitura
+          leitura={leitura(
+            [],
+            [{ modelo: "qualidade@v1", saida, latencia_ms: 5, criado_em: "" }],
+          )}
+        />
+      </MantineProvider>,
+    );
+    expect(screen.getByText("ilegível (decide)")).toBeInTheDocument();
+    expect(screen.getByText("97%")).toBeInTheDocument();
+    expect(screen.getByTestId("defeitos-informativos")).toBeInTheDocument();
+  });
+
+  it("heuristica: sem barra de ilegivel nem aviso de defeitos informativos", () => {
+    render(
+      <MantineProvider>
+        <PainelLeitura
+          leitura={leitura(
+            [],
+            [{ modelo: "heuristica@v1", saida: { fora_de_foco: 0.9 }, latencia_ms: 3, criado_em: "" }],
+          )}
+        />
+      </MantineProvider>,
+    );
+    expect(screen.queryByText("ilegível (decide)")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("defeitos-informativos")).not.toBeInTheDocument();
+    expect(screen.getByText("90%")).toBeInTheDocument();
   });
 });

@@ -4,10 +4,27 @@ import type { LeituraOut } from "../api/servicos";
 
 const CLASSES = ["fora_de_foco", "glare", "tampa_suja", "enquadramento_incorreto", "display_apagado"];
 
+function Barra({ rotulo, valor, cor }: { rotulo: string; valor?: number; cor: string }) {
+  const v = (valor ?? 0) * 100;
+  return (
+    <div>
+      <Group justify="space-between" gap={4}>
+        <Text size="xs">{rotulo}</Text>
+        <Text size="xs" c="dimmed">
+          {v.toFixed(0)}%
+        </Text>
+      </Group>
+      <Progress value={v} size="sm" color={cor} />
+    </div>
+  );
+}
+
 /** Dados declarados pelo leiturista, ao lado da foto, mais sinais do modelo. */
 export function PainelLeitura({ leitura }: { leitura: LeituraOut }) {
   const ultimaInferencia = leitura.inferencias.at(-1);
   const scores = (ultimaInferencia?.saida ?? {}) as Record<string, number>;
+  // Modelo treinado (M7): decide so por `ilegivel`; os defeitos dele sao informativos.
+  const modeloTreinado = ultimaInferencia?.modelo.startsWith("qualidade@") ?? false;
   // A ultima entrada na fila: re-decisoes (recalcular_decisao, troca de detector)
   // fazem a leitura entrar mais de uma vez, e o motivo que vale e o mais recente.
   const motivoFila = [...leitura.historico].reverse().find((h) => h.status === "fila_humana")
@@ -100,16 +117,19 @@ export function PainelLeitura({ leitura }: { leitura: LeituraOut }) {
         <Title order={5}>Sinais do modelo</Title>
         {ultimaInferencia && Object.keys(scores).length > 0 ? (
           <Stack gap={6} mt={4}>
+            <Text size="xs" c="dimmed">
+              {ultimaInferencia.modelo}
+            </Text>
+            {modeloTreinado && (
+              <Barra rotulo="ilegível (decide)" valor={scores.ilegivel} cor="red" />
+            )}
+            {modeloTreinado && (
+              <Text size="xs" c="dimmed" data-testid="defeitos-informativos">
+                Defeitos abaixo: informativos, treinados com degradação sintética; não decidem.
+              </Text>
+            )}
             {CLASSES.map((c) => (
-              <div key={c}>
-                <Group justify="space-between" gap={4}>
-                  <Text size="xs">{c}</Text>
-                  <Text size="xs" c="dimmed">
-                    {((scores[c] ?? 0) * 100).toFixed(0)}%
-                  </Text>
-                </Group>
-                <Progress value={(scores[c] ?? 0) * 100} size="sm" color="orange" />
-              </div>
+              <Barra key={c} rotulo={c} valor={scores[c]} cor={modeloTreinado ? "gray" : "orange"} />
             ))}
           </Stack>
         ) : (

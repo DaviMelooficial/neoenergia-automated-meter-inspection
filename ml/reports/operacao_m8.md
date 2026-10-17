@@ -180,15 +180,24 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
   **decidida** fica: é a medida daquela decisão, que existiu. A decisão nova, inclusive a do auditor se a leitura for
   para a fila, sorteia por conta própria, sem colidir (antes, a unicidade por leitura dava um 409 permanente).
 - **Falso positivo da auto-rejeição: unidade e erro.**
-  - Unidade: a leitura, dentro de um estrato (detector, política) lido da linha do histórico da decisão (ator e
-    `detalhe.politica`). A mesma foto pode ter várias auditorias decididas (reaberta e rejeitada de novo, com a
+  - Unidade: a leitura, dentro de um estrato (detector, política, etapa) lido da linha do histórico da decisão
+    (ator, `detalhe.politica` e o status: `qualidade` para a rejeição da triagem, `validacao` para a rejeição por
+    divergência do ponto B, hoje inalcançável, que mede outra coisa e não se soma). A mesma foto pode ter várias auditorias decididas (reaberta e rejeitada de novo, com a
     auditoria decidida sobrevivendo à reabertura e taxa de 100%): no estrato, só a auditoria decidida **mais
     antiga** conta. No `inspecao_m8` as 87 foram auto-rejeitadas duas vezes pela v1; só a decisão vigente foi sorteada,
     e mesmo que as duas fossem auditadas, contariam uma vez. Estratos diferentes não se somam: na integração com o M7,
     as auditorias da heurística ficam no estrato `heuristica@v1 · politica@v1` e não entram no da v2.
-  - O endpoint e a tela mostram o estrato da política ativa; admin vê todos (`estratos_auto_rejeitadas`).
-  - Erro: qualquer veredito que não seja "reprovada por uma das 5 classes de qualidade": aprovada, ou reprovada por
-    `outro`. (Na auto-aprovada, qualquer reprovada é erro.)
+  - O endpoint e a tela mostram o estrato da **última decisão automática gravada no histórico** (quem decide de
+    fato), e não o `POLITICA_ATUAL`, que é constante até a integração com o M7; sem nenhuma decisão, cai na política
+    ativa. Admin vê todos (`estratos_auto_rejeitadas`).
+  - **Fotos de calibração e treino ficam fora**: foto com rótulo `lab02` ou das rodadas cegas (a, b, desempate) não é
+    sorteada para auditoria automática e, se já tiver auditoria, não entra no estrato. Motivo: são acerto por
+    construção (o 0,85 foi escolhido com zero falso positivo no Lab 2) e quem as rotulou poderia recebê-las. No
+    `inspecao_m8` eram 3 das 87 (as 3 rejeições do Lab 2); com elas, 299 auditorias sem erro dariam limite real de
+    1,007%, acima de 1%, e o `alvo_atingido` viraria indevidamente.
+  - Erro, na rejeição de qualidade: qualquer veredito que não seja "reprovada por uma das 5 classes de qualidade":
+    aprovada, ou reprovada por `outro`. Na rejeição por divergência (etapa `validacao`), só aprovada é erro, porque
+    `outro` é o motivo da divergência. Na auto-aprovada, qualquer reprovada é erro.
   - O bloco mostra a taxa sempre com o limite superior de 95% (Clopper-Pearson) e o total de leituras auditadas que
     sustentaria precisão ≥ 0,99 com os erros de hoje: **299 sem erro, 473 com 1, 628 com 2** (é o total, não o que
     falta). `alvo_atingido` quando o limite superior é **menor ou igual** a 1%; com 10 auditadas e 0 erro a tela diz
@@ -197,11 +206,13 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     começo é de auto-rejeitadas, e o revisor tende a confirmar a máquina) e a própria definição (um revisor em
     dúvida que reprova por um defeito de qualidade conta como acerto da máquina). Ler o `alvo_atingido` com isso em
     mente.
-- **Tempo para o alvo com taxa de 100%:** os 4 lotes têm 87 auto-rejeições, cerca de 22 por lote. 299 sem erro são
-  cerca de **14 lotes no total, contando os 4 que já existem: faltam uns 10**. Com 1 erro, 473 (~22 lotes); com 2,
-  628 (~29). O limite real é a **vazão do auditor** (cada auditoria é uma decisão a mais na fila dele), não o sorteio.
-- No `inspecao_m8`: 87 de 87 auto-rejeitadas sorteadas (taxa 100%), nenhuma decidida; 0 da fila (não há decisão de
-  conta real).
+- **Tempo para o alvo com taxa de 100%:** os 4 lotes têm 87 auto-rejeições (84 fora as de calibração), cerca de 22
+  por lote, mas a taxa varia de 12 a 32 por lote. 299 sem erro são cerca de **14 lotes no total, contando os 4 que já
+  existem: faltam uns 10**. Com 1 erro, 473 (~22 lotes); com 2, 628 (~29). O limite real é a **vazão do auditor**
+  (cada auditoria é uma decisão a mais na fila dele), não o sorteio. Com a v2 do M7 o estrato **recomeça do zero**, e a
+  vazão passa a ser a de auto-rejeições da v2, não a da heurística.
+- No `inspecao_m8`: 84 de 84 auto-rejeitadas elegíveis sorteadas (taxa 100%; as 3 de calibração ficaram fora),
+  nenhuma decidida; 0 da fila (não há decisão de conta real).
 - **Quem audita:** só o papel `auditor` (decisão pendente acima). Nunca o autor da decisão (POST e banco).
 - **Resposta única:** toda recusa em `/auditoria/{id}/decisao` e `/auditoria/{id}/liberar` é 404
   `{"detail":"auditoria indisponivel"}`, byte a byte igual para "não existe", "é sua", "pendente sem reserva sua",
@@ -231,15 +242,19 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 
 ### Riscos residuais (declarados, não resolvidos)
 
-- **Cegueira de origem é parcial no começo.** Hoje 100% das auditorias pendentes vêm da máquina (87 de 87), e as
+- **Cegueira de origem é parcial no começo.** Hoje 100% das auditorias pendentes vêm da máquina (84 de 84), e as
   primeiras auditorias de produção serão todas de auto-rejeitadas. Em regime a proporção cai: a fila a 7% de ~2.840
   leituras por lote dá ~198 auditorias de fila, contra ~22 automáticas, uns 10%. Um revisor que sabe que as
   automáticas são maioria no começo tende a esperar "reprovada", o que puxa para concordar com a máquina e
   **subestima o falso positivo** (ver a definição de erro acima).
-- **404 depois de uma reserva válida.** Se a máquina reabre a leitura enquanto o revisor está com a auditoria, ela é
-  invalidada e o POST dele dá a recusa única, o que só acontece com item automático. Mitigado: `_redecidivel` não
-  reabre leitura com auditoria pendente reservada (o `recalcular_decisao` e a troca de detector pulam a leitura
-  enquanto a reserva vale, 10 min). Resta o caso de a reserva vencer no meio da decisão.
+- **404 depois de uma reserva válida.** Se a máquina reabrisse a leitura enquanto o revisor está com a auditoria,
+  ela seria invalidada e o POST dele daria a recusa única, o que só acontece com item automático. Fechado por lock:
+  antes de reabrir, o `recalcular_decisao` e a troca de detector em `triagem_qualidade` travam as auditorias pendentes
+  da leitura com `FOR UPDATE SKIP LOCKED` (`handlers._travar_auditorias_pendentes`), e o `/auditoria/proxima` disputa o
+  mesmo lock (`reservar_proxima` também é SKIP LOCKED). Se o revisor está reservando agora, a leitura é pulada; se já
+  reservou, a reserva ativa aparece e a leitura é pulada; se o job trava primeiro, o `/proxima` não entrega aquela
+  auditoria. O UPDATE da invalidação repete o predicado "sem reserva ativa". Teste com duas conexões reais, reserva
+  feita no meio do job. Resta o caso de a reserva **vencer** (10 min) com o revisor ainda decidindo.
 - **Inferência pela observação ao longo do tempo.** O revisor vê lote, linha e medidores no item. Varrendo
   `/fila-humana` ao longo do dia, ele vê quais leituras de um lote estiveram na fila; uma leitura que nunca apareceu
   lá e surge na auditoria é, com alta chance, uma auto-rejeitada. `/leituras/{id}` não ajuda (decisão oculta), mas a
@@ -297,7 +312,12 @@ assim no `inspecao_m8`.
 - `jobs/cli.py`, `--politica default=POLITICA_ATUAL`, fica resolvido pelo M7.
 - `qualidade.LOTES_DE_TESTE` recebe os lotes de teste do detector do M7.
 - `estados.transicionar` já sorteia toda decisão automática gravada; com o M7, as decisões da v2 passam por ali sem
-  mudança, e caem num estrato próprio (`qualidade@v1 · politica@v2`).
+  mudança, e caem num estrato próprio (`qualidade@v1 · politica@v2 · qualidade`), que recomeça do zero.
+- O bloco da tela usa o estrato da última decisão automática do histórico; depois do merge, ele passa a ser o da v2
+  assim que a v2 decidir a primeira leitura. Se o merge trocar `politica_ativa()` por `politica_para(detector)`, o
+  fallback (sem nenhuma decisão) segue o mesmo caminho.
+- `RODADAS_DE_CALIBRACAO` (lab02, a, b, desempate) já exclui as fotos de treino do M7; se o M7 usar outra rodada ou
+  outro conjunto (por exemplo um split próprio), ela precisa entrar ali.
 - A baseline do drift troca junto com o detector.
 
 ## Fora do escopo do M8

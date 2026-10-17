@@ -22,6 +22,7 @@ router = APIRouter(prefix="/fila-humana", tags=["fila-humana"])
 DB = Annotated[Session, Depends(get_db)]
 
 RESERVA = timedelta(minutes=10)
+ITEM_INDISPONIVEL = "item indisponivel para decisao"
 
 
 def _agora() -> datetime:
@@ -159,18 +160,15 @@ def decidir(leitura_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Revi
     leitura = db.scalar(select(Leitura).where(Leitura.id == leitura_id).with_for_update())
     if leitura is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "leitura nao encontrada")
-    if leitura.status_atual != StatusLeitura.FILA_HUMANA:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"leitura nao esta na fila humana (status {leitura.status_atual})",
-        )
     reservada_por_outro = (
         leitura.reservado_por not in (None, usuario.id)
         and leitura.reservado_ate is not None
         and leitura.reservado_ate > _agora()
     )
-    if reservada_por_outro:
-        raise HTTPException(status.HTTP_409_CONFLICT, "item reservado por outro auditor")
+    if leitura.status_atual != StatusLeitura.FILA_HUMANA or reservada_por_outro:
+        # Texto constante para "ja decidida", "reabriu na maquina" e "reservada por
+        # outro": ecoar o status entregaria a decisao a um segundo revisor (M8).
+        raise HTTPException(status.HTTP_409_CONFLICT, ITEM_INDISPONIVEL)
 
     revisao = RevisaoHumana(
         leitura_id=leitura.id,

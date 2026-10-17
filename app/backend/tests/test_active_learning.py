@@ -164,13 +164,16 @@ def test_migracao_reversivel_com_backfill():
 
     with Session(engine) as s:
         lt = fx.lote(s, "0126_0003", date(2026, 1, 2))
-        conta = criar_usuario(s, "backfill@teste.com.br", Papel.AUDITOR)
+        conta = criar_usuario(s, f"backfill{fx.DOMINIO_REAL}", Papel.AUDITOR)
+        e2e = criar_usuario(s, "backfill.e2e@exemplo.com.br", Papel.AUDITOR)
         aprovada, _ = fx.leitura(s, lt, S.APROVADA_HUMANO, fx.scores(0.1))
         reprovada, foto_r = fx.leitura(s, lt, S.REPROVADA_HUMANO, fx.scores(0.1))
         fx.decisao(s, aprovada, conta.id, "aprovada")
         fx.decisao(s, reprovada, conta.id, "reprovada", "tampa_suja")
+        de_teste, _ = fx.leitura(s, lt, S.APROVADA_HUMANO, fx.scores(0.1))
+        fx.decisao(s, de_teste, e2e.id, "aprovada")
         s.commit()
-        lote_id, uid, foto_r_id = lt.id, conta.id, foto_r.id
+        lote_id, uid, foto_r_id, uid_e2e = lt.id, conta.id, foto_r.id, e2e.id
     try:
         engine.dispose()
         command.downgrade(cfg, "c3e1a7d9f204")
@@ -185,10 +188,13 @@ def test_migracao_reversivel_com_backfill():
                 select(Rotulo).where(Rotulo.rodada == "producao", Rotulo.usuario_id == uid)
             ).all()
             assert len(rotulos) == 2 and all(r.revisao_id for r in rotulos)
+            # revisao de conta de teste (E2E/demo) nao vira rotulo no backfill
+            assert not s.scalars(select(Rotulo).where(Rotulo.usuario_id == uid_e2e)).all()
             r = next(r for r in rotulos if r.foto_id == foto_r_id)
             assert (r.legivel, r.tampa_suja, r.reflexo, r.cena) == (False, True, None, None)
     finally:
         with engine.begin() as c:
             c.execute(text("DELETE FROM lotes WHERE id = :i"), {"i": lote_id})
-            c.execute(text("DELETE FROM revisoes_humanas WHERE usuario_id = :u"), {"u": uid})
-            c.execute(text("DELETE FROM usuarios WHERE id = :u"), {"u": uid})
+            for u in (uid, uid_e2e):
+                c.execute(text("DELETE FROM revisoes_humanas WHERE usuario_id = :u"), {"u": u})
+                c.execute(text("DELETE FROM usuarios WHERE id = :u"), {"u": u})

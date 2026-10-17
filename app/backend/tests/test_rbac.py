@@ -47,7 +47,13 @@ ROTAS = [
 ]
 ORDEM = {Papel.AUDITOR: 1, Papel.SUPERVISOR: 2, Papel.ADMIN: 3}
 # Excecao a hierarquia: admin ve o kappa das rodadas cegas, entao nao rotula nelas.
-ADMIN_BARRADO = {("POST", "/rotulagem/proxima"), ("POST", "/rotulagem/1")}
+# Idem na auditoria amostral (M8): admin ve a concordancia por par e por lote.
+ADMIN_BARRADO = {
+    ("POST", "/rotulagem/proxima"),
+    ("POST", "/rotulagem/1"),
+    ("POST", "/auditoria/proxima"),
+    ("POST", "/auditoria/1/decisao"),
+}
 
 
 def chamar(client, metodo, rota, corpo, headers):

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, aliased
 from inspecao import auditoria
 from inspecao.auth.deps import Supervisor
 from inspecao.config import get_settings
+from inspecao.contas_teste import decidida_por_teste, usuario_real
 from inspecao.db import get_db
 from inspecao.enums import DecisaoHumana, StatusLeitura
 from inspecao.jobs import fila
@@ -31,6 +32,7 @@ from inspecao.models import (
 from inspecao.monitoramento import auto_aprovacao, sinais
 from inspecao.monitoramento import drift as drift_mod
 from inspecao.monitoramento import qualidade as qualidade_mod
+from inspecao.rotulagem.servico import eh_admin
 from inspecao.schemas import AutoAprovacaoOut, ConcordanciaAuditoriaOut, DriftOut, QualidadeOut
 
 router = APIRouter(prefix="/metricas", tags=["metricas"])
@@ -71,7 +73,7 @@ def _tempo_medio_decisao(db: Session) -> float | None:
             & (entrada.status == StatusLeitura.FILA_HUMANA.value)
             & (entrada.id < saida.id),
         )
-        .where(saida.status.in_(DECIDIDAS_HUMANO))
+        .where(saida.status.in_(DECIDIDAS_HUMANO), ~decidida_por_teste(saida.leitura_id))
     )
     valor = db.scalar(stmt)
     return float(valor) if valor is not None else None
@@ -102,29 +104,33 @@ def qualidade(db: DB, _: Supervisor, politica: Politica = None) -> QualidadeOut:
     )
     por_status = _por_status(db)
     auto = sum(n for s, n in por_status.items() if s in AUTO)
-    decididas = sum(n for s, n in por_status.items() if s in DECIDIDAS_HUMANO)
     pendentes = por_status.get(StatusLeitura.FILA_HUMANA.value, 0)
     periodo = db.execute(select(func.min(Lote.data_extracao), func.max(Lote.data_extracao))).one()
 
+    real = usuario_real(RevisaoHumana.usuario_id)
     motivos = dict(
         db.execute(
             select(RevisaoHumana.motivo, func.count())
-            .where(RevisaoHumana.decisao == DecisaoHumana.REPROVADA.value)
+            .where(RevisaoHumana.decisao == DecisaoHumana.REPROVADA.value, real)
             .group_by(RevisaoHumana.motivo)
         ).all()
     )
     revisoes = dict(
         db.execute(
-            select(RevisaoHumana.decisao, func.count()).group_by(RevisaoHumana.decisao)
+            select(RevisaoHumana.decisao, func.count()).where(real).group_by(RevisaoHumana.decisao)
         ).all()
     )
     por_auditor = [
         {"usuario_id": uid, "decisoes": n}
         for uid, n in db.execute(
-            select(RevisaoHumana.usuario_id, func.count()).group_by(RevisaoHumana.usuario_id)
+            select(RevisaoHumana.usuario_id, func.count())
+            .where(real)
+            .group_by(RevisaoHumana.usuario_id)
         ).all()
     ]
     baseline, por_lote = qualidade_mod.por_lote(db)
+    # Decisoes de contas de teste (E2E, demo) nao contam como decididas por auditor.
+    decididas = baseline["contagens"]["aprovada_humano"] + baseline["contagens"]["reprovada_humano"]
 
     return QualidadeOut.model_validate(
         {
@@ -143,6 +149,7 @@ def qualidade(db: DB, _: Supervisor, politica: Politica = None) -> QualidadeOut:
             "revisoes_por_decisao": revisoes,
             "produtividade_por_auditor": por_auditor,
             "tempo_medio_decisao_segundos": _tempo_medio_decisao(db),
+            "decididas_conta_teste": baseline["contagens"]["decidida_conta_teste"],
             "jobs": fila.resumo(db),
             "baseline": baseline,
             "por_lote": por_lote,
@@ -177,7 +184,7 @@ def drift(db: DB, _: Supervisor, politica: Politica = None) -> DriftOut:
                 func.count(),
             )
             .join(Leitura, Leitura.id == RevisaoHumana.leitura_id)
-            .where(Leitura.lote_id == lote.id)
+            .where(Leitura.lote_id == lote.id, usuario_real(RevisaoHumana.usuario_id))
         ).one()
         modelos = db.scalars(
             select(func.distinct(ResultadoInferencia.modelo))
@@ -208,6 +215,10 @@ def estado_auto_aprovacao(db: DB, _: Supervisor, politica: Politica = None) -> A
 
 
 @router.get("/auditoria", response_model=ConcordanciaAuditoriaOut)
-def concordancia_auditoria(db: DB, _: Supervisor) -> ConcordanciaAuditoriaOut:
-    """Concordancia primeiro x segundo revisor da auditoria amostral (so agregados)."""
-    return ConcordanciaAuditoriaOut.model_validate(auditoria.concordancia(db))
+def concordancia_auditoria(db: DB, usuario: Supervisor) -> ConcordanciaAuditoriaOut:
+    """Concordancia primeiro x segundo revisor da auditoria amostral. Supervisor ve so os
+    totais com ao menos `min_pares` pares; contagens, por lote e serie so admin (que por
+    isso nao audita)."""
+    return ConcordanciaAuditoriaOut.model_validate(
+        auditoria.concordancia(db, detalhe=eh_admin(usuario))
+    )

@@ -14,12 +14,19 @@ from inspecao.db import get_db
 from inspecao.enums import DecisaoHumana, MotivoReprovacao
 from inspecao.models import AuditoriaAmostral
 from inspecao.rotulagem import producao
+from inspecao.rotulagem.servico import eh_admin
 from inspecao.routers.operacao import carregar_leitura, leitura_completa
-from inspecao.schemas import AuditoriaDecisaoOut, DecisaoIn, ItemAuditoriaOut
+from inspecao.schemas import AuditoriaDecisaoOut, DecisaoIn, ItemAuditoriaOut, QuarentenaCegaOut
 
 router = APIRouter(prefix="/auditoria", tags=["auditoria"])
 DB = Annotated[Session, Depends(get_db)]
 PROPRIA_DECISAO = "o primeiro revisor nao audita a propria decisao"
+ADMIN_NAO_AUDITA = "admin ve a concordancia por par e por lote e por isso nao audita"
+
+
+def _barrar_admin(usuario) -> None:
+    if eh_admin(usuario):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_NAO_AUDITA)
 
 
 def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAuditoriaOut:
@@ -36,7 +43,10 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
         foto_principal=completa.foto_principal,
         fotos=completa.fotos,
         inferencias=completa.inferencias,
-        quarentena=completa.quarentena,
+        quarentena=[
+            QuarentenaCegaOut(tipo=q.tipo, severidade=q.severidade, detalhe=q.detalhe)
+            for q in completa.quarentena
+        ],
         reservado_ate=auditoria.reservado_ate,
         restantes=servico.pendentes_para(db, usuario_id),
     )
@@ -45,7 +55,8 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
 @router.post("/proxima", response_model=ItemAuditoriaOut)
 def proxima(db: DB, usuario: Auditor) -> ItemAuditoriaOut:
     """Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma
-    decisao dele mesmo, nunca uma reservada por outro revisor."""
+    decisao dele mesmo, nunca uma reservada por outro revisor. Admin nao audita."""
+    _barrar_admin(usuario)
     auditoria = servico.reservar_proxima(db, usuario.id)
     if auditoria is None:
         db.rollback()
@@ -81,6 +92,7 @@ def decidir(auditoria_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Au
     decidida ou reservada por outro revisor, 409. O banco repete a regra
     (`ck_auditorias_segundo_revisor`), e a linha fica travada ate o commit.
     """
+    _barrar_admin(usuario)
     if dados.decisao is DecisaoHumana.REPROVADA and dados.motivo is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "reprovacao exige motivo")
     if dados.decisao is DecisaoHumana.APROVADA and dados.motivo is not None:

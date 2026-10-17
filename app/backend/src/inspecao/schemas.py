@@ -264,6 +264,7 @@ class ConsolidacaoOut(BaseModel):
 # ---------------------------------------------------------------- metricas (M8)
 
 BucketDecisao = Literal[
+    "decidida_conta_teste",
     "auto_rejeitada",
     "auto_aprovada",
     "fila_humana",
@@ -306,6 +307,7 @@ class MatrizConcordanciaOut(BaseModel):
 
 class ConcordanciaMaquinaOut(BaseModel):
     fonte: Literal["producao", "lab02"]
+    escopo: str
     politica: str
     n: int
     matriz: MatrizConcordanciaOut
@@ -346,6 +348,7 @@ class QualidadeOut(BaseModel):
     revisoes_por_decisao: dict[str, int]
     produtividade_por_auditor: list[ProdutividadeOut]
     tempo_medio_decisao_segundos: float | None
+    decididas_conta_teste: int = Field(description="decisoes de E2E/demo, fora das medidas")
     jobs: dict[str, dict[str, int]]
     baseline: BaselineQualidadeOut
     por_lote: list[DecisoesLoteOut]
@@ -354,13 +357,15 @@ class QualidadeOut(BaseModel):
 
 
 class SinalOut(BaseModel):
-    """`desvio` = valor - baseline. `n` = denominador do valor no lote."""
+    """`desvio` = valor - baseline. `n` = denominador do valor no lote. `z`: carta p com
+    sobredispersao (so nas fracoes: classes, auto-rejeicao e zona cinzenta)."""
 
     valor: float | None
     baseline: float | None
     desvio: float | None
     alerta: bool
     n: int
+    z: float | None
 
 
 class SinaisLoteOut(BaseModel):
@@ -403,6 +408,9 @@ class BaselineDriftOut(BaseModel):
     n_fotos_com_score: int
     n_pares_discordancia: int
     valores: ValoresBaselineOut | None
+    sobredispersao: dict[str, float] = Field(
+        description="phi da carta p por fracao (qui-quadrado/(k-1) entre os lotes da baseline)"
+    )
 
 
 class CriterioDriftOut(BaseModel):
@@ -417,6 +425,7 @@ class CriterioDriftOut(BaseModel):
     lotes_seguidos_confianca: int
     subida_discordancia: float
     subida_zona_cinzenta: float
+    z_carta_p: float
 
 
 class DriftOut(BaseModel):
@@ -428,27 +437,48 @@ class DriftOut(BaseModel):
     lotes: list[LoteDriftOut]
 
 
+class DiagnosticoZonaOut(BaseModel):
+    """Erro que a faixa p_ruim <= limiar teria no Lab 2 (dentro da amostra). Nao e limiar."""
+
+    limiar: float
+    fonte: Literal["lab02"]
+    n: int
+    ilegiveis: int
+    taxa_erro: float | None
+    limite_inferior_erro: float | None
+
+
 class AutoAprovacaoOut(BaseModel):
     politica: str
     detector: str | None
     limiar_rejeita: float | None
     limiar_aprova: float | None
     ativa: bool
+    contador_aplicavel: bool
     motivo: str
-    limiar_contagem: float
-    origem_limiar_contagem: Literal["politica", "candidato"]
     alvo_erro: float
     confianca: float
     necessarias: int
-    fotos_na_zona: int
+    fotos_na_zona: int | None
     rotuladas_na_zona: int
     erros: int
     acumuladas_sem_erro: int
     limite_superior_erro: float | None
     meta_atingida: bool
+    diagnostico: DiagnosticoZonaOut | None
 
 
 # ---------------------------------------------------------------- auditoria (M8)
+
+
+class QuarentenaCegaOut(BaseModel):
+    """Inconsistencia da leitura sem nenhum id (nem da leitura, nem da foto)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: str
+    severidade: str
+    detalhe: dict[str, Any] | None
 
 
 class ItemAuditoriaOut(BaseModel):
@@ -467,7 +497,7 @@ class ItemAuditoriaOut(BaseModel):
     foto_principal: FotoOut | None
     fotos: list[FotoOut]
     inferencias: list[InferenciaOut]
-    quarentena: list[QuarentenaOut]
+    quarentena: list[QuarentenaCegaOut]
     reservado_ate: datetime | None
     restantes: int
 
@@ -483,11 +513,26 @@ class AuditoriaDecisaoOut(BaseModel):
 
 
 class MedidasConcordanciaOut(BaseModel):
-    n: int
+    n: int | None
     concordancia_decisao: float | None
     kappa_decisao: float | None
     concordancia_motivo: float | None
     kappa_motivo: float | None
+
+
+class TotalConcordanciaOut(MedidasConcordanciaOut):
+    """`suprimido`: menos de `min_pares` pares; o supervisor nao ve a medida."""
+
+    suprimido: bool
+
+
+class AutoAprovadasAuditoriaOut(BaseModel):
+    """Auditorias de leituras auto-aprovadas pela maquina: reprovada = erro da maquina."""
+
+    n: int | None
+    reprovadas_pelo_revisor: int | None
+    taxa_erro: float | None
+    suprimido: bool
 
 
 class ConcordanciaLoteOut(MedidasConcordanciaOut):
@@ -499,12 +544,17 @@ class ConcordanciaDiaOut(MedidasConcordanciaOut):
 
 
 class ConcordanciaAuditoriaOut(BaseModel):
+    """`detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares."""
+
     taxa_configurada: float
-    decisoes_na_fila: int
-    sorteadas: int
+    min_pares: int
+    detalhe: bool
+    decisoes_na_fila: int | None
+    sorteadas: int | None
     taxa_observada: float | None
-    pendentes: int
-    decididas: int
-    total: MedidasConcordanciaOut
+    pendentes: int | None
+    decididas: int | None
+    total: TotalConcordanciaOut
+    auto_aprovadas: AutoAprovadasAuditoriaOut
     por_lote: list[ConcordanciaLoteOut]
     serie: list[ConcordanciaDiaOut]

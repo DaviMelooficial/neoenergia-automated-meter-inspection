@@ -55,13 +55,16 @@ def resumo() -> int:
 
 
 def auditoria_sortear() -> int:
-    """Sorteio da auditoria amostral para as decisoes gravadas antes do M8 (idempotente)."""
+    """Sorteio da auditoria amostral para as decisoes de fila sem sorteio (as gravadas
+    antes do M8) e para as leituras auto-aprovadas. Idempotente; contas de teste ficam
+    de fora."""
     from inspecao import auditoria
 
     with SessionLocal() as sessao:
-        n = auditoria.sortear_decididas(sessao)
+        fila_humana = auditoria.sortear_decididas(sessao)
+        auto = auditoria.sortear_auto_aprovadas(sessao)
         sessao.commit()
-    print(f"{n} leituras decididas sorteadas para segundo revisor")
+    print(f"sorteadas para segundo revisor: {fila_humana} da fila, {auto} auto-aprovadas")
     return 0
 
 

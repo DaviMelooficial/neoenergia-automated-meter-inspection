@@ -21,13 +21,27 @@ Criterio de alerta (desvio = valor do lote - valor da baseline):
 - zona cinzenta (proxy de fabricante ou aparencia nova): fracao com 0,5 <= p_ruim <
   limiar_rejeita. Alerta com desvio > +10 p.p.
 
+Complemento, carta p com sobredispersao (para as fracoes: classes, auto-rejeicao, zona
+cinzenta): z = (p_lote - p_base) / sqrt(phi * p_base * (1 - p_base) / n_lote), com phi =
+qui-quadrado de Pearson / (k - 1) entre os k lotes da baseline (minimo 1). Alerta com
+|z| > 3. Motivo: o limiar absoluto de 10 p.p. e cego para taxas de 1% a 5% (a
+auto-rejeicao fica em 0,8%, com erro-padrao de ~0,17 p.p. por lote); e os lotes de maio
+ja diferem entre si alem do binomial (qui-quadrado ~9,8 com 2 g.l., p ~0,007), o que o
+phi absorve para a carta nao alarmar por variacao normal entre lotes.
+
 Desvios do plano, conscientes: (1) a referencia e a baseline fixa, e nao a media
 movel dos ultimos 5 lotes: so existem 4 lotes, e a media movel sobre eles misturaria
 o lote de teste de julho na propria referencia; (2) lote com menos de 100 fotos com
 score nao dispara alerta (fica marcado `amostra_insuficiente`) e quebra a sequencia
-de lotes seguidos. Os limiares de alerta estao nas constantes abaixo.
+de lotes seguidos; (3) "confianca media" foi definida como a media de
+max(p_ruim, 1 - p_ruim), e "queda sustentada" como cair mais de 0,05 em 2 lotes seguidos;
+(4) a baseline contem os proprios lotes de maio, entao o desvio deles e contra um
+agregado que os inclui. Quando o detector for o do M7, a baseline tem de ser trocada
+junto: o modelo foi treinado em maio, e a confianca dele la e inflada pelo treino. Os
+limiares de alerta estao nas constantes abaixo.
 """
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,6 +62,7 @@ QUEDA_CONFIANCA = 0.05
 LOTES_SEGUIDOS_CONFIANCA = 2
 SUBIDA_DISCORDANCIA = 0.10
 SUBIDA_ZONA_CINZENTA = 0.10
+Z_CARTA_P = 3.0
 
 CRITERIO: dict[str, Any] = {
     "min_fotos": MIN_FOTOS,
@@ -61,6 +76,7 @@ CRITERIO: dict[str, Any] = {
     "lotes_seguidos_confianca": LOTES_SEGUIDOS_CONFIANCA,
     "subida_discordancia": SUBIDA_DISCORDANCIA,
     "subida_zona_cinzenta": SUBIDA_ZONA_CINZENTA,
+    "z_carta_p": Z_CARTA_P,
 }
 
 
@@ -133,7 +149,37 @@ def _acumular(
 
 def _sinal(valor: float | None, base: float | None, n: int) -> dict[str, Any]:
     desvio = None if valor is None or base is None else valor - base
-    return {"valor": valor, "baseline": base, "desvio": desvio, "alerta": False, "n": n}
+    return {"valor": valor, "baseline": base, "desvio": desvio, "alerta": False, "n": n, "z": None}
+
+
+def _sobredispersao(contagens: list[tuple[int, int]]) -> float:
+    """phi = qui-quadrado de Pearson / (k - 1) entre os lotes da baseline, minimo 1."""
+    validos = [(k, n) for k, n in contagens if n]
+    total_n = sum(n for _, n in validos)
+    if len(validos) < 2 or not total_n:
+        return 1.0
+    p = sum(k for k, _ in validos) / total_n
+    if p in (0.0, 1.0):
+        return 1.0
+    chi2 = sum((k - n * p) ** 2 / (n * p * (1 - p)) for k, n in validos)
+    return max(1.0, chi2 / (len(validos) - 1))
+
+
+def _z(k: int, n: int, p_base: float | None, phi: float) -> float | None:
+    if not n or p_base is None or p_base in (0.0, 1.0):
+        return None
+    return (k / n - p_base) / math.sqrt(phi * p_base * (1 - p_base) / n)
+
+
+# fracao -> (contagem, denominador) num Acumulado; a carta p vale para estas
+def _fracoes_contaveis() -> dict[str, Any]:
+    contaveis: dict[str, Any] = {
+        "taxa_auto_rejeicao": lambda a: (a.rejeitadas, a.n),
+        "zona_cinzenta": lambda a: (a.zona, a.n),
+    }
+    for c in CLASSES:
+        contaveis[f"classe:{c}"] = lambda a, c=c: (a.classes[c], a.n_classe[c])
+    return contaveis
 
 
 def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict[str, Any]:
@@ -146,6 +192,16 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
     for lote in na_baseline:
         base.somar(acumulados.get(lote.id, Acumulado()))
     fb = base.fracoes(politica) if base.n else None
+    tem_limiar = politica.limiar_rejeita is not None
+    contaveis = {
+        nome: f
+        for nome, f in _fracoes_contaveis().items()
+        if tem_limiar or nome.startswith("classe:")
+    }
+    phi = {
+        nome: _sobredispersao([f(acumulados.get(lote.id, Acumulado())) for lote in na_baseline])
+        for nome, f in contaveis.items()
+    }
 
     serie: list[dict[str, Any]] = []
     seguidos_rejeicao = 0
@@ -165,6 +221,14 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
         }
         alertas: list[str] = []
         suficiente = a.n >= MIN_FOTOS
+        for nome, f_contagem in contaveis.items():
+            s = (
+                bloco["classes"][nome.removeprefix("classe:")]
+                if nome.startswith("classe:")
+                else bloco[nome]
+            )
+            k, n = f_contagem(a)
+            s["z"] = _z(k, n, s["baseline"], phi[nome]) if fb else None
         if not suficiente:
             seguidos_rejeicao = seguidos_confianca = 0
         else:
@@ -201,6 +265,15 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
             if s["desvio"] is not None and s["desvio"] > SUBIDA_ZONA_CINZENTA:
                 s["alerta"] = True
                 alertas.append(f"zona cinzenta: {_pp(s['desvio'])} contra a baseline")
+            for nome in contaveis:
+                s = (
+                    bloco["classes"][nome.removeprefix("classe:")]
+                    if nome.startswith("classe:")
+                    else bloco[nome]
+                )
+                if s["z"] is not None and abs(s["z"]) > Z_CARTA_P:
+                    s["alerta"] = True
+                    alertas.append(f"carta p, {nome.replace(':', ' ')}: z = {s['z']:+.1f}")
         serie.append(
             {
                 "lote_id": lote.id,
@@ -224,6 +297,7 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
             "n_fotos_com_score": base.n,
             "n_pares_discordancia": base.pares.n,
             "valores": fb,
+            "sobredispersao": phi,
         },
         "serie": serie,
     }

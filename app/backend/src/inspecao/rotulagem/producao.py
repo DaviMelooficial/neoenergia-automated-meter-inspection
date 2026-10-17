@@ -21,6 +21,11 @@ divergencia de leitura com foto boa: `legivel` fica nulo.
 
 As rodadas cegas (a, b, desempate) nao sao afetadas: elas so consultam a propria
 rodada e o `lab02`, e os indices unicos delas filtram por rodada.
+
+Vies de selecao: a fila entrega por data de extracao do lote e id da leitura
+(`fila_humana.consulta_proxima`), nao por p_ruim. Os primeiros rotulos de producao nao
+sao escolhidos pelo score, mas vem do lote mais antigo primeiro (200526); qualquer
+medida por zona de p_ruim feita cedo representa esse lote, nao os quatro.
 """
 
 from sqlalchemy import select

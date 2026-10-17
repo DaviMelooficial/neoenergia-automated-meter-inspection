@@ -9,6 +9,10 @@ Buckets de decisao, sobre o status atual de cada leitura com foto:
 | aprovada_humano   | aprovada_humano                             |
 | reprovada_humano  | reprovada_humano                            |
 | em_processamento  | recebida, triagem_qualidade, validacao_leitura |
+| decidida_conta_teste | aprovada/reprovada_humano por conta de teste (E2E, demo) |
+
+Decisao de conta de teste (`inspecao.contas_teste`) nao e decisao de auditor: fica num
+bucket proprio, fora de aprovada/reprovada (no banco local, as 55 revisoes de E2E e demo).
 
 Taxa = bucket / leituras com foto (status diferente de `sem_foto`). A baseline e o
 agregado dos lotes do banco: no banco real, exatamente os 4 lotes ingeridos, a
@@ -22,9 +26,11 @@ triada, ou triada antes do M5 gravar a politica) fica como `sem_registro`.
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from inspecao.config import get_settings
+from inspecao.contas_teste import decidida_por_teste
 from inspecao.enums import StatusLeitura
 from inspecao.inference.politica import Politica
 from inspecao.models import HistoricoStatus, Leitura, Lote
@@ -40,13 +46,28 @@ BUCKETS: dict[str, tuple[StatusLeitura, ...]] = {
     "em_processamento": (S.RECEBIDA, S.TRIAGEM_QUALIDADE, S.VALIDACAO_LEITURA),
 }
 BUCKET_DO_STATUS = {st.value: b for b, sts in BUCKETS.items() for st in sts}
+TESTE = "decidida_conta_teste"
+BUCKET_DO_STATUS[TESTE] = TESTE
+# Detectores sem treino nem calibracao sobre o Lab 2 alem do limiar do M5. Para os
+# treinados (M7), a concordancia contra o Lab 2 so vale no lote de teste.
+DETECTORES_SEM_TREINO = {"heuristica@v1", "nulo@v0"}
+
+
+def _status():
+    """Status da leitura, com a decisao de conta de teste separada."""
+    humano = Leitura.status_atual.in_([S.APROVADA_HUMANO.value, S.REPROVADA_HUMANO.value])
+    return case((humano & decidida_por_teste(Leitura.id), TESTE), else_=Leitura.status_atual).label(
+        "status"
+    )
+
+
 SAIDAS_DA_TRIAGEM = (S.REJEITADA_QUALIDADE, S.VALIDACAO_LEITURA, S.FILA_HUMANA)
 SEM_REGISTRO = "sem_registro"
 
 
 def decisoes(por_status: dict[str, int]) -> dict[str, Any]:
     """{com_foto, contagens, taxas} a partir da contagem por status."""
-    contagens = dict.fromkeys(BUCKETS, 0)
+    contagens = dict.fromkeys([*BUCKETS, TESTE], 0)
     for st, n in por_status.items():
         if st in BUCKET_DO_STATUS:
             contagens[BUCKET_DO_STATUS[st]] += n
@@ -62,10 +83,9 @@ def _somar(destino: dict[str, int], origem: dict[str, int]) -> None:
 
 def por_lote(db: Session) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """(baseline com os lotes do banco, lista por lote em ordem de extracao)."""
+    st = _status()
     contagem = db.execute(
-        select(Leitura.lote_id, Leitura.status_atual, func.count()).group_by(
-            Leitura.lote_id, Leitura.status_atual
-        )
+        select(Leitura.lote_id, st, func.count()).group_by(Leitura.lote_id, st)
     ).all()
     por_id: dict[int, dict[str, int]] = {}
     for lote_id, st, n in contagem:
@@ -96,12 +116,13 @@ def por_detector(db: Session) -> list[dict[str, Any]]:
         .order_by(HistoricoStatus.leitura_id, HistoricoStatus.id.desc())
         .subquery()
     )
+    st = _status()
     linhas = db.execute(
-        select(ultima.c.ator, ultima.c.politica, Leitura.status_atual, func.count())
+        select(ultima.c.ator, ultima.c.politica, st, func.count())
         .select_from(Leitura)
         .outerjoin(ultima, ultima.c.leitura_id == Leitura.id)
         .where(Leitura.status_atual != S.SEM_FOTO.value)
-        .group_by(ultima.c.ator, ultima.c.politica, Leitura.status_atual)
+        .group_by(ultima.c.ator, ultima.c.politica, st)
     ).all()
     grupos: dict[tuple[str, str], dict[str, int]] = {}
     for ator, politica, st, n in linhas:
@@ -112,7 +133,11 @@ def por_detector(db: Session) -> list[dict[str, Any]]:
 
 
 def _concordancia(
-    politica: Politica, fonte: str, humano: dict[int, bool], resultados: list[sinais.Resultado]
+    politica: Politica,
+    fonte: str,
+    escopo: str,
+    humano: dict[int, bool],
+    resultados: list[sinais.Resultado],
 ) -> dict[str, Any]:
     c = sinais.Concordancia()
     for r in resultados:
@@ -123,6 +148,7 @@ def _concordancia(
             c.adicionar(ilegivel, humano[r.foto_id])
     return {
         "fonte": fonte,
+        "escopo": escopo,
         "politica": politica.versao,
         "n": c.n,
         "matriz": c.matriz,
@@ -134,12 +160,31 @@ def _concordancia(
 def concordancia_maquina_humano(db: Session, politica: Politica) -> list[dict[str, Any]]:
     """Maquina ("ilegivel" = p_ruim >= limiar_rejeita) contra humano, onde ha os dois.
 
-    Duas fontes, separadas para nao misturar populacoes: `producao` (decisao de
-    auditor; so ve o que a maquina mandou para a fila) e `lab02` (amostra fechada do
-    Lab 2, que inclui fotos que a maquina rejeitaria).
+    Duas fontes, separadas para nao misturar populacoes:
+    - `producao`: decisao de auditor (contas reais). So ve o que a maquina mandou para a
+      fila, entao nunca tem par "rejeita";
+    - `lab02`: o Lab 2 e o conjunto de calibracao do limiar do M5, logo DENTRO da
+      amostra: o "zero falso positivo na rejeicao" vale por construcao, e e pelo mesmo
+      motivo que o Lab 2 fica fora do contador da auto-aprovacao. Para detector treinado
+      (M7), so as fotos do lote de teste (fora de `DRIFT_LOTES_BASELINE`, treino e
+      validacao) entram.
     """
     resultados = sinais.ultimos_resultados(db, politica.modelo)
+    escopo_lab02 = "dentro da amostra (calibracao do M5)"
+    resultados_lab02 = resultados
+    if politica.modelo not in DETECTORES_SEM_TREINO:
+        maio = set(
+            db.scalars(select(Lote.id).where(Lote.nome.in_(get_settings().drift_lotes_baseline)))
+        )
+        resultados_lab02 = [r for r in resultados if r.lote_id not in maio]
+        escopo_lab02 = "so o lote de teste (fora de treino e validacao)"
     return [
-        _concordancia(politica, "producao", sinais.veredito_producao(db), resultados),
-        _concordancia(politica, "lab02", sinais.veredito_lab02(db), resultados),
+        _concordancia(
+            politica,
+            "producao",
+            "decisoes de auditor (fora da amostra)",
+            sinais.veredito_producao(db),
+            resultados,
+        ),
+        _concordancia(politica, "lab02", escopo_lab02, sinais.veredito_lab02(db), resultados_lab02),
     ]

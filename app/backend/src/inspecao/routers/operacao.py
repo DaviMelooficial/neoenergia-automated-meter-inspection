@@ -6,12 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from inspecao import auditoria
 from inspecao.auth.deps import Admin, Auditor
 from inspecao.db import get_db
-from inspecao.enums import TipoJob
+from inspecao.enums import StatusLeitura, TipoJob
 from inspecao.jobs import fila
-from inspecao.models import Foto, Leitura, Lote, NotaOcorrencia, Quarentena
+from inspecao.models import Foto, Leitura, Lote, NotaOcorrencia, Quarentena, Usuario
+from inspecao.rotulagem.servico import eh_admin
 from inspecao.schemas import (
     FotoOut,
     IngestBatchIn,
@@ -110,16 +110,46 @@ def listar_lotes(db: DB, _: Auditor) -> list[LoteOut]:
     return saida
 
 
+# Decisoes finais que um segundo revisor poderia conferir (auditoria amostral, M8).
+DECISOES_OCULTAS = {
+    StatusLeitura.APROVADA_HUMANO.value,
+    StatusLeitura.REPROVADA_HUMANO.value,
+    StatusLeitura.AUTO_APROVADA.value,
+}
+STATUS_OCULTO = "decidida"
+
+
+def ocultar_decisao(saida: LeituraOut, leitura: Leitura, usuario: Usuario) -> LeituraOut:
+    """Leitura com decisao final vista por quem nao a tomou nem e admin: status vira
+    `decidida`, saem as revisoes e as linhas de historico da decisao.
+
+    A regra vale para TODA leitura decidida, em auditoria ou nao: bloquear so as que
+    estao em auditoria faria do proprio bloqueio um oraculo de "esta leitura foi
+    sorteada", e um auditor varrendo ids acharia o item que tem para auditar. O custo e
+    pequeno: auditor e supervisor nao precisam ver a decisao alheia para trabalhar; admin
+    ve tudo e por isso nao audita.
+    """
+    autores = {r.usuario_id for r in leitura.revisoes}
+    if leitura.status_atual not in DECISOES_OCULTAS or usuario.id in autores or eh_admin(usuario):
+        return saida
+    return saida.model_copy(
+        update={
+            "status_atual": STATUS_OCULTO,
+            "revisoes": [],
+            "historico": [
+                h
+                for h in saida.historico
+                if h.status not in DECISOES_OCULTAS and not h.ator.startswith("usuario:")
+            ],
+        }
+    )
+
+
 @router.get("/leituras/{leitura_id}", response_model=LeituraOut)
 def obter_leitura(leitura_id: int, db: DB, usuario: Auditor) -> LeituraOut:
-    """Leitura completa. Em auditoria amostral pendente, so o revisor original a ve:
-    status, historico e revisao entregariam a primeira decisao ao segundo revisor."""
-    pendente = auditoria.pendente_da_leitura(db, leitura_id)
-    if pendente is not None and pendente.revisor_original_id != usuario.id:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "leitura em auditoria amostral: decisao oculta"
-        )
-    return leitura_completa(db, carregar_leitura(db, leitura_id))
+    """Leitura completa; decisao final alheia oculta (ver `ocultar_decisao`)."""
+    leitura = carregar_leitura(db, leitura_id)
+    return ocultar_decisao(leitura_completa(db, leitura), leitura, usuario)
 
 
 @router.get("/fotos/{foto_id}/arquivo")

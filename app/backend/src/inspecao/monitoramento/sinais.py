@@ -12,12 +12,13 @@ Definicoes (as mesmas em todos os endpoints):
 - classe ativa: score da classe >= 0,5.
 - zona cinzenta: 0,5 <= p_ruim < limiar_rejeita (o detector acha mais provavel
   ruim do que bom, mas nao a ponto de rejeitar).
-- zona de aprovacao: p_ruim <= limiar_aprova da politica; enquanto a politica nao
-  define um (auto-aprovacao desligada), vale o candidato do M8, 0,05, que so serve
-  para contar a evidencia acumulada e nao decide nada.
+- zona de aprovacao: p_ruim <= limiar_aprova da politica. Politica sem limiar_aprova
+  nao tem zona de aprovacao, e o contador dos 600 nao se aplica a ela. A faixa
+  p_ruim <= 0,05 (`LIMIAR_EXPLORATORIO`) so aparece como diagnostico do erro que essa
+  faixa teria, medido no Lab 2: nao e candidato a limiar.
 - veredito humano de producao, por foto: ilegivel se algum rotulo `producao` da
   foto tem legivel = false; legivel se todos os que tem legivel dizem true. Rotulo
-  com legivel nulo (reprovada por `outro`) nao conta.
+  com legivel nulo (reprovada por `outro`) e rotulo de conta de teste nao contam.
 """
 
 from collections.abc import Mapping
@@ -27,6 +28,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from inspecao.contas_teste import usuario_real
 from inspecao.enums import RodadaRotulagem
 from inspecao.inference import politica as politica_mod
 from inspecao.inference.politica import CLASSES, Politica
@@ -36,7 +38,7 @@ from inspecao.rotulagem.consolidacao import consolidar, kappa_cohen
 
 LIMIAR_CLASSE_ATIVA = 0.5
 INICIO_ZONA_CINZENTA = 0.5
-LIMIAR_APROVA_CANDIDATO = 0.05
+LIMIAR_EXPLORATORIO = 0.05
 
 
 def politica_ativa() -> Politica:
@@ -62,13 +64,6 @@ def na_zona_cinzenta(politica: Politica, p: float | None) -> bool | None:
     if p is None or politica.limiar_rejeita is None:
         return None
     return INICIO_ZONA_CINZENTA <= p < politica.limiar_rejeita
-
-
-def limiar_aprova(politica: Politica) -> tuple[float, str]:
-    """(limiar, origem): o da politica, ou o candidato do M8 quando ela nao tem."""
-    if politica.limiar_aprova is not None:
-        return politica.limiar_aprova, "politica"
-    return LIMIAR_APROVA_CANDIDATO, "candidato"
 
 
 def classes_ativas(saida: Mapping[str, Any]) -> dict[str, bool]:
@@ -104,7 +99,11 @@ def veredito_producao(db: Session) -> dict[int, bool]:
     """foto_id -> legivel segundo os rotulos `producao` (ver docstring do modulo)."""
     consulta = (
         select(Rotulo.foto_id, func.bool_and(Rotulo.legivel))
-        .where(Rotulo.rodada == RodadaRotulagem.PRODUCAO.value, Rotulo.legivel.is_not(None))
+        .where(
+            Rotulo.rodada == RodadaRotulagem.PRODUCAO.value,
+            Rotulo.legivel.is_not(None),
+            usuario_real(Rotulo.usuario_id),
+        )
         .group_by(Rotulo.foto_id)
     )
     return dict(db.execute(consulta).tuples().all())

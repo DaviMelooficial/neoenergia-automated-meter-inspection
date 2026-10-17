@@ -502,11 +502,18 @@ class AuditoriaAmostral(Base):
     nao a traz) e nunca e o primeiro: a regra vale no POST e no banco
     (`ck_auditorias_segundo_revisor`, `ck_auditorias_reserva_de_outro`). Uma auditoria
     por leitura. A decisao do segundo revisor nao muda o status da leitura: serve
-    para medir a concordancia inter-anotador continua.
+    para medir a concordancia inter-anotador continua. Depois de gravada, a decisao e
+    imutavel no banco (gatilho `trg_auditorias_decisao_imutavel`, da migracao).
     """
 
     __tablename__ = "auditorias_amostrais"
     __table_args__ = (
+        CheckConstraint(
+            "CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id "
+            "IS NOT NULL WHEN origem = 'auto_aprovada' THEN revisao_id IS NULL AND "
+            "revisor_original_id IS NULL ELSE false END",
+            name="ck_auditorias_origem",
+        ),
         CheckConstraint(
             "revisor_id IS NULL OR revisor_id <> revisor_original_id",
             name="ck_auditorias_segundo_revisor",
@@ -548,8 +555,15 @@ class AuditoriaAmostral(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     leitura_id: Mapped[int] = mapped_column(ForeignKey("leituras.id", ondelete="CASCADE"))
-    revisao_id: Mapped[int] = mapped_column(ForeignKey("revisoes_humanas.id", ondelete="CASCADE"))
-    revisor_original_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="RESTRICT"))
+    # fila: decisao de auditor (revisao e revisor original preenchidos); auto_aprovada:
+    # decisao da maquina, sem revisao nem revisor original (ck_auditorias_origem).
+    origem: Mapped[str] = mapped_column(String(20), default="fila", server_default="fila")
+    revisao_id: Mapped[int | None] = mapped_column(
+        ForeignKey("revisoes_humanas.id", ondelete="CASCADE"), nullable=True
+    )
+    revisor_original_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True
+    )
     sorteada_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -566,4 +580,4 @@ class AuditoriaAmostral(Base):
     decidida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     leitura: Mapped["Leitura"] = relationship()
-    revisao: Mapped["RevisaoHumana"] = relationship()
+    revisao: Mapped["RevisaoHumana | None"] = relationship()

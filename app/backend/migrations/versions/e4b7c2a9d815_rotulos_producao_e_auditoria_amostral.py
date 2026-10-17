@@ -12,9 +12,16 @@ Create Date: 2026-10-17 10:00:00.000000
 2. `auditorias_amostrais`: item decidido sorteado para um segundo revisor. A
    regra "segundo revisor diferente do primeiro" vive tambem no banco
    (`ck_auditorias_segundo_revisor`), e nao so no endpoint.
+   `origem`: `fila` (decisao de auditor, com revisao e revisor original) ou
+   `auto_aprovada` (decisao da maquina, sem revisao nem revisor original). Decisao
+   gravada nao muda: o gatilho `trg_auditorias_decisao_imutavel` recusa UPDATE de
+   revisor, decisao, motivo, observacao ou data depois de decidida. DELETE fica
+   permitido: a auditoria so some junto com a leitura (cascata de reingestao com
+   `--reprocessar`), como a revisao humana que ela confere.
 3. Backfill: cada revisao humana ja gravada vira um rotulo `producao`, com o mesmo
    mapeamento de `inspecao.rotulagem.producao` (escrito aqui em SQL para a migracao
-   nao depender do codigo de hoje).
+   nao depender do codigo de hoje). Revisoes de contas de teste (dominios de
+   `inspecao.contas_teste`, copiados aqui) ficam de fora.
 
 Downgrade: apaga os rotulos `producao` (eles tem campos nulos, que o esquema
 anterior nao aceita) e a tabela de auditoria. Os rotulos de revisao voltam no
@@ -48,7 +55,28 @@ SELECT DISTINCT ON (f.id, r.usuario_id)
        r.id, r.criado_em
 FROM revisoes_humanas r
 JOIN fotos f ON f.leitura_id = r.leitura_id AND f.principal
+JOIN usuarios u ON u.id = r.usuario_id
+WHERE u.email NOT ILIKE '%@exemplo.com.br' AND u.email NOT ILIKE '%@teste.com.br'
 ORDER BY f.id, r.usuario_id, r.id
+"""
+
+GATILHO = """
+CREATE FUNCTION auditorias_decisao_imutavel() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.decisao IS NOT NULL AND (
+        NEW.revisor_id IS DISTINCT FROM OLD.revisor_id
+        OR NEW.decisao IS DISTINCT FROM OLD.decisao
+        OR NEW.motivo IS DISTINCT FROM OLD.motivo
+        OR NEW.observacao IS DISTINCT FROM OLD.observacao
+        OR NEW.decidida_em IS DISTINCT FROM OLD.decidida_em
+    ) THEN
+        RAISE EXCEPTION 'auditoria % ja decidida: decisao imutavel', OLD.id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_auditorias_decisao_imutavel
+    BEFORE UPDATE ON auditorias_amostrais
+    FOR EACH ROW EXECUTE FUNCTION auditorias_decisao_imutavel();
 """
 
 
@@ -61,8 +89,9 @@ def upgrade() -> None:
     op.create_table('auditorias_amostrais',
     sa.Column('id', sa.BigInteger(), nullable=False),
     sa.Column('leitura_id', sa.BigInteger(), nullable=False),
-    sa.Column('revisao_id', sa.BigInteger(), nullable=False),
-    sa.Column('revisor_original_id', sa.Integer(), nullable=False),
+    sa.Column('origem', sa.String(length=20), server_default='fila', nullable=False),
+    sa.Column('revisao_id', sa.BigInteger(), nullable=True),
+    sa.Column('revisor_original_id', sa.Integer(), nullable=True),
     sa.Column('sorteada_em', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('reservado_por', sa.Integer(), nullable=True),
     sa.Column('reservado_ate', sa.DateTime(timezone=True), nullable=True),
@@ -71,6 +100,7 @@ def upgrade() -> None:
     sa.Column('motivo', sa.String(length=40), nullable=True),
     sa.Column('observacao', sa.Text(), nullable=True),
     sa.Column('decidida_em', sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint("CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id IS NOT NULL WHEN origem = 'auto_aprovada' THEN revisao_id IS NULL AND revisor_original_id IS NULL ELSE false END", name='ck_auditorias_origem'),
     sa.CheckConstraint('revisor_id IS NULL OR revisor_id <> revisor_original_id', name='ck_auditorias_segundo_revisor'),
     sa.CheckConstraint('reservado_por IS NULL OR reservado_por <> revisor_original_id', name='ck_auditorias_reserva_de_outro'),
     sa.CheckConstraint('(revisor_id IS NULL) = (decisao IS NULL) AND (decisao IS NULL) = (decidida_em IS NULL)', name='ck_auditorias_decisao_completa'),
@@ -102,10 +132,13 @@ def upgrade() -> None:
     op.create_index('uq_rotulos_revisao', 'rotulos', ['revisao_id'], unique=True, postgresql_where='revisao_id IS NOT NULL')
     op.create_index('uq_rotulos_auditoria', 'rotulos', ['auditoria_id'], unique=True, postgresql_where='auditoria_id IS NOT NULL')
 
+    op.execute(GATILHO)
     op.execute(BACKFILL)
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS trg_auditorias_decisao_imutavel ON auditorias_amostrais")
+    op.execute("DROP FUNCTION IF EXISTS auditorias_decisao_imutavel()")
     op.execute("DELETE FROM rotulos WHERE rodada = 'producao'")
     op.drop_index('uq_rotulos_auditoria', table_name='rotulos', postgresql_where='auditoria_id IS NOT NULL')
     op.drop_index('uq_rotulos_revisao', table_name='rotulos', postgresql_where='revisao_id IS NOT NULL')

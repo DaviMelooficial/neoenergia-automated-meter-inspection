@@ -108,3 +108,31 @@ def decisao(
         revisao_id=rev.id,
     )
     return rev
+
+
+# Dominio ficticio fora de `contas_teste.DOMINIOS_DE_TESTE`: o M8 so mede decisao de conta
+# real, e as contas de `usuarios_fixture` (@teste.com.br) contam como E2E.
+DOMINIO_REAL = "@campo.example"
+
+
+def contas_reais(db: Session) -> dict:
+    """Um usuario real de cada papel (e um segundo auditor). Idempotente na transacao."""
+    from sqlalchemy import select
+
+    from inspecao.enums import Papel
+    from inspecao.models import Usuario
+    from tests.usuarios_fixture import Conta, criar_usuario
+
+    def conta(nome: str, papel: Papel) -> Conta:
+        email = f"{nome}{DOMINIO_REAL}"
+        existente = db.scalar(select(Usuario).where(Usuario.email == email))
+        if existente is not None:
+            return Conta(id=existente.id, email=email, papel=papel)
+        return criar_usuario(db, email, papel)
+
+    return {
+        "auditor": conta("auditora", Papel.AUDITOR),
+        "auditor2": conta("auditor2", Papel.AUDITOR),
+        "supervisor": conta("supervisora", Papel.SUPERVISOR),
+        "admin": conta("admin", Papel.ADMIN),
+    }

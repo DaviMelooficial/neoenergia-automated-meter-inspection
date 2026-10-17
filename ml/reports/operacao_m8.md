@@ -411,14 +411,45 @@ O que cada pendência virou:
     M7 (`ilegivel` ≥ 0,976 e p_ruim < 0,85): são **355** (89 / 108 / 80 / 78 em 030726 / 200526 / 210526 / 220526),
     em `ml/reports/20261016-213656/inspecao_355.csv`, sem veredito.
 
+- **Rollback v2 → v1:** `DETECTOR_QUALIDADE=heuristica` mais `recalcular --todos --politica politica@v1`. Só o
+  `recalcular` não basta: com o detector ainda em onnx, todo lote novo é triado pela v2. Se a auditoria da decisão da
+  v2 já tinha sido decidida, a regravação sorteia uma auditoria nova da mesma foto. Ela não conta na medida, mas é
+  uma revisão a mais para o auditor.
+- **"Mesma decisão"** compara a última decisão gravada pela máquina (ator, política e `detalhe.decisao`), e não o
+  status. Assim `seguir`, que sai para `validacao_leitura` e acaba na fila pelo sistema, não é reaberta a cada
+  passada quando existir `limiar_aprova`.
+- **Tempo médio de decisão** (`/metricas/qualidade`): uma entrada por decisão, a última `fila_humana` antes dela.
+  Com a regravação, uma leitura pode entrar várias vezes na fila, e o self-join antigo contava a decisão uma vez por
+  entrada.
+
+### Runbook do deploy da integração
+
+1. **Migração.** `alembic current` e depois `alembic upgrade head` (`b5d8f3a1c726`, `d2f6a8c4e913`).
+   - A `d2f6a8c4e913` foi editada no lugar no re-gate (união dos lotes declarados no retroativo).
+   - Banco que aplicou a versão anterior precisa de `alembic downgrade b5d8f3a1c726` e depois `upgrade head`. É o
+     caso do `inspecao_int`, que tinha a `d2f6a8c4e913` com o corpo antigo e foi recriado a partir do
+     `inspecao_m8`.
+2. **Importação.** `make rotulos-importar-inspecao-m7`, antes de qualquer troca para o onnx.
+3. **Primeira passada do `recalcular` depois do deploy.** Toda leitura cuja última saída da triagem não traz
+   `politica` (ou `decisao`) no `detalhe` é regravada uma vez:
+   - ganha 2 linhas de histórico (`triagem_qualidade` e a saída);
+   - as auditorias pendentes da decisão antiga são invalidadas e sorteadas de novo para a decisão regravada.
+
+   As passadas seguintes com a mesma política não gravam nada. Medido no `inspecao_int` (cópia do `inspecao_m8`):
+   0 saídas da máquina sem as duas chaves, então ali nada é regravado por isso.
+4. **Ligar o modelo** (decisão do Davi, depois do veredito das 355): `DETECTOR_QUALIDADE=onnx` e
+   `make triagem-todos`.
+   - A primeira decisão automática da v2 grava a ativação.
+   - Os 4 lotes atuais nunca entram no estrato dela.
+
 Medido no `inspecao_int`, recriado a partir do `inspecao_m8` e migrado até `d2f6a8c4e913` (versão final). O cenário
 foi v1 → v2 → v1: `DETECTOR_QUALIDADE=onnx` + `reprocessar --todos` (11.423 jobs), depois
 `recalcular --todos --politica politica@v1`.
 
-| momento | ativações | atribuição (`por_detector`, 11.419 com foto) | auditorias `auto_rejeitada` |
+| momento | ativações | atribuição (`por_detector`; 11.474 com foto: 11.419 re-decidíveis e 55 humanas em `nulo@v0`) | auditorias `auto_rejeitada` |
 | --- | --- | --- | --- |
 | depois da migração | `politica@v1` (retroativa, decisão 94769, 2026-10-16 23:01 UTC, os 4 lotes) | `heuristica@v1 · politica@v1`: 87 rejeitadas, 11.332 na fila | 87 válidas da v1 |
-| depois da v2 | + `politica@v2` (1ª decisão, os 4 lotes) | `qualidade@v1 · politica@v2`: 425 rejeitadas, 10.994 na fila | 425 válidas da v2 (100% sorteadas); as 87 da v1 invalidadas |
+| depois da v2 | + `politica@v2` (primeira decisão auditada, os 4 lotes) | `qualidade@v1 · politica@v2`: 425 rejeitadas, 10.994 na fila | 425 válidas da v2 (100% sorteadas); as 87 da v1 invalidadas |
 | de volta à v1 | as duas | `heuristica@v1 · politica@v1`: 87 rejeitadas, 11.332 na fila | 87 válidas da v1, uma por rejeitada vigente; 512 invalidadas (87 da v1 antiga e 425 da v2) |
 
 - As 55 decisões humanas ficam intactas o tempo todo, no grupo `nulo@v0` porque foram triadas pela v0 no M3, e

@@ -248,10 +248,13 @@ O M8 (métricas, drift, auditoria amostral) foi escrito sem o código do M7 e en
   sem rótulo. Reprocessado no `inspecao_int`, as 425 auto-rejeições da v2 foram sorteadas (100%). Todas estão fora
   da medida, por lote anterior e por rótulo de calibração. Nenhuma foi decidida, então o estrato vazio ainda não
   mede nada. A medida começa do zero no primeiro lote ingerido depois da ativação.
-- **Voltar para a v1 devolve tudo à v1.** O `recalcular --politica politica@v1` regrava a decisão igual quando ela
-  veio de outra política. No `inspecao_int`, depois de v1 → v2 → v1, as 11.419 leituras com foto ficam atribuídas a
-  `heuristica@v1 · politica@v1`. As 87 rejeitadas têm auditoria válida da v1, e as 55 decisões humanas ficam
-  intactas.
+- **Rollback para a v1.** São dois passos: `DETECTOR_QUALIDADE=heuristica` (o worker volta a triar com a
+  heurística) e `recalcular --todos --politica politica@v1`. Se o detector continuar em onnx, todo lote novo
+  continua sendo triado pela v2. O `recalcular` regrava a decisão igual quando ela veio de outra política. No
+  `inspecao_int`, depois de v1 → v2 → v1, ficam 11.474 leituras com foto: 11.419 atribuídas a
+  `heuristica@v1 · politica@v1` e 55 a `nulo@v0` (as decisões humanas, intactas). As 87 rejeitadas têm auditoria
+  válida da v1. Num rollback em que a auditoria da v2 já tinha sido decidida, a regravação sorteia uma auditoria
+  nova da mesma foto. Ela não conta na medida (lote anterior à ativação), mas custa uma revisão a mais ao auditor.
 - **A inspeção das 355 está preparada:**
   - `make m7-amostra-inspecao RODADA=20261016-213656` gerou `inspecao_355.csv` nesta pasta, com 355 fotos: 89 em
     030726, 108 em 200526, 80 em 210526 e 78 em 220526;

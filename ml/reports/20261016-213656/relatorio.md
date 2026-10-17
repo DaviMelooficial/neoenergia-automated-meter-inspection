@@ -235,18 +235,28 @@ O M8 (métricas, drift, auditoria amostral) foi escrito sem o código do M7 e en
 - **Drift da v2:**
   - a distribuição de classes usa só `ilegivel` (`politica.chaves`). As 5 classes do modelo seguem informativas e
     fora do drift;
-  - a baseline é o lote de teste 03/07, não maio, onde a confiança do modelo é inflada pelo treino.
+  - a baseline é o lote de teste 03/07, não maio, onde a confiança do modelo pode ser inflada pelo treino.
+    Medida, ela fica em 0,8229 no teste e entre 0,8117 e 0,8169 em maio. Com k = 1, o phi não é estimável
+    e o 03/07 é comparado com ele mesmo. Os lotes de maio contra ele medem treino e validação × teste e
+    maio × julho, não drift. O drift da v2 só vale para os lotes ingeridos depois. O 03/07 também contém 89
+    das 355 da inspeção de calibração.
 - **Concordância contra o Lab 2** só nas 84 fotos do lote de teste (`LOTES_DE_TESTE`). No banco de integração deu o
   mesmo E2 da seção 5: 83 pares com legível, 3 rejeitadas e 0 falso positivo.
 - **Falso positivo da auto-rejeição da v2 só em lotes novos.** A primeira decisão automática da `politica@v2`
-  grava a ativação dela com os 4 lotes atuais (tabela `ativacoes_politica`), e nenhum deles entra no estrato
+  grava a ativação dela com os 4 lotes atuais e os do split do M7 declarados na política (`Politica.lotes_de_calibracao`, tabela `ativacoes_politica`), e nenhum deles entra no estrato
   `qualidade@v1 · politica@v2`. As 2.500 fotos do estágio 1 do treino e as fotos de calibração ficam de fora mesmo
-  sem rótulo. Reprocessado no `inspecao_int`: as 425 auto-rejeições da v2 foram sorteadas (100%) e ficaram fora da
-  medida, que começa do zero no primeiro lote ingerido depois da ativação.
+  sem rótulo. Reprocessado no `inspecao_int`, as 425 auto-rejeições da v2 foram sorteadas (100%). Todas estão fora
+  da medida, por lote anterior e por rótulo de calibração. Nenhuma foi decidida, então o estrato vazio ainda não
+  mede nada. A medida começa do zero no primeiro lote ingerido depois da ativação.
+- **Voltar para a v1 devolve tudo à v1.** O `recalcular --politica politica@v1` regrava a decisão igual quando ela
+  veio de outra política. No `inspecao_int`, depois de v1 → v2 → v1, as 11.419 leituras com foto ficam atribuídas a
+  `heuristica@v1 · politica@v1`. As 87 rejeitadas têm auditoria válida da v1, e as 55 decisões humanas ficam
+  intactas.
 - **A inspeção das 355 está preparada:**
   - `make m7-amostra-inspecao RODADA=20261016-213656` gerou `inspecao_355.csv` nesta pasta, com 355 fotos: 89 em
     030726, 108 em 200526, 80 em 210526 e 78 em 220526;
   - o CSV traz nome do arquivo e scores, sem foto nem leitura;
+  - 42 delas também estão na inspeção das 200 do M5 (`inspecao_m5`);
   - `make rotulos-importar-inspecao-m7` grava a rodada de calibração `inspecao_m7`;
   - com o detector onnx configurado, a métrica de auditoria acusa `exclusao_incompleta` até essa importação;
   - preencher `legivel_inspecao` (1/0) e `inspetor` e reimportar troca o rótulo pendente pelo veredito.

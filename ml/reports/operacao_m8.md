@@ -332,9 +332,9 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
    - "confiança média (p_ruim)" foi definida como a média de max(p_ruim, 1 − p_ruim), e "queda sustentada" como
      cair mais de 0,05 contra a baseline em 2 lotes seguidos; o plano não fixava a medida nem o limiar;
    - carta p como complemento, com phi só a partir de 5 lotes;
-   - a baseline troca junto com o detector: o modelo do M7 foi treinado e calibrado em maio, e a confiança dele
-     nesses lotes é inflada pelo treino. Feito na integração: para detector treinado, a baseline são os lotes de
-     teste dele (o 03/07 para a `qualidade@v1`).
+   - a baseline troca junto com o detector: o modelo do M7 foi treinado (20/05 e 21/05) e validado (22/05) em
+     maio, e a confiança dele nesses lotes pode ser inflada pelo treino. Feito na integração: para detector
+     treinado, a baseline são os lotes de teste dele (o 03/07 para a `qualidade@v1`).
 
 ## Migração editada no lugar
 
@@ -375,8 +375,11 @@ O que cada pendência virou:
 - **Estrato só com lotes posteriores à ativação (a regra decidida).** Forma escolhida: tabela `ativacoes_politica`
   (migração `d2f6a8c4e913`), uma linha por política, gravada por `estados.transicionar` na **primeira decisão
   automática** da política, na mesma transação, com `ON CONFLICT DO NOTHING` entre workers. A linha guarda
-  `ativada_em`, o `historico_id` da decisão e `lotes_anteriores` = os nomes de todos os lotes existentes naquele
-  instante. `_estratos` só conta auditorias de lotes cujo nome **não** está em `lotes_anteriores`
+  `ativada_em`, o `historico_id` da decisão e `lotes_anteriores`: os nomes de todos os lotes existentes naquele
+  instante, unidos aos lotes de treino, validação e calibração declarados na política
+  (`Politica.lotes_de_calibracao`). Para a v1 e a v2 são os 4 lotes da base; para a v2 é o `SPLIT_POR_LOTE` de
+  `mlinsp.particao`. Assim um lote de calibração que ainda não estava no banco na ativação também fica de fora.
+  Só decisão de ator `modelo:*` ativa, o mesmo filtro do retroativo. `_estratos` só conta auditorias de lotes cujo nome **não** está em `lotes_anteriores`
   (`auditoria.lote_posterior_a_ativacao`); política sem ativação (decisão sem política no histórico) não mede nada.
   Por que assim:
   - é derivada do que o sistema já faz (a primeira decisão), sem passo manual que alguém esqueça antes de trocar o
@@ -387,7 +390,17 @@ O que cada pendência virou:
     antigo reprocessado, então é o lado conservador.
 
   Retroativo da migração: toda política com decisão automática no histórico recebe a ativação da primeira decisão
-  dela, com **todos** os lotes do banco no momento da migração em `lotes_anteriores`. A exclusão por
+  dela, com **todos** os lotes do banco no momento da migração (mais os declarados) em `lotes_anteriores`. A
+  `d2f6a8c4e913` foi editada no lugar no re-gate da integração (nunca publicada): banco que aplicou a versão anterior
+  precisa de `alembic downgrade b5d8f3a1c726` seguido de `upgrade head`.
+- **`recalcular` regrava a decisão igual vinda de outra política.** Antes, decisão inalterada não ganhava linha, e
+  a volta v2 → v1 deixava a última linha do histórico citando a v2: a atribuição por política e o estrato da v1
+  ficavam com a v2, e as auditorias da v1 invalidadas na troca não voltavam. Agora a leitura cuja decisão não muda,
+  mas cuja última decisão automática é de outra política (ou de outro ator), é reaberta e decidida de novo pelo
+  `transicionar`: ganha a linha da política nova, a auditoria dela é sorteada e a ativação é registrada. Decisão
+  humana não é reaberta. Mesma decisão da mesma política continua sem linha nova.
+- **Detector mal configurado** (contrato onnx ausente, divergente ou com nome de arquivo diferente de
+  `<versao>.onnx`): `/metricas/*`, inclusive `/metricas/auditoria`, respondem 503 com o motivo no `detail`. A exclusão por
   `RODADAS_DE_CALIBRACAO` continua como proteção adicional.
 - **Rodada `inspecao_m7`** para a inspeção das 355 fotos que só a `politica@v2` rejeita:
   - migração `b5d8f3a1c726` (CHECKs de `rotulos`);
@@ -398,26 +411,47 @@ O que cada pendência virou:
     M7 (`ilegivel` ≥ 0,976 e p_ruim < 0,85): são **355** (89 / 108 / 80 / 78 em 030726 / 200526 / 210526 / 220526),
     em `ml/reports/20261016-213656/inspecao_355.csv`, sem veredito.
 
-Medido no `inspecao_int` (cópia do `inspecao_m8` migrada até `d2f6a8c4e913`):
+Medido no `inspecao_int`, recriado a partir do `inspecao_m8` e migrado até `d2f6a8c4e913` (versão final). O cenário
+foi v1 → v2 → v1: `DETECTOR_QUALIDADE=onnx` + `reprocessar --todos` (11.423 jobs), depois
+`recalcular --todos --politica politica@v1`.
 
-| momento | ativações | auditorias auto_rejeitada | no estrato |
+| momento | ativações | atribuição (`por_detector`, 11.419 com foto) | auditorias `auto_rejeitada` |
 | --- | --- | --- | --- |
-| depois da migração | `politica@v1` (retroativa, decisão 94769, 2026-10-16 23:01 UTC; os 4 lotes) | 87 pendentes | 0 |
-| depois de `DETECTOR_QUALIDADE=onnx` + `reprocessar --todos` | + `politica@v2` (gravada pela 1ª decisão, os 4 lotes) | 512: 425 da v2 (100% sorteadas) + 87 da v1 invalidadas | 0 |
-| depois de `recalcular --todos --politica politica@v1` | as duas | 529: 87 pendentes, 442 invalidadas | 0 |
+| depois da migração | `politica@v1` (retroativa, decisão 94769, 2026-10-16 23:01 UTC, os 4 lotes) | `heuristica@v1 · politica@v1`: 87 rejeitadas, 11.332 na fila | 87 válidas da v1 |
+| depois da v2 | + `politica@v2` (1ª decisão, os 4 lotes) | `qualidade@v1 · politica@v2`: 425 rejeitadas, 10.994 na fila | 425 válidas da v2 (100% sorteadas); as 87 da v1 invalidadas |
+| de volta à v1 | as duas | `heuristica@v1 · politica@v1`: 87 rejeitadas, 11.332 na fila | 87 válidas da v1, uma por rejeitada vigente; 512 invalidadas (87 da v1 antiga e 425 da v2) |
 
-- Rótulos de calibração: `lab02` 500, `inspecao_m5` 200 e `inspecao_m7` 355 (todos pendentes, 0 não mapeadas).
-  `exclusao_incompleta` vazia com o detector heurístico e com o onnx.
-- Das 529 auditorias, todas estão em lote anterior à ativação da política delas, **e** todas têm rótulo de
-  calibração. As duas proteções cobrem o mesmo conjunto: as 425 da v2 são as 355 da `inspecao_m7` mais as 70 que a
-  v1 também rejeita, que estão na `inspecao_m5`. Nenhuma auditoria dos 4 lotes entra em estrato nenhum.
-- A volta para a v1 restaura o estado do M5: 87 `rejeitada_qualidade`, 11.332 na fila e as 55 decisões humanas
-  intactas. As 70 rejeitadas pelas duas políticas ficam com a decisão da v2 como última linha do histórico (o recálculo
-  não grava decisão inalterada), e por isso 70 das 87 auditorias pendentes apontam decisões da v2.
-- Drift da v2 com a baseline 03/07 (2.795 fotos): auto-rejeição de 3,69% na baseline e de 4,00% / 3,40% / 3,79% em
-  200526 / 210526 / 220526, todos com |z| < 1; classe ativa `ilegivel` de 46,3% na baseline e de 45,2% a 46,6% nos
-  outros lotes; nenhum alerta. Concordância contra o Lab 2 só no lote de teste: 83 pares, 3 rejeita/ilegível, 0
-  rejeita/legível (o mesmo E2 do M7).
+- As 55 decisões humanas ficam intactas o tempo todo, no grupo `nulo@v0` porque foram triadas pela v0 no M3, e
+  contadas como conta de teste.
+- Rodar o mesmo `recalcular --politica politica@v1` de novo não grava nada (107.729 linhas de histórico antes e
+  depois).
+- **"No estrato: 0" é trivial aqui, porque nenhuma auditoria foi decidida.** O que o cenário mostra é a exclusão:
+  todas as 599 auditorias estão em lote anterior à ativação da política delas **e** todas têm rótulo de calibração.
+  As duas proteções cobrem o mesmo conjunto. As 425 da v2 são as 355 da `inspecao_m7` mais as 70 que a v1 também
+  rejeita, que estão na `inspecao_m5`. Quando auditadas, nenhuma entraria em estrato nenhum.
+- Rótulos de calibração:
+  - `lab02`: 500 linhas em 329 fotos;
+  - `inspecao_m5`: 200;
+  - `inspecao_m7`: 355, todos pendentes, 0 não mapeados. 42 das 355 também estão na `inspecao_m5`, e 89 estão no
+    03/07.
+
+  `exclusao_incompleta` sai vazia com o detector heurístico e com o onnx.
+- Drift da v2 com a baseline 03/07 (2.795 fotos):
+  - auto-rejeição: 3,69% na baseline; 4,00% / 3,40% / 3,79% em 200526 / 210526 / 220526;
+  - classe ativa `ilegivel`: 46,3% na baseline, entre 45,2% e 46,6% nos outros lotes;
+  - confiança: 0,8229 no 03/07 e de 0,8117 a 0,8169 em maio;
+  - nenhum alerta.
+
+  **Isso não é evidência de estabilidade:**
+  - 20/05 e 21/05 são treino e 22/05 é validação, então o desvio deles mede treino e validação × teste e maio ×
+    julho, não drift;
+  - com k = 1 o phi não é estimável (fica em 1);
+  - o 03/07 é comparado com ele mesmo (z = 0);
+  - o 03/07 contém 89 das 355 da inspeção de calibração.
+
+  O drift da v2 só tem leitura nos lotes ingeridos depois da ativação.
+- Concordância contra o Lab 2 só no lote de teste: 83 pares, 3 rejeita/ilegível, 0 rejeita/legível (o mesmo E2 do
+  M7).
 
 ## Fora do escopo do M8
 

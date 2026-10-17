@@ -51,10 +51,12 @@ de lotes seguidos; (3) "confianca media" foi definida como a media de
 max(p_ruim, 1 - p_ruim), e "queda sustentada" como cair mais de 0,05 em 2 lotes seguidos;
 (4) a baseline contem os proprios lotes de maio, entao o desvio deles e contra um
 agregado que os inclui. A baseline troca junto com o detector (`lotes_baseline`): o
-modelo do M7 foi treinado e calibrado em maio, e a confianca dele la e inflada pelo
-treino; para detector treinado a baseline sao os lotes de teste dele
-(`qualidade.LOTES_DE_TESTE`, o 03/07 para a `qualidade@v1`). Os limiares de alerta estao
-nas constantes abaixo.
+modelo do M7 foi treinado (20/05, 21/05) e validado (22/05) em maio, e a confianca dele la
+pode ser inflada pelo treino; para detector treinado a baseline sao os lotes de teste dele
+(`qualidade.LOTES_DE_TESTE`, o 03/07 para a `qualidade@v1`). Com um lote so (k = 1) o phi
+nao e estimavel, e o proprio 03/07 e comparado contra si mesmo; nos lotes de maio o desvio
+mede treino x teste e maio x julho, nao drift. O drift da v2 so tem leitura nos lotes
+ingeridos depois. Os limiares de alerta estao nas constantes abaixo.
 """
 
 import math

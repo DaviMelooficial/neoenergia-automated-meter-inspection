@@ -2,7 +2,8 @@
  "versao": "qualidade@v1",
  "rodada": "20261016-213656",
  "semente": 0,
- "commit": "a00f1e103b6845b78dd9e2dbf779d1346d087f3e",
+ "commit": "5c774da8aea56a7916a707c495ad4744d59147a5",
+ "arvore_suja": false,
  "onnx_sha256": "ab653b59e90e5e8e16637bc5ead99f1beac988df693291f724459b8e53304b72",
  "onnx_bytes": 3742111,
  "entrada": {
@@ -88,9 +89,10 @@
    "erro_sup95": 0.6315968501359612
   },
   "criterio_entrada": {
-   "E1_macro_f1_maior_que_v0": true,
+   "E1_macro_f1_maior_que_heuristica": true,
    "E2_zero_fp_no_teste": true,
-   "E3_cobertura_base_maior_ou_igual_v0": true,
+   "E3_cobertura_base_maior_ou_igual_heuristica": true,
+   "cobertura_base": 0.0372186706366582,
    "entra": true
   }
  }

@@ -204,7 +204,8 @@ export function Auditoria() {
           )}
         </Group>
         <Text size="sm" c="dimmed" role="status" aria-live="polite">
-          restantes: <b>{atual?.restantes ?? 0}</b> · feitas nesta sessão: <b>{feitas}</b>
+          {/* sem contagem exata: o salto dela diria a origem dos proximos itens */}
+          {atual?.ha_mais ? "há mais itens" : "último item disponível"} · feitas nesta sessão: <b>{feitas}</b>
         </Text>
       </Group>
       <Text size="sm" c="dimmed">

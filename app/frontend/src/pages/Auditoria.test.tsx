@@ -22,7 +22,7 @@ import { Auditoria } from "./Auditoria";
 
 const a = vi.mocked(auditoria);
 
-function item(id: number, restantes = 2): ItemAuditoria {
+function item(id: number, ha_mais = true): ItemAuditoria {
   return {
     auditoria_id: id,
     lote: "PSP_EXTRATLEITIMPL_990126_0004",
@@ -44,7 +44,7 @@ function item(id: number, restantes = 2): ItemAuditoria {
     fotos: [],
     quarentena: [],
     reservado_ate: null,
-    restantes,
+    ha_mais,
   };
 }
 
@@ -83,7 +83,7 @@ describe("Auditoria", () => {
   });
 
   it("decide pelo teclado e avisa que a decisao anterior nao e mostrada", async () => {
-    a.proxima.mockResolvedValueOnce(item(1)).mockResolvedValueOnce(item(2, 1));
+    a.proxima.mockResolvedValueOnce(item(1)).mockResolvedValueOnce(item(2, false));
     renderizar();
     await screen.findByText("auditoria #1");
     expect(screen.getByText(/A decisão anterior não é mostrada/)).toBeInTheDocument();

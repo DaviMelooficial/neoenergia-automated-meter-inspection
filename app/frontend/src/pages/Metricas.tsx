@@ -358,6 +358,24 @@ function Drift({ d }: { d: MetricasDrift }) {
   );
 }
 
+/** Erro da maquina medido pelo segundo revisor: a taxa nunca sem o limite superior de 95%,
+ * e "sustentado" so quando o limite cai abaixo do alvo. */
+function blocoAutomatico(
+  b: ConcordanciaAuditoria["auto_rejeitadas"],
+  minPares: number,
+  erro: string,
+  alvo: string,
+): string {
+  if (b.suprimido) return `menos de ${minPares} auditadas, oculto.`;
+  if (!b.n) return `nenhuma auditada ainda; ${num(b.necessarias ?? 0)} sem erro sustentam o alvo (${alvo}).`;
+  const situacao = b.alvo_atingido
+    ? `Alvo (${alvo}) sustentado com 95%.`
+    : `Alvo (${alvo}) ainda não sustentado: são precisas ${num(b.necessarias ?? 0)} auditorias com ${num(
+        b.erros ?? 0,
+      )} erro(s).`;
+  return `${num(b.n)} auditadas, ${erro} ${pct(b.taxa_erro)} (até ${pct(b.limite_superior_erro)} com 95%). ${situacao}`;
+}
+
 export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
   return (
     <Stack gap="sm" data-testid="painel-auditoria">
@@ -396,17 +414,15 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
           Contagens, série e detalhe por lote são só do admin.
         </Text>
       )}
-      <Text size="xs" c="dimmed" data-testid="auditoria-auto">
-        Decisões da máquina auditadas: auto-rejeitadas{" "}
-        {a.auto_rejeitadas.suprimido
-          ? `(menos de ${a.min_pares}, oculto)`
-          : `${num(a.auto_rejeitadas.n ?? 0)}, falso positivo ${pct(a.auto_rejeitadas.taxa_erro)}`}
-        ; auto-aprovadas{" "}
-        {a.auto_aprovadas.suprimido
-          ? `(menos de ${a.min_pares}, oculto)`
-          : `${num(a.auto_aprovadas.n ?? 0)}, erro ${pct(a.auto_aprovadas.taxa_erro)}`}
-        .
-      </Text>
+      <Stack gap={2} data-testid="auditoria-auto">
+        <Text size="xs" c="dimmed">
+          Auto-rejeitadas (auditoria de {pct(a.taxa_auto_rejeitada, 0)}):{" "}
+          {blocoAutomatico(a.auto_rejeitadas, a.min_pares, "falso positivo", "precisão ≥ 99%")}
+        </Text>
+        <Text size="xs" c="dimmed">
+          Auto-aprovadas: {blocoAutomatico(a.auto_aprovadas, a.min_pares, "erro", "erro < 0,5%")}
+        </Text>
+      </Stack>
       {a.serie.length > 0 ? (
         <Card withBorder padding="xs">
           <Text size="sm" fw={600}>

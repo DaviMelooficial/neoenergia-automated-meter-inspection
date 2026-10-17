@@ -205,8 +205,28 @@ const auditoria: ConcordanciaAuditoria = {
   taxa_configurada: 0.07,
   min_pares: 10,
   detalhe: true,
-  auto_aprovadas: { n: 0, erros: 0, taxa_erro: null, suprimido: false },
-  auto_rejeitadas: { n: 12, erros: 1, taxa_erro: 1 / 12, suprimido: false },
+  auto_aprovadas: {
+    n: 0,
+    erros: 0,
+    taxa_erro: null,
+    limite_superior_erro: null,
+    alvo_erro: 0.005,
+    necessarias: 598,
+    alvo_atingido: false,
+    suprimido: false,
+  },
+  auto_rejeitadas: {
+    n: 12,
+    erros: 1,
+    taxa_erro: 1 / 12,
+    limite_superior_erro: 0.339,
+    alvo_erro: 0.01,
+    necessarias: 473,
+    alvo_atingido: false,
+    suprimido: false,
+  },
+  taxa_auto_rejeitada: 1,
+  invalidadas: 0,
   decisoes_na_fila: 100,
   sorteadas: 7,
   taxa_observada: 0.07,
@@ -316,9 +336,32 @@ describe("Metricas", () => {
     expect(cartao).toHaveTextContent("75,0%");
     expect(within(painel).getByText("0,500")).toBeInTheDocument();
     expect(within(painel).getByTestId("auditoria-auto")).toHaveTextContent(
-      "auto-rejeitadas 12, falso positivo 8,3%",
+      "12 auditadas, falso positivo 8,3% (até 33,9% com 95%). Alvo (precisão ≥ 99%) ainda não " +
+        "sustentado: são precisas 473 auditorias com 1 erro(s).",
     );
     expect(within(painel).getByRole("img", { name: "concordância acumulada por dia" })).toBeInTheDocument();
+  });
+
+  it("10 auto-rejeicoes sem erro: mostra o limite de 25,9% e nao declara o alvo batido", async () => {
+    m.auditoria.mockResolvedValue({
+      ...auditoria,
+      auto_rejeitadas: {
+        n: 10,
+        erros: 0,
+        taxa_erro: 0,
+        limite_superior_erro: 0.2589,
+        alvo_erro: 0.01,
+        necessarias: 299,
+        alvo_atingido: false,
+        suprimido: false,
+      },
+    });
+    renderizar();
+    const painel = await screen.findByTestId("painel-auditoria");
+    const auto = within(painel).getByTestId("auditoria-auto");
+    expect(auto).toHaveTextContent("falso positivo 0,0% (até 25,9% com 95%)");
+    expect(auto).toHaveTextContent("ainda não sustentado: são precisas 299 auditorias");
+    expect(auto).not.toHaveTextContent("sustentado com 95%");
   });
 
   it("auditoria para supervisor: sem contagens e com a medida oculta abaixo do minimo", async () => {
@@ -338,8 +381,27 @@ describe("Metricas", () => {
         kappa_motivo: null,
         suprimido: true,
       },
-      auto_aprovadas: { n: null, erros: null, taxa_erro: null, suprimido: true },
-      auto_rejeitadas: { n: null, erros: null, taxa_erro: null, suprimido: true },
+      auto_aprovadas: {
+        n: null,
+        erros: null,
+        taxa_erro: null,
+        limite_superior_erro: null,
+        alvo_erro: 0.01,
+        necessarias: null,
+        alvo_atingido: null,
+        suprimido: true,
+      },
+      auto_rejeitadas: {
+        n: null,
+        erros: null,
+        taxa_erro: null,
+        limite_superior_erro: null,
+        alvo_erro: 0.01,
+        necessarias: null,
+        alvo_atingido: null,
+        suprimido: true,
+      },
+      invalidadas: null,
       por_lote: [],
       serie: [],
     });

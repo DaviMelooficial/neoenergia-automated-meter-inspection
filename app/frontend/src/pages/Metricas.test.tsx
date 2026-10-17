@@ -206,6 +206,8 @@ const auditoria: ConcordanciaAuditoria = {
   min_pares: 10,
   detalhe: true,
   auto_aprovadas: {
+    detector: "heuristica@v1",
+    politica: "politica@v1",
     n: 0,
     erros: 0,
     taxa_erro: null,
@@ -216,6 +218,8 @@ const auditoria: ConcordanciaAuditoria = {
     suprimido: false,
   },
   auto_rejeitadas: {
+    detector: "heuristica@v1",
+    politica: "politica@v1",
     n: 12,
     erros: 1,
     taxa_erro: 1 / 12,
@@ -227,6 +231,8 @@ const auditoria: ConcordanciaAuditoria = {
   },
   taxa_auto_rejeitada: 1,
   invalidadas: 0,
+  estratos_auto_aprovadas: [],
+  estratos_auto_rejeitadas: [],
   decisoes_na_fila: 100,
   sorteadas: 7,
   taxa_observada: 0.07,
@@ -346,6 +352,8 @@ describe("Metricas", () => {
     m.auditoria.mockResolvedValue({
       ...auditoria,
       auto_rejeitadas: {
+        detector: "heuristica@v1",
+        politica: "politica@v1",
         n: 10,
         erros: 0,
         taxa_erro: 0,
@@ -382,6 +390,8 @@ describe("Metricas", () => {
         suprimido: true,
       },
       auto_aprovadas: {
+        detector: "heuristica@v1",
+        politica: "politica@v1",
         n: null,
         erros: null,
         taxa_erro: null,
@@ -392,6 +402,8 @@ describe("Metricas", () => {
         suprimido: true,
       },
       auto_rejeitadas: {
+        detector: "heuristica@v1",
+        politica: "politica@v1",
         n: null,
         erros: null,
         taxa_erro: null,

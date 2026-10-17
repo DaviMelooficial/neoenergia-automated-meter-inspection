@@ -416,7 +416,8 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
       )}
       <Stack gap={2} data-testid="auditoria-auto">
         <Text size="xs" c="dimmed">
-          Auto-rejeitadas (auditoria de {pct(a.taxa_auto_rejeitada, 0)}):{" "}
+          Auto-rejeitadas de {a.auto_rejeitadas.detector} · {a.auto_rejeitadas.politica} (auditoria de{" "}
+          {pct(a.taxa_auto_rejeitada, 0)}; uma leitura por estrato):{" "}
           {blocoAutomatico(a.auto_rejeitadas, a.min_pares, "falso positivo", "precisão ≥ 99%")}
         </Text>
         <Text size="xs" c="dimmed">

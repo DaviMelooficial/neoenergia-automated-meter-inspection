@@ -22,7 +22,8 @@ import { VisualizadorFoto } from "../components/VisualizadorFoto";
  * historico nem revisoes (cegueira do servidor), entao esses campos vao vazios. */
 function comoLeitura(item: ItemAuditoria): LeituraOut {
   return {
-    id: item.auditoria_id,
+    // id local, nao vem do servidor: o item nao expoe identificador ordenavel
+    id: 0,
     lote: item.lote,
     linha_csv: item.linha_csv,
     medidores: item.medidores,
@@ -79,7 +80,7 @@ export function Auditoria() {
 
   useEffect(() => {
     return () => {
-      const id = atualRef.current?.auditoria_id;
+      const id = atualRef.current?.auditoria;
       if (id) auditoria.liberar(id).catch(() => undefined);
     };
   }, []);
@@ -119,7 +120,7 @@ export function Auditoria() {
       }
       setOcupado(true);
       try {
-        await auditoria.decidir(atual.auditoria_id, {
+        await auditoria.decidir(atual.auditoria, {
           decisao,
           motivo: decisao === "reprovada" ? motivo : null,
           observacao: observacao.trim() || null,
@@ -146,7 +147,7 @@ export function Auditoria() {
     if (!atual || ocupado) return;
     setOcupado(true);
     try {
-      await auditoria.liberar(atual.auditoria_id);
+      await auditoria.liberar(atual.auditoria);
       setAtual(null);
       setPausada(true);
     } finally {
@@ -197,9 +198,10 @@ export function Auditoria() {
       <Group justify="space-between">
         <Group gap="xs">
           <Title order={3}>Auditoria amostral</Title>
+          {/* nenhum numero de auditoria na tela: o id diria a ordem do sorteio */}
           {atual && (
-            <Badge variant="light" ff="monospace" data-testid="auditoria-atual">
-              auditoria #{atual.auditoria_id}
+            <Badge variant="light" data-testid="auditoria-atual">
+              em auditoria
             </Badge>
           )}
         </Group>

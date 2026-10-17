@@ -24,7 +24,7 @@ const a = vi.mocked(auditoria);
 
 function item(id: number, ha_mais = true): ItemAuditoria {
   return {
-    auditoria_id: id,
+    auditoria: `00000000-0000-4000-8000-${String(id).padStart(12, "0")}`,
     lote: "PSP_EXTRATLEITIMPL_990126_0004",
     linha_csv: 10 + id,
     medidores: [`77${id}`],
@@ -74,7 +74,7 @@ describe("Auditoria", () => {
     vi.clearAllMocks();
     a.liberar.mockResolvedValue({} as never);
     a.decidir.mockImplementation(async (id, dados) => ({
-      auditoria_id: id,
+      auditoria: id,
       decisao: dados.decisao,
       motivo: dados.motivo ?? null,
       observacao: null,
@@ -85,13 +85,16 @@ describe("Auditoria", () => {
   it("decide pelo teclado e avisa que a decisao anterior nao e mostrada", async () => {
     a.proxima.mockResolvedValueOnce(item(1)).mockResolvedValueOnce(item(2, false));
     renderizar();
-    await screen.findByText("auditoria #1");
+    await screen.findByText("771");
     expect(screen.getByText(/A decisão anterior não é mostrada/)).toBeInTheDocument();
+    // nenhum numero de auditoria na tela
+    expect(screen.queryByText(/auditoria #|#\d/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("auditoria-atual")).toHaveTextContent("em auditoria");
     expect(screen.queryByText(/aprovada_humano|reprovada_humano/)).not.toBeInTheDocument();
     tecla("3"); // tampa suja
     tecla("r");
-    await screen.findByText("auditoria #2");
-    expect(a.decidir).toHaveBeenCalledWith(1, {
+    await screen.findByText("772");
+    expect(a.decidir).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001", {
       decisao: "reprovada",
       motivo: "tampa_suja",
       observacao: null,
@@ -108,10 +111,10 @@ describe("Auditoria", () => {
     a.proxima.mockResolvedValueOnce(item(1)).mockResolvedValueOnce(item(5));
     a.decidir.mockRejectedValueOnce(erro(404, "auditoria indisponivel"));
     renderizar();
-    await screen.findByText("auditoria #1");
+    await screen.findByText("771");
     tecla("a");
     expect(await screen.findByText("auditoria indisponivel")).toBeInTheDocument();
-    await screen.findByText("auditoria #5");
+    await screen.findByText("775");
   });
 
   it("papel sem auditoria (403) mostra o motivo", async () => {
@@ -123,9 +126,9 @@ describe("Auditoria", () => {
   it("pular devolve a reserva", async () => {
     a.proxima.mockResolvedValueOnce(item(1));
     renderizar();
-    await screen.findByText("auditoria #1");
+    await screen.findByText("771");
     fireEvent.click(screen.getByTestId("btn-pular"));
-    await waitFor(() => expect(a.liberar).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(a.liberar).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001"));
     expect(await screen.findByText("Auditoria devolvida")).toBeInTheDocument();
   });
 });

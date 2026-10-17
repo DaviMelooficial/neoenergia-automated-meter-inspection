@@ -111,9 +111,9 @@ export const metricas = {
 // ------------------------------------------------------------------ auditoria amostral
 export const auditoria = {
   proxima: () => api.post<ItemAuditoria>("/auditoria/proxima").then((r) => r.data),
-  liberar: (id: number) => api.post(`/auditoria/${id}/liberar`),
-  decidir: (id: number, dados: DecisaoIn) =>
-    api.post<AuditoriaDecisao>(`/auditoria/${id}/decisao`, dados).then((r) => r.data),
+  liberar: (codigo: string) => api.post(`/auditoria/${codigo}/liberar`),
+  decidir: (codigo: string, dados: DecisaoIn) =>
+    api.post<AuditoriaDecisao>(`/auditoria/${codigo}/decisao`, dados).then((r) => r.data),
 };
 
 // ------------------------------------------------------------------ rotulagem

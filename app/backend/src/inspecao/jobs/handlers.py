@@ -238,8 +238,9 @@ SAIDAS_DA_TRIAGEM = (
 
 def _ultima_decisao_automatica(
     sessao: Session, leitura_ids: list[int]
-) -> dict[int, tuple[str, str | None]]:
-    """leitura_id -> (ator, politica) da ultima saida da triagem gravada pela maquina."""
+) -> dict[int, tuple[str, str | None, str | None]]:
+    """leitura_id -> (ator, politica, decisao) da ultima saida da triagem gravada pela
+    maquina."""
     if not leitura_ids:
         return {}
     consulta = (
@@ -247,6 +248,7 @@ def _ultima_decisao_automatica(
             HistoricoStatus.leitura_id,
             HistoricoStatus.ator,
             HistoricoStatus.detalhe["politica"].astext,
+            HistoricoStatus.detalhe["decisao"].astext,
         )
         .where(
             HistoricoStatus.leitura_id.in_(leitura_ids),
@@ -256,7 +258,9 @@ def _ultima_decisao_automatica(
         .distinct(HistoricoStatus.leitura_id)
         .order_by(HistoricoStatus.leitura_id, HistoricoStatus.id.desc())
     )
-    return {lid: (ator, politica) for lid, ator, politica in sessao.execute(consulta)}
+    return {
+        lid: (ator, politica, decisao) for lid, ator, politica, decisao in sessao.execute(consulta)
+    }
 
 
 def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
@@ -304,8 +308,10 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
     contagem: Counter[str] = Counter()
     for leitura, modelo, saida in linhas:
         decisao, p_ruim, detalhe = _decidir(politica, modelo, saida)
-        mesma = DESTINO[decisao].value == leitura.status_atual
-        if mesma and ultimas.get(leitura.id) == (f"modelo:{modelo}", politica.versao):
+        # "Mesma" = a ultima decisao gravada pela maquina e esta (ator, politica e decisao),
+        # e nao o status: `seguir` sai para validacao_leitura e acaba na fila pelo sistema,
+        # e comparar status reabriria essa leitura a cada passada.
+        if ultimas.get(leitura.id) == (f"modelo:{modelo}", politica.versao, decisao.value):
             contagem["inalterada"] += 1
             continue
         # Reconfere a linha antes de reabrir (defesa em profundidade: o lock acima ja

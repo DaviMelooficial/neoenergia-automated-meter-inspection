@@ -61,19 +61,27 @@ def _quarentena_por_tipo(db: Session, lote_id: int | None = None) -> dict[str, i
 
 
 def _tempo_medio_decisao(db: Session) -> float | None:
-    """Segundos entre a entrada na fila humana e a decisao, media sobre as decididas."""
+    """Segundos entre a entrada na fila humana e a decisao, media sobre as decididas.
+
+    Uma entrada por decisao: a ULTIMA `fila_humana` antes dela. A leitura pode ter entrado
+    na fila varias vezes (reaberta pela maquina, regravada pela troca de politica), e o
+    self-join com todas as entradas anteriores contaria a decisao uma vez por entrada."""
     entrada = aliased(HistoricoStatus)
     saida = aliased(HistoricoStatus)
-    stmt = (
-        select(func.avg(extract("epoch", saida.criado_em - entrada.criado_em)))
-        .select_from(saida)
-        .join(
-            entrada,
-            (entrada.leitura_id == saida.leitura_id)
-            & (entrada.status == StatusLeitura.FILA_HUMANA.value)
-            & (entrada.id < saida.id),
+    ultima_entrada = (
+        select(entrada.criado_em)
+        .where(
+            entrada.leitura_id == saida.leitura_id,
+            entrada.status == StatusLeitura.FILA_HUMANA.value,
+            entrada.id < saida.id,
         )
-        .where(saida.status.in_(DECIDIDAS_HUMANO), ~decidida_por_teste(saida.leitura_id))
+        .order_by(entrada.id.desc())
+        .limit(1)
+        .correlate(saida)
+        .scalar_subquery()
+    )
+    stmt = select(func.avg(extract("epoch", saida.criado_em - ultima_entrada))).where(
+        saida.status.in_(DECIDIDAS_HUMANO), ~decidida_por_teste(saida.leitura_id)
     )
     valor = db.scalar(stmt)
     return float(valor) if valor is not None else None

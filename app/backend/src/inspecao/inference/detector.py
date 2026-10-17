@@ -108,7 +108,12 @@ def nome_do_detector(settings: Settings) -> str:
                 f"contrato do modelo de qualidade ausente: {caminho_json} "
                 "(gere com `make m7-exportar`; MODELO_QUALIDADE_PATH aponta a versao em uso)"
             )
-        contrato = json.loads(caminho_json.read_text(encoding="utf-8"))
+        try:
+            contrato = json.loads(caminho_json.read_text(encoding="utf-8"))
+        except ValueError as erro:
+            raise RuntimeError(f"contrato {caminho_json.name} corrompido: {erro}") from erro
+        if not isinstance(contrato, dict):
+            raise RuntimeError(f"contrato {caminho_json.name} corrompido: nao e um objeto json")
         validar_contrato_onnx(contrato)
         # A mesma checagem do DetectorOnnx: o arquivo de cada versao se chama <versao>.onnx.
         if caminho_json.stem != contrato["versao"]:

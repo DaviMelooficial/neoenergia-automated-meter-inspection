@@ -448,7 +448,7 @@ def test_politica_ativa_segue_o_detector_configurado(monkeypatch, tmp_path):
         sinais.politica_ativa()
 
 
-@pytest.mark.parametrize("contrato", ["ausente", "divergente"])
+@pytest.mark.parametrize("contrato", ["ausente", "divergente", "corrompido"])
 def test_detector_mal_configurado_da_503_com_o_motivo(
     client, contas, monkeypatch, tmp_path, contrato
 ):
@@ -461,11 +461,13 @@ def test_detector_mal_configurado_da_503_com_o_motivo(
     if contrato == "divergente":
         dados = json.loads(CONTRATO_M7.read_text("utf-8")) | {"limiar_rejeita": 0.5}
         (tmp_path / "qualidade@v1.json").write_text(json.dumps(dados), "utf-8")
+    if contrato == "corrompido":
+        (tmp_path / "qualidade@v1.json").write_text('{"versao": "qualidade@v1", ', "utf-8")
     cab = login(client, contas["admin"])
     for rota in ("/metricas/qualidade", "/metricas/drift", "/metricas/auditoria"):
         r = client.get(rota, headers=cab)
         assert r.status_code == 503, (rota, r.text)
-        motivo = "ausente" if contrato == "ausente" else "limiar_rejeita"
+        motivo = {"ausente": "ausente", "divergente": "limiar_rejeita"}.get(contrato, "corrompido")
         assert "detector de qualidade mal configurado" in r.json()["detail"]
         assert motivo in r.json()["detail"]
 
@@ -509,3 +511,35 @@ def test_drift_da_v2_usa_as_chaves_dela_e_o_lote_de_teste_como_baseline(
     # a heuristica continua com os 5 sinais de defeito e a baseline de DRIFT_LOTES_BASELINE
     h = client.get("/metricas/drift", headers=login(client, contas["supervisor"])).json()
     assert h["baseline"]["lotes"] == [maio.nome]
+
+
+def test_tempo_medio_de_decisao_conta_a_ultima_entrada_na_fila(db_session):
+    """Leitura que entrou duas vezes na fila (reaberta e regravada pela troca de politica)
+    e foi decidida uma vez: a duracao e da ULTIMA entrada ate a decisao, uma vez so."""
+    from datetime import UTC, datetime, timedelta
+
+    from inspecao.models import HistoricoStatus
+    from inspecao.routers.metricas import _tempo_medio_decisao
+
+    lt = fx.lote(db_session, "0126_0010", date(2026, 1, 10))
+    lei, _ = fx.leitura(db_session, lt, S.APROVADA_HUMANO, fx.scores(0.1))
+    fx.decisao(db_session, lei, fx.contas_reais(db_session)["auditor"].id, "aprovada")
+    t0 = datetime(2026, 1, 10, 12, 0, tzinfo=UTC)
+    for minutos, status, ator in (
+        (0, S.FILA_HUMANA, "modelo:qualidade@v1"),
+        (10, S.TRIAGEM_QUALIDADE, "modelo:heuristica@v1"),
+        (10, S.FILA_HUMANA, "modelo:heuristica@v1"),
+        (13, S.APROVADA_HUMANO, "usuario:1"),
+    ):
+        db_session.add(
+            HistoricoStatus(
+                leitura_id=lei.id,
+                status=status.value,
+                ator=ator,
+                criado_em=t0 + timedelta(minutes=minutos),
+            )
+        )
+        db_session.flush()
+    # a fixture ja gravou uma fila_humana (now(), depois de t0) antes destas linhas: ela
+    # tem id menor e fica antes da ultima entrada, entao nao muda a resposta
+    assert _tempo_medio_decisao(db_session) == pytest.approx(180.0)

@@ -1444,9 +1444,18 @@ def test_v1_v2_v1_devolve_a_atribuicao_e_o_estrato_a_v1(
     auditoria.sortear_automaticas(db_session)
     db_session.flush()
     ctx = ctx_com(DetectorNulo(), None)
-    for versao in ("politica@v2", "politica@v1"):
-        recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": versao})
-        db_session.flush()
+    recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": "politica@v2"})
+    db_session.flush()
+    db_session.expire_all()
+    # Estado intermediario: toda re-decidivel ja e da v2, inclusive as que nao mudam de
+    # status (as duas rejeitam; as duas mandam para a fila). So a humana fica na v1.
+    meio = {
+        (g["detector"], g["politica"]): g["com_foto"]
+        for g in qualidade_mod.por_detector(db_session)
+    }
+    assert meio == {("qualidade@v1", "politica@v2"): 4, ("heuristica@v1", "politica@v1"): 1}
+    recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": "politica@v1"})
+    db_session.flush()
     db_session.expire_all()
 
     grupos = {

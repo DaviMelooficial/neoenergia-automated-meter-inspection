@@ -550,3 +550,33 @@ def test_triagem_avisa_quando_a_leitura_esta_travada_por_outra_transacao(
 
     assert f"leitura {alvo} travada por outra transacao" in caplog.text
     assert _status(fabrica, lote_id)[LINHAS_PRETAS[0]] == (StatusLeitura.FILA_HUMANA.value, None)
+
+
+def test_seguir_da_mesma_politica_nao_reabre_a_cada_passada(
+    db_session, staging, tmp_path, monkeypatch
+):
+    """Herdado do gate: `seguir` sai para validacao_leitura e acaba na fila pelo sistema.
+    Comparar status reabriria a leitura a cada passada; a comparacao e com a ultima
+    decisao gravada pela maquina (ator, politica e decisao)."""
+    from inspecao.inference import politica as politica_mod
+    from inspecao.inference.politica import Politica
+
+    p = Politica(
+        versao="politica@teste-aprova",
+        modelo="heuristica@v1",
+        limiar_rejeita=0.85,
+        limiar_aprova=0.05,
+    )
+    monkeypatch.setitem(politica_mod.POLITICAS, p.versao, p)
+    lote, storage = triar_com_heuristica(db_session, staging, tmp_path)
+    proibido = ctx_com(DetectorHeuristico(), StorageProibido(raiz=storage.raiz))
+    nitida = leitura_da_linha(db_session, lote, 4)
+    payload = {"lote_id": lote.id, "politica": p.versao}
+    fila.enfileirar(db_session, TipoJob.RECALCULAR_DECISAO, payload)
+    esvaziar_fila(proibido, db_session)  # recalcula (seguir) e valida (sistema -> fila)
+    db_session.expire_all()
+    assert [h.status for h in nitida.historico][-2:] == ["validacao_leitura", "fila_humana"]
+    antes = n_historico(db_session, nitida)
+    fila.enfileirar(db_session, TipoJob.RECALCULAR_DECISAO, payload)
+    esvaziar_fila(proibido, db_session)
+    assert n_historico(db_session, nitida) == antes

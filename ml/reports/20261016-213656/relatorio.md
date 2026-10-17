@@ -20,16 +20,16 @@ dos json desta pasta. "Heurística" aqui é sempre a `heuristica@v1` do M5, que 
 | Critério de entrada (E1 + E2 + E3) | **Passa em 1 das 3 sementes** (a 0, escolhida pela validação). A semente 1 não acha limiar sem FP na validação; a semente 2 tem 2 FP no teste |
 | E1: macro-F1 de legível no teste (03/07, 83 fotos) | modelo **0,766** × heurística 0,651. Média das 3 sementes: 0,785 ± 0,018. ΔmacroF1 da semente 0 com IC 95% pareado de −0,01 a +0,24 |
 | AUROC no teste (positivo = ilegível) | 0,872 × 0,670. **ΔAUROC +0,20 (IC 95% de +0,09 a +0,32)** |
-| E2: falsos positivos no teste no limiar calibrado | **0** em 3 rejeitadas (IC 95% de Wilson da precisão: 0,44 a 1,00; limite superior do erro: 63%) |
+| E2: falsos positivos no teste no limiar calibrado | **0** em 3 rejeitadas. Precisão: IC 95% bilateral de Wilson de 0,44 a 1,00. Erro: limite superior unilateral de 95% por Clopper-Pearson de 63% (1 − 0,05^(1/3)) |
 | E3: cobertura de rejeição | base inteira 3,72% (425); **só no lote de teste: 3,69%**. A base inteira inclui as fotos de treino |
-| Mesma comparação, mesmo protocolo | heurística com limiar de zero FP na validação (0,607): 3 rejeitadas e 0 FP no teste, **270 na base (2,36%)**. Vantagem real: **~1,6×** (425 × 270), não 4,9× (425 × 87) |
+| Mesma comparação, mesmo protocolo | heurística com limiar de zero FP na validação (0,607): 3 rejeitadas e 0 FP no teste, **270 na base (2,36%)**. Vantagem real: **~1,6×** (425 × 270), não 4,9× (425 × 87). E as regras rejeitam conjuntos diferentes: 124 pelos dois, 301 só pelo modelo, 146 só pela heurística |
 | Limiar (`politica@v2`) | `ilegivel >= 0,976`; `limiar_aprova` = None |
 | Reprodutibilidade | semente 0 treinada duas vezes: logits **idênticos** (diferença 0,0) |
 | Paridade torch × onnxruntime (100 fotos) | logit de legível 3,9e-5 e cena 3,1e-5; probabilidades < 1e-5 (critério < 1e-4) |
 | Paridade de ponta a ponta (backend × torch, 11.419 fotos) | máximo de 6,0e-6 em `ilegivel`; **0 decisões diferentes** |
 | Tempo de treino | 12,4 min, 3 sementes + 1 repetição (MPS, Apple M5) |
 | Latência no worker real | média 5,4 ms, p95 6 ms por foto (decodificação + inferência, gravada em `resultados_inferencia`) |
-| `.onnx` no git | **Não** (seção 6). sha256 `ab653b59e90e…` em `qualidade.json`, exportado do commit `5c774da` com a árvore de código limpa |
+| `.onnx` no git | **Não** (seção 6). sha256 `ab653b59e90e…` em `qualidade@v1.json` e na `politica@v2`, exportado do commit `9fda860` com a árvore de código limpa |
 
 ## 1. Desvios do plano (registrados como tais)
 
@@ -123,10 +123,12 @@ o IC da macro-F1 toca o zero por pouco.
 
 - No mesmo protocolo, a vantagem do modelo é **~1,6×**, não 4,9×. O gate de dados calculou sem o
   arredondamento (limiar 0,6067) e obteve 271 (2,37%).
+- As duas regras não rejeitam o mesmo conjunto. No mesmo protocolo, na base inteira: 124 rejeitadas
+  pelos dois, 301 só pelo modelo, 146 só pela heurística. Contra a v1 (0,85): 70, 355 e 17.
 - O protocolo de zero FP na validação já falhou uma vez: no M5, a faixa 0,6 a 0,85 da heurística
   também tinha zero FP nos rótulos, e a inspeção visual achou fotos legíveis nela. Por isso a v1
   ficou em 0,85.
-- O mesmo pode valer para o modelo: zero FP em 3 rejeições não exclui erro de até 63%.
+- O mesmo pode valer para o modelo: zero FP em 3 rejeições não exclui erro de até 63% (limite superior unilateral de 95%, Clopper-Pearson).
 
 ![cobertura x risco](cobertura_risco_teste.png)
 
@@ -154,19 +156,30 @@ modelo, 17 só pela heurística.
 
 ## 6. Exportação, contrato e o `.onnx` fora do git
 
-- `ml/artifacts/qualidade.onnx` (3,7 MB, opset 17, lote dinâmico, entrada `float32[N,3,224,224]`,
-  saídas em logit) e `ml/artifacts/qualidade.json` (cópia nesta pasta).
+- `ml/artifacts/qualidade@v1.onnx` (3,7 MB, opset 17, lote dinâmico, entrada `float32[N,3,224,224]`,
+  saídas em logit) e `ml/artifacts/qualidade@v1.json` (cópia nesta pasta como `qualidade.json`). Um
+  arquivo por versão: exportar a `qualidade@v2` não toca no arquivo que o worker carrega
+  (`MODELO_QUALIDADE_PATH` aponta a versão em uso).
 - O json traz:
   - `versao`, `rodada`, `limiar_rejeita`, temperaturas e pré-processamento;
   - `onnx_sha256`;
-  - `commit` = `5c774da` com `arvore_suja: false`. A primeira exportação citava `a00f1e1` com o
-    código do M7 ainda não commitado; foi refeita depois dos commits, com o mesmo sha256.
+  - `commit` = `9fda860` com `arvore_suja: false`. A primeira exportação citava `a00f1e1` com o
+    código do M7 ainda não commitado; foi refeita depois dos commits, sempre com o mesmo sha256.
 - **O contrato é amarrado à política:**
-  - o `DetectorOnnx` recusa um json cuja `rodada` ou cujo `limiar_rejeita` diverja da política
-    registrada para a `versao`, ou cuja `versao` não tenha política de modelo treinado
-    (`validar_contrato_onnx`);
+  - a `politica@v2` registra `rodada`, `limiar_rejeita` e o `onnx_sha256` do arquivo exportado. O
+    sha amarra também a semente: reexportar a mesma rodada com outra semente muda o arquivo;
+  - o `DetectorOnnx` recusa (`validar_contrato_onnx`) um json com `versao` sem política de modelo
+    treinado (inclusive json sem `versao`), ou cuja `rodada`, `onnx_sha256` ou `limiar_rejeita`
+    (tolerância de 1e-9) diverja da política. Também recusa um arquivo cujo nome não seja
+    `<versao>.onnx`;
+  - `politica_para` dá erro para detector sem política registrada, em vez de cair na v0. O worker
+    é a única fonte da política em uso;
+  - `make recalcular-todos` sem `POLITICA` enfileira o job **sem** política no payload, e o worker
+    aplica a dele. O CLI não resolve pela configuração, que pode apontar uma versão ainda sem
+    política;
   - o `export_onnx` recusa exportar uma rodada nova com uma `versao` já usada por outra rodada.
-    Rodada nova = `--versao qualidade@v2` com a `politica@v3` dela.
+    Rodada nova = `--versao qualidade@v2` com a `politica@v3` dela (rodada, limiar e o sha impresso
+    na exportação).
 - **Decisão: o `.onnx` não vai para o git.** É binário, muda a cada treino, deriva de pesos ImageNet
   de terceiros e foi ajustado com fotos do cliente. O hash
   `ab653b59e90e5e8e16637bc5ead99f1beac988df693291f724459b8e53304b72` versionado aqui é o elo, e o
@@ -184,7 +197,7 @@ O critério passa na semente escolhida pela validação, e o código entra: `Det
 `politica@v2` e a política escolhida pelo detector. A auto-rejeição do modelo **fica desligada**,
 porque:
 
-1. o zero FP do teste se apoia em 3 rejeições (limite superior do erro: 63%);
+1. o zero FP do teste se apoia em 3 rejeições (erro de até 63%: limite superior unilateral de 95%, Clopper-Pearson);
 2. o critério passa em 1 das 3 sementes;
 3. no mesmo protocolo a vantagem de cobertura é 1,6×, e esse protocolo já deixou passar foto legível
    no M5;

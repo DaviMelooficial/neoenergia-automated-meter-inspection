@@ -10,10 +10,10 @@
  "rejeitadas_torch": 425,
  "decisoes_diferentes": 0,
  "latencia_ms_por_foto": {
-  "p50": 11.161291971802711,
-  "p95": 17.40387077443302,
-  "media": 12.046450390710048,
+  "p50": 13.086624909192324,
+  "p95": 19.942383421584978,
+  "media": 14.107960241887765,
   "nota": "onnxruntime CPU 1 thread por chamada, 8 chamadas em paralelo"
  },
- "segundos_total": 17.8
+ "segundos_total": 20.9
 }

@@ -2,7 +2,7 @@
  "versao": "qualidade@v1",
  "rodada": "20261016-213656",
  "semente": 0,
- "commit": "5c774da8aea56a7916a707c495ad4744d59147a5",
+ "commit": "9fda8602a938e1036c8c7ca3873e09d9bfece86c",
  "arvore_suja": false,
  "onnx_sha256": "ab653b59e90e5e8e16637bc5ead99f1beac988df693291f724459b8e53304b72",
  "onnx_bytes": 3742111,
@@ -82,11 +82,11 @@
    "cobertura": 0.03571428571428571,
    "falsos_positivos": 0,
    "precisao": 1.0,
-   "precisao_ic95": [
+   "precisao_ic95_wilson": [
     0.4385,
     1.0
    ],
-   "erro_sup95": 0.6315968501359612
+   "erro_sup95_clopper_pearson_unilateral": 0.6315968501359612
   },
   "criterio_entrada": {
    "E1_macro_f1_maior_que_heuristica": true,

@@ -12,6 +12,8 @@ from collections import defaultdict
 import pytest
 
 from inspecao.config import RAIZ_REPO
+from inspecao.enums import RodadaRotulagem
+from inspecao.rotulagem import relatorio
 from inspecao.rotulagem.consolidacao import (
     CLASSES,
     DEFEITOS,
@@ -96,7 +98,7 @@ def test_kappa_medio_pondera_por_n_e_ignora_indefinido():
     assert medio["reflexo"].kappa is None and not medio["reflexo"].passa
 
 
-def test_kappa_dos_500_rotulos_do_lab02_bate_com_resumo_json():
+def _por_foto_lab02() -> dict[str, dict[str, dict]]:
     por_foto: dict[str, dict[str, dict]] = defaultdict(dict)
     with (RAIZ_REPO / "lab-02/rotulos/rotulos.csv").open(encoding="utf-8", newline="") as f:
         for r in csv.DictReader(f):
@@ -104,6 +106,11 @@ def test_kappa_dos_500_rotulos_do_lab02_bate_com_resumo_json():
             por_foto[r["nome_arquivo"]][r["rotulador"]] = _voto(
                 r["cena"], int(r["legivel"]), **{d: int(r[d]) for d in DEFEITOS}
             )
+    return por_foto
+
+
+def test_kappa_dos_500_rotulos_do_lab02_bate_com_resumo_json():
+    por_foto = _por_foto_lab02()
     esperado = json.loads((RAIZ_REPO / "lab-02/resultados/resumo.json").read_text())
 
     pares = kappa_por_par(por_foto)
@@ -119,3 +126,36 @@ def test_kappa_dos_500_rotulos_do_lab02_bate_com_resumo_json():
     for classe, kappa in esperado["kappa"].items():
         assert round(medio[classe].kappa, 3) == kappa, classe
     assert {c for c in CLASSES if medio[c].passa} == {"cena", "legivel"}
+
+
+def test_relatorio_kappa_md_traz_gate_desvios_e_aceite_pendente():
+    por_foto = _por_foto_lab02()
+    pares = kappa_por_par(por_foto)
+    md = relatorio.gerar(
+        [RodadaRotulagem.LAB02],
+        kappa_medio(pares),
+        pares,
+        {"lab02": 500},
+        rotulos=500,
+        fotos=329,
+        fotos_dupla=117,
+        fotos_empate=39,
+        controle_com_dupla=50,
+    )
+    assert "| cena | 0,744 | 225 | passa |" in md
+    assert "| tampa_suja | 0,148 | 225 | **não passa** (< 0,6) |" in md
+    assert "| davi_melo × elizabete_barbosa | 83 | 0,780 |" in md
+    assert "Fotos de controle com 2 ou mais rótulos: 50." in md
+    assert "5 de 7 classes ficam abaixo de 0,6" in md
+    assert "As rodadas A e B com o esquema v2 ainda não rodaram" in md
+    assert "| a | 0 |" in md and "| lab02 | 500 |" in md
+    for trecho in (
+        "## Desvios",
+        "Decisão pendente do Davi",
+        "3 votos",
+        "não parquet",
+        "POST /rotulagem/proxima",
+        "## Risco residual",
+        "T-M6-02",
+    ):
+        assert trecho in md, trecho

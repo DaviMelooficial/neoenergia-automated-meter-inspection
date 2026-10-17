@@ -5,6 +5,7 @@ Tudo com nomes de arquivo, leituras e notas ficticios: lote 010199 nao existe.
 """
 
 import csv
+import hashlib
 from datetime import UTC, datetime
 
 import pytest
@@ -144,8 +145,8 @@ def test_mesmo_rotulador_nao_rotula_a_mesma_foto_duas_vezes_na_rodada(db_session
     _inserir(db_session, foto_id=foto, usuario_id=uid)
     with pytest.raises(IntegrityError):
         _inserir(db_session, foto_id=foto, usuario_id=uid)
-    # outra rodada ou outro rotulador pode
-    _inserir(db_session, foto_id=foto, usuario_id=uid, rodada="b")
+    # outra rodada fora da dupla-cega, ou outro rotulador, pode
+    _inserir(db_session, foto_id=foto, usuario_id=uid, rodada="producao")
     _inserir(db_session, foto_id=foto, usuario_id=contas["admin"].id)
     _inserir(db_session, foto_id=foto, rotulador_externo="ext_x", rodada="lab02")
     with pytest.raises(IntegrityError):
@@ -202,6 +203,44 @@ def test_importador_idempotente_e_conta_nao_mapeadas(db_session, fotos, tmp_path
     assert corrigido.fora_de_foco and not corrigido.legivel and corrigido.usuario_id is None
     assert corrigido.gravado_em == datetime(2026, 10, 8, 16, 17, 32, tzinfo=UTC)
     assert corrigido.segundos_na_foto == 4.5
+
+
+def test_importador_marca_controle_e_export_traz_a_coluna(
+    client, db_session, fotos, tmp_path, contas
+):
+    caminho = tmp_path / "rotulos.csv"
+    escrever_csv(
+        caminho,
+        [
+            linha(1, "ext_x", "digital", legivel=1),
+            linha(1, "ext_y", "digital", legivel=1),
+            linha(2, "ext_x", "digital", legivel=1),
+        ],
+    )
+    sha = hashlib.sha256(nome(1).encode()).hexdigest()
+    arq_controle = tmp_path / "controle.dat"
+    arq_controle.write_text(f"{sha}\n{'f' * 64}\n", encoding="ascii")
+    hashes = importador.ler_controle(arq_controle)
+
+    r1 = importador.importar(db_session, caminho, hashes)
+    assert r1.fotos_controle == 1 and r1.inseridos == 3
+    # sem o controle.dat o campo nao e tocado: continua idempotente
+    r2 = importador.importar(db_session, caminho)
+    assert r2.fotos_controle is None and r2.inalterados == 3
+    assert importador.importar(db_session, caminho, hashes).inalterados == 3
+
+    cab = login(client, contas["admin"])
+    linhas = {
+        row["nome_arquivo"]: row
+        for row in csv.DictReader(client.get("/rotulagem/export", headers=cab).text.splitlines())
+    }
+    assert (linhas[nome(1)]["controle"], linhas[nome(2)]["controle"]) == ("1", "0")
+    consolidado = client.get("/rotulagem/consolidacao", headers=cab).json()
+    assert consolidado["fotos_dupla_rotulagem"] == 1
+
+    arq_controle.write_text("nao-e-hash\n", encoding="ascii")
+    with pytest.raises(importador.CsvInvalido, match="sha256"):
+        importador.ler_controle(arq_controle)
 
 
 @pytest.mark.parametrize(
@@ -409,14 +448,95 @@ def test_consolidacao_kappa_por_classe_com_valores_conhecidos(client, lab02, rot
 
 def test_consolidacao_das_rodadas_a_e_b_pareia_os_usuarios(client, lab02, rotuladores):
     cab = login(client, rotuladores["sup1"])
+    admin = login(client, rotuladores["admin"])
     client.post(f"/rotulagem/{lab02[1].id}", json=rotulo("a"), headers=cab)
     client.post(f"/rotulagem/{lab02[2].id}", json=rotulo("a"), headers=cab)
-    ok = client.get("/rotulagem/consolidacao", params={"rodada": ["a", "b"]}, headers=cab)
+    ok = client.get("/rotulagem/consolidacao", params={"rodada": ["a", "b"]}, headers=admin)
     assert ok.status_code == 200 and ok.json()["pares"] == []  # um rotulador so
     cab3 = login(client, rotuladores["sup3"])
     client.post(f"/rotulagem/{lab02[1].id}", json=rotulo("b"), headers=cab3)
-    r = client.get("/rotulagem/consolidacao", params={"rodada": ["a", "b"]}, headers=cab)
+    r = client.get("/rotulagem/consolidacao", params={"rodada": ["a", "b"]}, headers=admin)
     assert r.status_code == 200 and r.json()["pares"][0]["n"] == 1
+
+
+def test_consolidacao_das_rodadas_cegas_nao_vaza_por_diferencial(client, lab02, rotuladores):
+    """Com n = 1, kappa n/d quer dizer que concordaram e 0 que divergiram: quem votou
+    nao pode consultar o kappa das rodadas cegas, nem antes nem depois do voto."""
+    cab = {k: login(client, rotuladores[k]) for k in ("sup1", "sup2", "sup3", "admin")}
+    f1 = lab02[1].id
+
+    def consultar(quem, rodadas):
+        return client.get("/rotulagem/consolidacao", params={"rodada": rodadas}, headers=cab[quem])
+
+    assert consultar("sup2", ["a", "b"]).status_code == 200  # ainda nao votou: nada a vazar
+    assert client.post(f"/rotulagem/{f1}", json=rotulo("a"), headers=cab["sup1"]).status_code == 201
+    assert client.post(f"/rotulagem/{f1}", json=rotulo("b"), headers=cab["sup2"]).status_code == 201
+    for quem, propria in (("sup1", "a"), ("sup2", "b")):
+        for rodadas in (["a", "b"], [propria], ["a", "b", "desempate"], ["lab02", propria]):
+            r = consultar(quem, rodadas)
+            assert r.status_code == 403, (quem, rodadas, r.text)
+            assert "kappa" not in r.json() and "pares" not in r.json()
+        assert consultar(quem, ["lab02"]).status_code == 200  # lab02 ja fechou
+        assert consultar(quem, ["desempate"]).status_code == 200  # nao votou no desempate
+    assert consultar("sup3", ["a", "b"]).status_code == 200
+    assert consultar("admin", ["a", "b"]).json()["pares"][0]["n"] == 1
+
+
+def test_rodadas_cegas_se_excluem_por_rotulador_e_foto(client, db_session, lab02, rotuladores):
+    """O terceiro do desempate nao pode votar na mesma foto em a ou b: senao a
+    consolidacao a+b+desempate teria o mesmo rotulador duas vezes e daria 422 a todos."""
+    cab = {k: login(client, rotuladores[k]) for k in ("sup1", "sup2", "sup3", "admin")}
+    f2, f3 = lab02[2].id, lab02[3].id
+    client.post(f"/rotulagem/{f2}", json=rotulo("a"), headers=cab["sup1"])
+    client.post(f"/rotulagem/{f2}", json=rotulo("b", "digital", False), headers=cab["sup2"])
+    assert (
+        client.post(f"/rotulagem/{f2}", json=rotulo("desempate"), headers=cab["sup3"]).status_code
+        == 201
+    )
+    for rodada in ("a", "b"):
+        r = client.post(f"/rotulagem/{f2}", json=rotulo(rodada), headers=cab["sup3"])
+        assert r.status_code == 409, rodada
+        # e o /proxima tambem nao a oferece
+        for _ in range(4):
+            p = client.post("/rotulagem/proxima", params={"rodada": rodada}, headers=cab["sup3"])
+            if p.status_code != 200:
+                break
+            assert p.json()["foto_id"] != f2
+            client.post(
+                f"/rotulagem/{p.json()['foto_id']}", json=rotulo(rodada), headers=cab["sup3"]
+            )
+    # quem votou na a nao vota na b da mesma foto (ja coberto) nem no desempate
+    client.post(f"/rotulagem/{f3}", json=rotulo("a"), headers=cab["sup1"])
+    r = client.get(
+        "/rotulagem/consolidacao", params={"rodada": ["a", "b", "desempate"]}, headers=cab["admin"]
+    )
+    assert r.status_code == 200, r.text
+    assert (
+        client.get(
+            "/rotulagem/export", params={"rodada": ["a", "b", "desempate"]}, headers=cab["admin"]
+        ).status_code
+        == 200
+    )
+
+
+def test_indice_unico_fecha_a_corrida_entre_rodadas_cegas(db_session, fotos, contas):
+    uid, foto = contas["supervisor"].id, fotos[1].id
+    _inserir(db_session, foto_id=foto, usuario_id=uid, rodada="a")
+    for rodada in ("b", "desempate"):
+        with pytest.raises(IntegrityError):
+            _inserir(db_session, foto_id=foto, usuario_id=uid, rodada=rodada)
+    _inserir(db_session, foto_id=foto, usuario_id=uid, rodada="producao")  # fora da dupla-cega
+
+
+def test_colisao_em_a_e_b_nao_derruba_o_desempate(client, db_session, lab02, rotuladores):
+    """So por escrita fora da API (externo nas duas rodadas): 409, nunca 500."""
+    for rodada in ("a", "b"):
+        _inserir(db_session, foto_id=lab02[1].id, rotulador_externo="ext_z", rodada=rodada)
+    cab = login(client, rotuladores["sup3"])
+    r = client.post("/rotulagem/proxima", params={"rodada": "desempate"}, headers=cab)
+    assert r.status_code == 409 and "ext_z" in r.text
+    r = client.post(f"/rotulagem/{lab02[1].id}", json=rotulo("desempate"), headers=cab)
+    assert r.status_code == 409
 
 
 def test_consolidacao_colisao_de_rotulador_da_422(client, db_session, lab02, rotuladores):
@@ -441,6 +561,7 @@ def test_export_consolidado_por_maioria(client, lab02, rotuladores):
     )
     assert (f2["cena"], f2["legivel"], f2["empate"], f2["n_rotuladores"]) == ("", "", "1", "2")
     assert (f4["cena"], f4["legivel"], f4["lote"]) == ("ocorrencia", "0", LOTE)
+    assert f1["controle"] == ""  # importado sem controle.dat
     # supervisor rotula: nao pode ver o consolidado por foto
     sup = login(client, rotuladores["sup1"])
     assert client.get("/rotulagem/export", headers=sup).status_code == 403

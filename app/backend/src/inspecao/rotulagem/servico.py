@@ -5,24 +5,40 @@ amostra das rodadas `a` e `b` e o conjunto de fotos rotuladas no Lab 2 (`lab02`,
 329 fotos). E sobre ele que o esquema v2 precisa ser remedido.
 
 Regras de cada rodada (garantidas aqui, nao na interface):
-- `a` e `b`: foto da amostra ainda sem rotulo naquela rodada. Quem rotulou a foto
-  numa delas nao a recebe na outra (rodadas com rotuladores distintos).
+- `a`, `b` e `desempate` se excluem por usuario e foto: quem votou numa nao vota
+  nas outras (indice unico parcial no banco, alem do filtro daqui).
+- `a` e `b`: foto da amostra ainda sem rotulo naquela rodada.
 - `desempate`: foto com rotulo em `a` e em `b` cuja maioria empata em alguma
-  classe, ainda sem desempate, para um terceiro que nao rotulou a nem b. O
-  desempate e um terceiro voto cego: a resposta tambem nao traz as versoes
-  divergentes (desvio consciente da regra 4 do doc 05, secao 4).
+  classe, ainda sem desempate, para um terceiro. O desempate e um terceiro voto
+  cego: a resposta tambem nao traz as versoes divergentes (desvio consciente da
+  regra 4 do doc 05, secao 4, pendente de decisao).
+
+Cegueira tambem vale para os agregados: o kappa por par de `a`/`b`/`desempate`
+com n pequeno revela, por diferenca antes e depois do proprio voto, o voto do
+outro. Por isso so admin ou quem nao votou nas rodadas consultadas ve esses
+numeros (`pode_ver_consolidacao`).
 """
 
 import csv
 import io
 from collections import defaultdict
+from dataclasses import dataclass
 
 from sqlalchemy import and_, exists, func, select
 from sqlalchemy.orm import Session
 
-from inspecao.enums import RodadaRotulagem
-from inspecao.models import Foto, Lote, Rotulo
-from inspecao.rotulagem.consolidacao import CLASSES, DEFEITOS, PorFoto, consolidar
+from inspecao.enums import ORDEM_PAPEL, Papel, RodadaRotulagem
+from inspecao.models import Foto, Lote, Rotulo, Usuario
+from inspecao.rotulagem.consolidacao import (
+    CLASSES,
+    DEFEITOS,
+    KappaClasse,
+    KappaPar,
+    PorFoto,
+    consolidar,
+    kappa_medio,
+    kappa_por_par,
+)
 
 RODADAS_DA_TELA = (RodadaRotulagem.A, RodadaRotulagem.B, RodadaRotulagem.DESEMPATE)
 AMOSTRA = RodadaRotulagem.LAB02
@@ -80,13 +96,12 @@ def fotos_divergentes(db: Session) -> list[int]:
 
 def condicao_elegivel(db: Session, usuario_id: int, rodada: RodadaRotulagem):
     """Foto que este usuario pode rotular nesta rodada (sem olhar quem ja rotulou)."""
+    outras = [r for r in RODADAS_DA_TELA if r is not rodada]
     if rodada is RodadaRotulagem.DESEMPATE:
-        return and_(
-            Foto.id.in_(fotos_divergentes(db)),
-            ~_rotulou(usuario_id, [RodadaRotulagem.A, RodadaRotulagem.B]),
-        )
-    outra = RodadaRotulagem.B if rodada is RodadaRotulagem.A else RodadaRotulagem.A
-    return and_(_tem_rotulo_na_rodada(AMOSTRA), ~_rotulou(usuario_id, [outra]))
+        candidatas = Foto.id.in_(fotos_divergentes(db))
+    else:
+        candidatas = _tem_rotulo_na_rodada(AMOSTRA)
+    return and_(candidatas, ~_rotulou(usuario_id, outras))
 
 
 def proxima_foto(db: Session, usuario_id: int, rodada: RodadaRotulagem) -> tuple[Foto | None, int]:
@@ -113,11 +128,42 @@ def foto_elegivel(db: Session, usuario_id: int, rodada: RodadaRotulagem, foto_id
     return db.scalar(consulta) is not None
 
 
-COLUNAS_EXPORT = ["foto_id", "nome_arquivo", "lote", "n_rotuladores", *CLASSES, "empate"]
+def pode_ver_consolidacao(db: Session, usuario: Usuario, rodadas: list[RodadaRotulagem]) -> bool:
+    """Admin sempre; os demais so quando nao votaram em nenhuma rodada cega consultada.
+
+    A rodada `lab02` ja fechou (importada), entao seu kappa nao revela nada a ninguem.
+    """
+    cegas = [r.value for r in rodadas if r in RODADAS_DA_TELA]
+    if not cegas or ORDEM_PAPEL[Papel(usuario.papel)] >= ORDEM_PAPEL[Papel.ADMIN]:
+        return True
+    voto = select(Rotulo.id).where(Rotulo.usuario_id == usuario.id, Rotulo.rodada.in_(cegas))
+    return db.scalar(voto.limit(1)) is None
+
+
+def controle_por_foto(db: Session, foto_ids: list[int]) -> dict[int, bool]:
+    """Foto de controle do Lab 2, quando o importador recebeu o controle.dat."""
+    consulta = (
+        select(Rotulo.foto_id, func.bool_or(Rotulo.controle))
+        .where(
+            Rotulo.rodada == AMOSTRA.value,
+            Rotulo.controle.is_not(None),
+            Rotulo.foto_id.in_(foto_ids),
+        )
+        .group_by(Rotulo.foto_id)
+    )
+    return dict(db.execute(consulta).tuples().all())
+
+
+COLUNAS_EXPORT = ["foto_id", "nome_arquivo", "lote", "n_rotuladores", "controle"]
+COLUNAS_EXPORT += [*CLASSES, "empate"]
 
 
 def exportar_csv(db: Session, rodadas: list[RodadaRotulagem]) -> tuple[str, int]:
-    """Uma linha por foto, rotulo por maioria; empate fica vazio (NA no pandas)."""
+    """Uma linha por foto, rotulo por maioria; empate fica vazio (NA no pandas).
+
+    `controle` e 1/0 como no `rotulador/consolidar.py`, e vazio quando o controle.dat
+    nao foi importado (o arquivo fica fora do git para manter os rotuladores cegos).
+    """
     por_foto = votos(db, rodadas)
     fotos = {
         f.id: (f.nome_arquivo, lote)
@@ -129,10 +175,50 @@ def exportar_csv(db: Session, rodadas: list[RodadaRotulagem]) -> tuple[str, int]
     escritor = csv.DictWriter(saida, fieldnames=COLUNAS_EXPORT, lineterminator="\n")
     escritor.writeheader()
     consolidados = consolidar(por_foto)
+    controle = controle_por_foto(db, list(por_foto))
     for c in sorted(consolidados, key=lambda c: fotos[c.foto][0]):
         nome, lote = fotos[c.foto]
         linha = {"foto_id": c.foto, "nome_arquivo": nome, "lote": lote}
         linha |= {"n_rotuladores": c.n_rotuladores, "empate": int(c.empate)}
+        linha["controle"] = int(controle[c.foto]) if c.foto in controle else ""
         linha |= {k: "" if v is None else v for k, v in c.valores.items()}
         escritor.writerow(linha)
     return saida.getvalue(), len(consolidados)
+
+
+@dataclass(frozen=True, slots=True)
+class Resumo:
+    rodadas: list[RodadaRotulagem]
+    rotuladores: list[str]
+    rotulos: int
+    fotos: int
+    fotos_dupla: int
+    fotos_empate: int
+    controle_com_dupla: int | None  # None sem controle.dat importado
+    pares: list[KappaPar]
+    medio: dict[str, KappaClasse]
+
+
+def resumir(db: Session, rodadas: list[RodadaRotulagem]) -> Resumo:
+    """Kappa e contagens de uma consolidacao. So agregados."""
+    por_foto = votos(db, rodadas)
+    pares = kappa_por_par(por_foto)
+    controle = controle_por_foto(db, list(por_foto))
+    return Resumo(
+        rodadas=list(rodadas),
+        rotuladores=sorted({r for v in por_foto.values() for r in v}),
+        rotulos=sum(len(v) for v in por_foto.values()),
+        fotos=len(por_foto),
+        fotos_dupla=sum(1 for v in por_foto.values() if len(v) >= 2),
+        fotos_empate=sum(1 for c in consolidar(por_foto) if c.empate),
+        controle_com_dupla=sum(1 for f, v in por_foto.items() if len(v) >= 2 and controle.get(f))
+        if controle
+        else None,
+        pares=pares,
+        medio=kappa_medio(pares),
+    )
+
+
+def contagem_por_rodada(db: Session) -> dict[str, int]:
+    consulta = select(Rotulo.rodada, func.count()).group_by(Rotulo.rodada)
+    return dict(db.execute(consulta).tuples().all())

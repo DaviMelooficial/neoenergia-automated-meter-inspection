@@ -1,8 +1,9 @@
 """Rotulagem dupla-cega (marco M6), esquema v2 do Lab 2.
 
-Supervisor ou acima rotula e ve o kappa (so agregados, nenhum rotulo por foto).
-O export traz o rotulo consolidado de cada foto, o que quebraria a cegueira de
-quem ainda esta rotulando; por isso e so de admin.
+Supervisor ou acima rotula e ve o kappa do `lab02`. O kappa das rodadas cegas
+(a, b, desempate) e so de admin ou de quem nao votou nelas: com n pequeno, o
+kappa por par antes e depois do proprio voto revela o voto do outro. O export traz
+o rotulo consolidado de cada foto; por isso e so de admin.
 """
 
 from typing import Annotated
@@ -17,14 +18,7 @@ from inspecao.db import get_db
 from inspecao.enums import Defeito, RodadaRotulagem
 from inspecao.models import Foto, Rotulo
 from inspecao.rotulagem import servico
-from inspecao.rotulagem.consolidacao import (
-    CLASSES,
-    DEFEITOS,
-    LIMIAR_KAPPA,
-    consolidar,
-    kappa_medio,
-    kappa_por_par,
-)
+from inspecao.rotulagem.consolidacao import CLASSES, DEFEITOS, LIMIAR_KAPPA
 from inspecao.schemas import (
     ConsolidacaoOut,
     FotoRotulagemOut,
@@ -52,11 +46,8 @@ def _rotulo_saida(r: Rotulo) -> RotuloOut:
     )
 
 
-def _votos(db: Session, rodadas: list[RodadaRotulagem]):
-    try:
-        return servico.votos(db, rodadas)
-    except servico.ColisaoDeRotulador as erro:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(erro)) from erro
+def _colisao(erro: servico.ColisaoDeRotulador, codigo: int) -> HTTPException:
+    return HTTPException(codigo, str(erro))
 
 
 @router.post("/proxima", response_model=FotoRotulagemOut)
@@ -66,7 +57,11 @@ def proxima(db: DB, usuario: Supervisor, rodada: RodadaTela = "a") -> FotoRotula
     A resposta so identifica a foto: nenhum rotulo alheio, decisao da maquina,
     score, posicao lida nem nota do leiturista.
     """
-    foto, restantes = servico.proxima_foto(db, usuario.id, RodadaRotulagem(rodada))
+    try:
+        foto, restantes = servico.proxima_foto(db, usuario.id, RodadaRotulagem(rodada))
+    except servico.ColisaoDeRotulador as erro:
+        # Dado inconsistente em a/b (so por escrita fora da API): sem desempate ate corrigir.
+        raise _colisao(erro, status.HTTP_409_CONFLICT) from erro
     if foto is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "nada a rotular nesta rodada")
     return FotoRotulagemOut(
@@ -80,30 +75,36 @@ def proxima(db: DB, usuario: Supervisor, rodada: RodadaTela = "a") -> FotoRotula
 
 
 @router.get("/consolidacao", response_model=ConsolidacaoOut)
-def consolidacao(db: DB, _: Supervisor, rodada: Rodadas = None) -> ConsolidacaoOut:
+def consolidacao(db: DB, usuario: Supervisor, rodada: Rodadas = None) -> ConsolidacaoOut:
     """Kappa de Cohen por classe (media dos pares ponderada por n) e por par.
 
-    Padrao: rodada `lab02`. Juntar rodadas em que o mesmo rotulador votou duas
-    vezes na mesma foto devolve 422, porque inflaria a concordancia.
+    Padrao: rodada `lab02`. Rodadas cegas: 403 para quem votou em alguma delas
+    (exceto admin). Juntar rodadas em que o mesmo rotulador votou duas vezes na
+    mesma foto devolve 422, porque inflaria a concordancia.
     """
     rodadas = rodada or [RodadaRotulagem.LAB02]
-    por_foto = _votos(db, rodadas)
-    pares = kappa_por_par(por_foto)
-    medio = kappa_medio(pares)
-    consolidados = consolidar(por_foto)
+    if not servico.pode_ver_consolidacao(db, usuario, rodadas):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "voce votou nestas rodadas: o kappa delas so fica visivel para admin",
+        )
+    try:
+        r = servico.resumir(db, rodadas)
+    except servico.ColisaoDeRotulador as erro:
+        raise _colisao(erro, status.HTTP_422_UNPROCESSABLE_CONTENT) from erro
     return ConsolidacaoOut(
         rodadas=rodadas,
         limiar=LIMIAR_KAPPA,
-        rotuladores=sorted({r for votos in por_foto.values() for r in votos}),
-        rotulos=sum(len(v) for v in por_foto.values()),
-        fotos=len(por_foto),
-        fotos_dupla_rotulagem=sum(1 for v in por_foto.values() if len(v) >= 2),
-        fotos_com_empate=sum(1 for c in consolidados if c.empate),
+        rotuladores=r.rotuladores,
+        rotulos=r.rotulos,
+        fotos=r.fotos,
+        fotos_dupla_rotulagem=r.fotos_dupla,
+        fotos_com_empate=r.fotos_empate,
         por_classe=[
-            KappaClasseOut(classe=c, kappa=medio[c].kappa, n=medio[c].n, passa=medio[c].passa)
+            KappaClasseOut(classe=c, kappa=r.medio[c].kappa, n=r.medio[c].n, passa=r.medio[c].passa)
             for c in CLASSES
         ],
-        pares=[KappaParOut(a=p.a, b=p.b, n=p.n, kappa=p.kappa) for p in pares],
+        pares=[KappaParOut(a=p.a, b=p.b, n=p.n, kappa=p.kappa) for p in r.pares],
     )
 
 
@@ -118,7 +119,7 @@ def exportar(db: DB, _: Admin, rodada: Rodadas = None) -> Response:
     try:
         texto, _n = servico.exportar_csv(db, rodada or [RodadaRotulagem.LAB02])
     except servico.ColisaoDeRotulador as erro:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(erro)) from erro
+        raise _colisao(erro, status.HTTP_422_UNPROCESSABLE_CONTENT) from erro
     return Response(
         texto,
         media_type="text/csv; charset=utf-8",
@@ -141,7 +142,11 @@ def gravar(foto_id: int, dados: RotuloIn, db: DB, usuario: Supervisor) -> Rotulo
     )
     if ja_tem is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "voce ja rotulou esta foto nesta rodada")
-    if not servico.foto_elegivel(db, usuario.id, rodada, foto_id):
+    try:
+        elegivel = servico.foto_elegivel(db, usuario.id, rodada, foto_id)
+    except servico.ColisaoDeRotulador as erro:
+        raise _colisao(erro, status.HTTP_409_CONFLICT) from erro
+    if not elegivel:
         raise HTTPException(
             status.HTTP_409_CONFLICT, "foto fora do que voce pode rotular nesta rodada"
         )
@@ -158,10 +163,12 @@ def gravar(foto_id: int, dados: RotuloIn, db: DB, usuario: Supervisor) -> Rotulo
     db.add(rotulo)
     try:
         db.commit()
-    except IntegrityError as erro:  # corrida com outra aba do mesmo usuario
+    except IntegrityError as erro:
+        # Corrida com outra aba do mesmo usuario: os indices unicos parciais barram o
+        # segundo voto na mesma rodada e o voto em outra rodada cega da mesma foto.
         db.rollback()
         raise HTTPException(
-            status.HTTP_409_CONFLICT, "voce ja rotulou esta foto nesta rodada"
+            status.HTTP_409_CONFLICT, "voce ja rotulou esta foto nesta ou em outra rodada cega"
         ) from erro
     db.refresh(rotulo)
     return _rotulo_saida(rotulo)

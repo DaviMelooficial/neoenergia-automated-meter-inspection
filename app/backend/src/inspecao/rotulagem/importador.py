@@ -6,9 +6,14 @@ quantas. A foto e encontrada pelo nome do arquivo (`fotos.nome_arquivo`, unico);
 nome que nao existe no banco e contado como nao mapeado e fica de fora.
 
 O `gravado_em` do app e hora local sem fuso; e lido como America/Recife.
+
+`controle`: com o `rotulador/controle.dat` (sha256 dos nomes das 50 fotos de
+controle, fora do git para o rotulador nao saber quais sao), marca cada rotulo
+lab02 como de controle ou nao. Sem o arquivo, o campo nao e tocado.
 """
 
 import csv
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +45,7 @@ class ResumoImportacao:
     fotos_csv: int = 0
     fotos_mapeadas: int = 0
     nao_mapeadas: list[str] = field(default_factory=list)
+    fotos_controle: int | None = None  # None = controle.dat nao informado
 
     @property
     def rotulos_no_banco(self) -> int:
@@ -89,7 +95,19 @@ def _ler(caminho: Path) -> tuple[list[tuple[int, dict]], int]:
     return linhas, puladas
 
 
-def importar(sessao: Session, caminho: Path) -> ResumoImportacao:
+def ler_controle(caminho: Path) -> set[str]:
+    hashes = {h.strip() for h in caminho.read_text(encoding="ascii").splitlines() if h.strip()}
+    invalidos = [h for h in hashes if len(h) != 64]
+    if invalidos:
+        raise CsvInvalido(f"controle.dat com linha que nao e sha256: {invalidos[0][:20]!r}")
+    return hashes
+
+
+def eh_controle(nome_arquivo: str, hashes: set[str]) -> bool:
+    return hashlib.sha256(nome_arquivo.encode("utf-8")).hexdigest() in hashes
+
+
+def importar(sessao: Session, caminho: Path, controle: set[str] | None = None) -> ResumoImportacao:
     """Grava na sessao (sem commit): quem chama decide se confirma."""
     linhas, puladas = _ler(caminho)
     resumo = ResumoImportacao(linhas=len(linhas) + puladas, puladas=puladas)
@@ -102,6 +120,8 @@ def importar(sessao: Session, caminho: Path) -> ResumoImportacao:
     )
     resumo.fotos_mapeadas = len(foto_por_nome)
     resumo.nao_mapeadas = [n for n in nomes if n not in foto_por_nome]
+    if controle is not None:
+        resumo.fotos_controle = sum(1 for n in foto_por_nome if eh_controle(n, controle))
 
     existentes = {
         (r.foto_id, r.rotulador_externo): r
@@ -112,6 +132,8 @@ def importar(sessao: Session, caminho: Path) -> ResumoImportacao:
         if foto_id is None:
             continue
         valores = {k: r[k] for k in CAMPOS if not (k == "gravado_em" and r[k] is None)}
+        if controle is not None:
+            valores["controle"] = eh_controle(r["nome_arquivo"], controle)
         atual = existentes.get((foto_id, r["rotulador"]))
         if atual is None:
             sessao.add(

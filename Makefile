@@ -81,10 +81,10 @@ relatorio-heuristicas:  ## exporta os scores do banco e gera ml/reports/heuristi
 	cd ml && uv run python -m mlinsp.relatorio_heuristicas --exportacao artifacts/heuristicas_exportacao.csv \
 	  --base "../Base cliente" --limiar $(LIMIAR)
 
-rotulos-importar:  ## importa os 500 rotulos do Lab 2 (lab-02/rotulos/rotulos.csv) na rodada lab02; idempotente
+rotulos-importar:  ## importa os 500 rotulos do Lab 2 na rodada lab02 (+ rotulador/controle.dat, fora do git); idempotente
 	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-lab02
 
-rotulos-kappa:  ## kappa de Cohen por classe e por par (RODADAS="a b" para outras rodadas; padrao lab02)
+rotulos-kappa:  ## kappa por classe e por par, grava ml/reports/kappa.md (RODADAS="a b"; padrao lab02)
 	cd app/backend && uv run python -m inspecao.rotulagem.cli kappa $(foreach r,$(RODADAS),--rodada $(r))
 
 rotulos-exportar:  ## grava ml/artifacts/rotulos.csv consolidado por maioria (RODADAS="..." opcional)

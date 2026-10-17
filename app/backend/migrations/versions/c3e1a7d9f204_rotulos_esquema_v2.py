@@ -34,6 +34,7 @@ def upgrade() -> None:
     sa.Column('display_apagado', sa.Boolean(), nullable=False),
     sa.Column('legivel', sa.Boolean(), nullable=False),
     sa.Column('segundos_na_foto', sa.Float(), nullable=True),
+    sa.Column('controle', sa.Boolean(), nullable=True),
     sa.Column('gravado_em', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('criado_em', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint('(usuario_id IS NULL) <> (rotulador_externo IS NULL)', name='ck_rotulos_um_rotulador'),
@@ -47,9 +48,11 @@ def upgrade() -> None:
     op.create_index(op.f('ix_rotulos_usuario_id'), 'rotulos', ['usuario_id'], unique=False)
     op.create_index('uq_rotulos_foto_rodada_externo', 'rotulos', ['foto_id', 'rodada', 'rotulador_externo'], unique=True, postgresql_where='rotulador_externo IS NOT NULL')
     op.create_index('uq_rotulos_foto_rodada_usuario', 'rotulos', ['foto_id', 'rodada', 'usuario_id'], unique=True, postgresql_where='usuario_id IS NOT NULL')
+    op.create_index('uq_rotulos_foto_usuario_dupla_cega', 'rotulos', ['foto_id', 'usuario_id'], unique=True, postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')")
 
 
 def downgrade() -> None:
+    op.drop_index('uq_rotulos_foto_usuario_dupla_cega', table_name='rotulos', postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')")
     op.drop_index('uq_rotulos_foto_rodada_usuario', table_name='rotulos', postgresql_where='usuario_id IS NOT NULL')
     op.drop_index('uq_rotulos_foto_rodada_externo', table_name='rotulos', postgresql_where='rotulador_externo IS NOT NULL')
     op.drop_index(op.f('ix_rotulos_usuario_id'), table_name='rotulos')

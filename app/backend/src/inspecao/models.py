@@ -406,6 +406,16 @@ class Rotulo(Base):
             unique=True,
             postgresql_where="rotulador_externo IS NOT NULL",
         ),
+        # Rodadas a, b e desempate se excluem por usuario e foto: quem votou numa nao
+        # vota nas outras. No banco, e nao so no endpoint, para fechar a corrida entre
+        # duas abas do mesmo usuario.
+        Index(
+            "uq_rotulos_foto_usuario_dupla_cega",
+            "foto_id",
+            "usuario_id",
+            unique=True,
+            postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')",
+        ),
         Index("ix_rotulos_rodada_foto", "rodada", "foto_id"),
     )
 
@@ -424,6 +434,9 @@ class Rotulo(Base):
     display_apagado: Mapped[bool] = mapped_column(Boolean)
     legivel: Mapped[bool] = mapped_column(Boolean)
     segundos_na_foto: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # So no lab02: foto de controle (vista pelos 3 integrantes), lida do controle.dat do
+    # app, que fica fora do git. Nulo = nao informado.
+    controle: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Quando o rotulador decidiu (no lab02, o `gravado_em` do CSV do app).
     gravado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

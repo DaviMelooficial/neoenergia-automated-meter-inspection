@@ -164,6 +164,7 @@ def test_relatorio_kappa_md_traz_gate_desvios_e_aceite_pendente():
         "papel de rotulador separado",
         "Ancoragem",
         "Troca de papel",
-        "`restantes` revela que houve voto",
+        "revela *qual* foto já tem voto",
+        "openssl rand -hex 16`, mesmo em dev",
     ):
         assert trecho in md, trecho

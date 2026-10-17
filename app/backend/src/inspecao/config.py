@@ -34,6 +34,8 @@ RAIZ_REPO = _descobrir_raiz()
 
 # Valor do .env.example: serve em dev, e recusado fora de dev como os demais exemplos.
 SALT_ROTULAGEM_EXEMPLO = "9b846d587d76561b49133bcbd9da8808"
+# Usado em dev com ROTULAGEM_SALT vazio. Publico (esta no codigo): recusado fora de dev.
+SALT_ROTULAGEM_DEV = "rotulagem-dev-sem-salt"
 
 
 class Settings(BaseSettings):
@@ -99,9 +101,9 @@ class Settings(BaseSettings):
             "trocar_em_producao_use_openssl_rand_hex_32",
             "trocar_no_primeiro_login",
             SALT_ROTULAGEM_EXEMPLO,
+            SALT_ROTULAGEM_DEV,
         }
     )
-    SALT_ROTULAGEM_DEV: ClassVar[str] = "rotulagem-dev-sem-salt"
 
     @model_validator(mode="after")
     def _proibir_placeholders_fora_de_dev(self) -> "Settings":
@@ -124,7 +126,7 @@ class Settings(BaseSettings):
         return self
 
     def salt_da_rotulagem(self) -> str:
-        return self.rotulagem_salt or self.SALT_ROTULAGEM_DEV
+        return self.rotulagem_salt or SALT_ROTULAGEM_DEV
 
     def caminho_absoluto(self, caminho: Path) -> Path:
         """Resolve um caminho relativo contra a raiz do repositorio."""

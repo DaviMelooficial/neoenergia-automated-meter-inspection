@@ -77,8 +77,14 @@ DESVIOS = """\
 - **Troca de papel no meio da rodada não é barrada.** Promover um rotulador a admin (que
   vê o kappa) ou rebaixar um admin (que passa a rotular) é risco procedimental: a regra
   vale para o papel no momento da chamada.
-- **`restantes` revela que houve voto, não o conteúdo.** O contador do `/proxima` cai
-  quando outra pessoa vota numa foto da rodada.
+- **`restantes` e o POST por id revelam que houve voto, não o conteúdo.** O contador do
+  `/proxima` cai quando outra pessoa vota numa foto da rodada, e o `POST /rotulagem/{id}`
+  (409 contra 201) revela *qual* foto já tem voto na rodada. O conteúdo do voto não vaza,
+  e sondar custa um voto real (o 201 grava).
+- **Salt de exemplo em rodada real.** Com `AMBIENTE=dev` a API aceita o `ROTULAGEM_SALT`
+  do `.env.example` (ou vazio, que cai num valor fixo do código), e os dois são públicos:
+  a ordem de entrega fica calculável. Para rodada real, gere o salt com
+  `openssl rand -hex 16`, mesmo em dev.
 """
 
 

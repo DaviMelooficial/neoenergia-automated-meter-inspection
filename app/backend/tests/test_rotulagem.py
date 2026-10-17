@@ -667,11 +667,12 @@ def _sequencia(client, cab, rodada: str, n: int) -> list[int]:
 
 
 def test_ordem_do_proxima_e_propria_de_cada_rotulador_e_usa_o_salt(
-    client, db_session, fotos, rotuladores, tmp_path, monkeypatch
+    client, db_session, fotos, rotuladores, tmp_path
 ):
-    """A ordem e md5(salt:foto:usuario) com o salt secreto do servidor: cada rotulador
-    tem a sua, e sem o salt ela nao e calculavel. O teste le o salt da configuracao
-    (que so o servidor tem) e confirma que trocar o salt troca a ordem entregue."""
+    """A sequencia inteira que o /proxima entrega a sup1 (rodada a) e a sup2 (rodada b)
+    e a ordem por md5(salt:foto:usuario), com o salt lido da configuracao do servidor.
+    O usuario entra no hash, entao cada rotulador tem a sua ordem; que a ordem depende
+    do salt e coberto por `test_trocar_o_salt_troca_a_ordem`."""
     from inspecao.config import get_settings
 
     caminho = tmp_path / "rotulos.csv"
@@ -702,14 +703,15 @@ def test_trocar_o_salt_troca_a_ordem(client, db_session, fotos, rotuladores, tmp
 
 
 def test_salt_da_rotulagem_obrigatorio_fora_de_dev():
-    from inspecao.config import SALT_ROTULAGEM_EXEMPLO, Settings
+    from inspecao.config import SALT_ROTULAGEM_DEV, SALT_ROTULAGEM_EXEMPLO, Settings
 
     base = {"ambiente": "producao", "jwt_secret": "s" * 40, "admin_senha_inicial": "p" * 20}
-    for salt in ("", "curto", SALT_ROTULAGEM_EXEMPLO):
+    for salt in ("", "curto", SALT_ROTULAGEM_EXEMPLO, SALT_ROTULAGEM_DEV):
         with pytest.raises(ValueError, match="ROTULAGEM_SALT"):
             Settings(**base, rotulagem_salt=salt)
     assert Settings(**base, rotulagem_salt="r" * 32).salt_da_rotulagem() == "r" * 32
-    assert Settings(ambiente="dev", rotulagem_salt="").salt_da_rotulagem()  # dev: valor fixo
+    dev = Settings(ambiente="dev", rotulagem_salt="")
+    assert dev.salt_da_rotulagem() == SALT_ROTULAGEM_DEV  # dev: valor fixo e publico
 
 
 def test_rodadas_cegas_se_excluem_por_rotulador_e_foto(client, db_session, lab02, rotuladores):

@@ -16,7 +16,7 @@ banco local. Reprodutível com `make triagem-todos` (worker com `DETECTOR_QUALID
 | Inspeção humana das 200 fotos dos extremos | **Pendente** (amostra e página prontas, ver "Pendência humana") |
 | Triagem das 11.419 leituras, 4 workers no host | **41,5 s** do primeiro claim ao último job (aceite: < 10 min). Latência por imagem: média 3,6 ms, p95 5 ms |
 | `recalcular_decisao` nos 4 lotes | 1 a 2 s por passada, sem abrir imagem (teste com storage que falha em qualquer leitura) |
-| Paridade backend × `mlinsp` (Lab 2) | 12 features **idênticas, bit a bit**, nas 11.419 fotos com resultado: `features_v0` recalculado pelo relatório contra os `sinais` que o worker gravou (`paridade_backend_mlinsp` em `heuristicas_resumo.json`). As 921 fotos restantes (866 órfãs e 55 já decididas na fila) não passam pela triagem |
+| Paridade backend × `mlinsp` (Lab 2) | 12 features **idênticas, bit a bit**, nas 11.419 fotos com resultado (0 saídas sem `sinais`): `features_v0` recalculado pelo relatório contra os `sinais` que o worker gravou (`paridade_backend_mlinsp` em `heuristicas_resumo.json`, campo `identicas`). As 921 fotos restantes (866 órfãs e 55 já decididas na fila) não passam pela triagem |
 
 ## 1. Sinais
 
@@ -148,3 +148,9 @@ nova, `politica@v2` em `POLITICAS` (e `POLITICA_ATUAL` apontando para ela), segu
 `make recalcular-todos POLITICA=politica@v2`, sem reabrir imagem. **Nunca editar `POLITICA_V1` no
 lugar**: o histórico de status grava a versão que decidiu cada leitura, e mudar o limiar sob o
 mesmo nome tornaria esse registro falso.
+
+Efeito operacional do recálculo: enquanto `recalcular_decisao` roda num lote, as leituras
+re-decidíveis desse lote ficam travadas até o commit (1 a 2 s nos lotes reais), e
+`/fila-humana/proxima` filtrada por esse lote responde fila vazia nesse intervalo. Itens que um
+auditor estava pegando no instante do recálculo são pulados e aparecem em warning no log do
+worker; rodar `make recalcular-todos` de novo os alcança.

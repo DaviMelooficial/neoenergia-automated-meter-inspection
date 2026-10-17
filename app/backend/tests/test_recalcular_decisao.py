@@ -326,9 +326,12 @@ def _reservar(sessao, usuario_id: int, leitura_id: int) -> None:
     leitura.reservado_ate = datetime.now(UTC) + timedelta(minutes=10)
 
 
-def test_recalcular_pula_item_que_o_auditor_esta_pegando_sem_esperar(base_na_fila):
-    """Auditor com o item travado em /proxima: o job pula a linha (nao espera o lock)
-    e a reserva que o auditor grava em seguida continua valendo."""
+def test_recalcular_pula_item_que_o_auditor_esta_pegando_sem_esperar(
+    base_na_fila, caplog, monkeypatch
+):
+    """Auditor com o item travado em /proxima: o job pula a linha (nao espera o lock),
+    avisa no log, e a reserva que o auditor grava em seguida continua valendo."""
+    monkeypatch.setattr(handlers.log, "disabled", False)  # fileConfig do alembic
     fabrica, contas, lote_id, storage = base_na_fila
     auditor = contas["auditor"].id
     s_aud, s_job = fabrica(), fabrica()
@@ -336,12 +339,17 @@ def test_recalcular_pula_item_que_o_auditor_esta_pegando_sem_esperar(base_na_fil
         pego = s_aud.scalar(consulta_proxima(auditor, ls.LOTE))  # lock aberto
         assert pego is not None
         s_job.execute(text("SET LOCAL lock_timeout = '2s'"))  # sem o SKIP LOCKED, estoura
-        recalcular_decisao(
-            ctx_com(DetectorHeuristico(), StorageProibido(raiz=storage.raiz)),
-            s_job,
-            {"lote_id": lote_id, "politica": "politica@v1"},
-        )
+        with caplog.at_level("INFO", logger="inspecao.jobs.handlers"):
+            recalcular_decisao(
+                ctx_com(DetectorHeuristico(), StorageProibido(raiz=storage.raiz)),
+                s_job,
+                {"lote_id": lote_id, "politica": "politica@v1"},
+            )
         s_job.commit()
+        n = len(ls.LINHAS_COM_FOTO)
+        assert f"{n} candidatas, {n - 1} travadas pelo job" in caplog.text
+        avisos = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert len(avisos) == 1 and "1 leituras puladas" in avisos[0]
         _reservar(s_aud, auditor, pego)
         s_aud.commit()
     finally:
@@ -495,3 +503,36 @@ def test_reserva_gravada_entre_o_select_e_o_loop_nao_e_reaberta(
     assert [status[n] for n in LINHAS_PRETAS[:-1]] == [StatusLeitura.REJEITADA_QUALIDADE.value] * (
         len(LINHAS_PRETAS) - 1
     )
+
+
+def test_triagem_avisa_quando_a_leitura_esta_travada_por_outra_transacao(
+    base_na_fila, caplog, monkeypatch
+):
+    monkeypatch.setattr(handlers.log, "disabled", False)  # fileConfig do alembic
+    fabrica, _, lote_id, storage = base_na_fila
+    with fabrica() as s:
+        alvo = s.scalar(
+            select(Leitura.id).where(
+                Leitura.lote_id == lote_id, Leitura.linha_csv == LINHAS_PRETAS[0]
+            )
+        )
+        s.execute(
+            ResultadoInferencia.__table__.delete().where(
+                ResultadoInferencia.foto_id.in_(select(Foto.id).where(Foto.leitura_id == alvo))
+            )
+        )
+        s.commit()
+
+    s_outra, s_job = fabrica(), fabrica()
+    try:
+        s_outra.execute(select(Leitura).where(Leitura.id == alvo).with_for_update())
+        with caplog.at_level("WARNING", logger="inspecao.jobs.handlers"):
+            triagem_qualidade(ctx_com(DetectorHeuristico(), storage), s_job, {"leitura_id": alvo})
+        s_job.commit()
+    finally:
+        s_outra.rollback()
+        s_outra.close()
+        s_job.close()
+
+    assert f"leitura {alvo} travada por outra transacao" in caplog.text
+    assert _status(fabrica, lote_id)[LINHAS_PRETAS[0]] == (StatusLeitura.FILA_HUMANA.value, None)

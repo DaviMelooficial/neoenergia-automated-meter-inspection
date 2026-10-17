@@ -91,16 +91,24 @@ def evidencia(exp: pd.DataFrame, rot: pd.DataFrame) -> pd.DataFrame:
 
 def paridade(feat: pd.DataFrame, exp: pd.DataFrame) -> dict:
     """Compara `features_v0` (calculado aqui) com os sinais que o backend gravou, foto a
-    foto, sem passar por CSV: a medida de paridade do report."""
-    gravado = pd.DataFrame(list(exp.sinais), index=exp.index)[NOMES_V0]
+    foto, sem passar por CSV: a medida de paridade do report.
+
+    Saida sem `sinais` (ou com sinal faltando) nao entra na comparacao e e contada a
+    parte: com alguma, `identicas` e falso, porque a paridade nao foi verificada nela."""
+    gravado = pd.DataFrame(list(exp.sinais), index=exp.index).reindex(columns=list(NOMES_V0))
+    sem_sinais = gravado.isna().any(axis=1)
+    gravado = gravado[~sem_sinais]
     calculado = feat.loc[gravado.index, NOMES_V0]
     dif = (calculado - gravado).abs()
     rel = dif / gravado.abs().where(gravado.abs() > 0, 1.0)
+    com_diferenca = int((dif > 0).any(axis=1).sum())
     return {
         "fotos": len(gravado),
-        "max_dif_abs": float(dif.max().max()),
-        "max_dif_rel": float(rel.max().max()),
-        "fotos_com_diferenca": int((dif > 0).any(axis=1).sum()),
+        "fotos_sem_sinais": int(sem_sinais.sum()),
+        "max_dif_abs": float(dif.max().max()) if len(gravado) else None,
+        "max_dif_rel": float(rel.max().max()) if len(gravado) else None,
+        "fotos_com_diferenca": com_diferenca,
+        "identicas": bool(len(gravado)) and not sem_sinais.any() and com_diferenca == 0,
     }
 
 

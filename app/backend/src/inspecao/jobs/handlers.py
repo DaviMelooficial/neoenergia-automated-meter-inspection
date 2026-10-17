@@ -131,7 +131,16 @@ def triagem_qualidade(ctx: Contexto, sessao: Session, payload: dict) -> None:
     if reaberta:
         # O status lido acima pode estar velho: trava e reconfere antes de reabrir.
         if not _travar_redecidiveis(sessao, select(Leitura).where(Leitura.id == leitura.id)):
-            log.info("leitura %s reservada, decidida ou travada: nada a reabrir", leitura.id)
+            if sessao.scalar(select(Leitura.id).where(Leitura.id == leitura.id, _redecidivel())):
+                # Re-decidivel, mas travada por outra transacao (auditor pegando o item).
+                log.warning(
+                    "leitura %s travada por outra transacao: triagem com %s nao feita; "
+                    "reenfileire (reprocessar_lote) para tentar de novo",
+                    leitura.id,
+                    ctx.detector.nome,
+                )
+            else:
+                log.info("leitura %s reservada ou decidida: nada a reabrir", leitura.id)
             return
         status = StatusLeitura(leitura.status_atual)
     foto = _foto_principal(sessao, leitura)
@@ -188,14 +197,17 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         ultimo = ultimo.where(ResultadoInferencia.modelo == politica.modelo)
     ultimo = ultimo.subquery()
 
-    linhas = _travar_redecidiveis(
-        sessao,
+    consulta = (
         select(Leitura, ultimo.c.modelo, ultimo.c.saida)
         .join(Foto, (Foto.leitura_id == Leitura.id) & Foto.principal.is_(True))
         .join(ultimo, ultimo.c.foto_id == Foto.id)
         .where(Leitura.lote_id == lote.id)
-        .order_by(Leitura.id),
+        .order_by(Leitura.id)
     )
+    candidatas = sessao.scalar(
+        select(func.count()).select_from(consulta.where(_redecidivel()).order_by(None).subquery())
+    )
+    linhas = _travar_redecidiveis(sessao, consulta)
 
     contagem: Counter[str] = Counter()
     for leitura, modelo, saida in linhas:
@@ -220,12 +232,22 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         _sair_da_triagem(sessao, leitura, decisao, ator, p_ruim, detalhe | {"recalculo": True})
         contagem[f"{de}->{DESTINO[decisao].value}"] += 1
     log.info(
-        "lote %s: recalcular_decisao com %s sobre %d leituras: %s",
+        "lote %s: recalcular_decisao com %s: %d candidatas, %d travadas pelo job: %s",
         lote.nome,
         politica.versao,
+        candidatas,
         len(linhas),
         dict(contagem),
     )
+    if candidatas > len(linhas) or contagem["pulada"]:
+        # SKIP LOCKED: linhas em uso por outra transacao (auditor pegando o item) ficam de
+        # fora desta passada, sem erro. O job e idempotente: rodar de novo as alcanca.
+        log.warning(
+            "lote %s: %d leituras puladas por estarem travadas por outra transacao; "
+            "rode recalcular_decisao de novo para alcanca-las",
+            lote.nome,
+            candidatas - len(linhas) + contagem["pulada"],
+        )
 
 
 def validacao_leitura(ctx: Contexto, sessao: Session, payload: dict) -> None:

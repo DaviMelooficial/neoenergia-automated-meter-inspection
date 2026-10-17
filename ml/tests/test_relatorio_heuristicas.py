@@ -62,8 +62,18 @@ def test_amostra_tem_100_piores_e_100_limitrofes_sem_repetir(tmp_path):
 def test_paridade_compara_os_sinais_gravados_com_o_calculado(tmp_path):
     exp = _exportacao(tmp_path, n=4)
     feat = pd.DataFrame(list(exp.sinais), index=exp.index)
-    assert paridade(feat, exp) == {"fotos": 4, "max_dif_abs": 0.0, "max_dif_rel": 0.0,
-                                   "fotos_com_diferenca": 0}
+    assert paridade(feat, exp) == {"fotos": 4, "fotos_sem_sinais": 0, "max_dif_abs": 0.0,
+                                   "max_dif_rel": 0.0, "fotos_com_diferenca": 0,
+                                   "identicas": True}
     feat.loc["f002.jpg", "tenengrad"] += 1.0
     r = paridade(feat, exp)
-    assert r["fotos_com_diferenca"] == 1 and r["max_dif_rel"] == 0.5
+    assert r["fotos_com_diferenca"] == 1 and r["max_dif_rel"] == 0.5 and not r["identicas"]
+
+
+def test_paridade_nao_declara_identicas_com_saida_sem_sinais(tmp_path):
+    exp = _exportacao(tmp_path, n=4)
+    feat = pd.DataFrame(list(exp.sinais), index=exp.index)
+    exp.at["f001.jpg", "sinais"] = {}
+    r = paridade(feat, exp)
+    assert r["fotos"] == 3 and r["fotos_sem_sinais"] == 1
+    assert r["fotos_com_diferenca"] == 0 and not r["identicas"]

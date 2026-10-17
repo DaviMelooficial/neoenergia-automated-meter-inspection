@@ -268,7 +268,7 @@
      "operacao"
     ],
     "summary": "Obter Leitura",
-    "description": "Leitura completa. Em auditoria amostral pendente, so o revisor original a ve:\nstatus, historico e revisao entregariam a primeira decisao ao segundo revisor.",
+    "description": "Leitura completa; decisao final alheia oculta (ver `ocultar_decisao`).",
     "operationId": "obter_leitura_leituras__leitura_id__get",
     "security": [
      {
@@ -717,7 +717,7 @@
      "auditoria"
     ],
     "summary": "Proxima",
-    "description": "Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma\ndecisao dele mesmo, nunca uma reservada por outro revisor.",
+    "description": "Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma\ndecisao dele mesmo, nunca uma reservada por outro revisor. Admin nao audita.",
     "operationId": "proxima_auditoria_proxima_post",
     "responses": {
      "200": {
@@ -1228,7 +1228,7 @@
      "metricas"
     ],
     "summary": "Concordancia Auditoria",
-    "description": "Concordancia primeiro x segundo revisor da auditoria amostral (so agregados).",
+    "description": "Concordancia primeiro x segundo revisor da auditoria amostral. Supervisor ve so os\ntotais com ao menos `min_pares` pares; contagens, por lote e serie so admin (que por\nisso nao audita).",
     "operationId": "concordancia_auditoria_metricas_auditoria_get",
     "responses": {
      "200": {
@@ -1699,21 +1699,13 @@
       "type": "boolean",
       "title": "Ativa"
      },
+     "contador_aplicavel": {
+      "type": "boolean",
+      "title": "Contador Aplicavel"
+     },
      "motivo": {
       "type": "string",
       "title": "Motivo"
-     },
-     "limiar_contagem": {
-      "type": "number",
-      "title": "Limiar Contagem"
-     },
-     "origem_limiar_contagem": {
-      "type": "string",
-      "enum": [
-       "politica",
-       "candidato"
-      ],
-      "title": "Origem Limiar Contagem"
      },
      "alvo_erro": {
       "type": "number",
@@ -1728,7 +1720,14 @@
       "title": "Necessarias"
      },
      "fotos_na_zona": {
-      "type": "integer",
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "Fotos Na Zona"
      },
      "rotuladas_na_zona": {
@@ -1757,6 +1756,16 @@
      "meta_atingida": {
       "type": "boolean",
       "title": "Meta Atingida"
+     },
+     "diagnostico": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DiagnosticoZonaOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
      }
     },
     "type": "object",
@@ -1766,9 +1775,8 @@
      "limiar_rejeita",
      "limiar_aprova",
      "ativa",
+     "contador_aplicavel",
      "motivo",
-     "limiar_contagem",
-     "origem_limiar_contagem",
      "alvo_erro",
      "confianca",
      "necessarias",
@@ -1777,9 +1785,60 @@
      "erros",
      "acumuladas_sem_erro",
      "limite_superior_erro",
-     "meta_atingida"
+     "meta_atingida",
+     "diagnostico"
     ],
     "title": "AutoAprovacaoOut"
+   },
+   "AutoAprovadasAuditoriaOut": {
+    "properties": {
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "reprovadas_pelo_revisor": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reprovadas Pelo Revisor"
+     },
+     "taxa_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Erro"
+     },
+     "suprimido": {
+      "type": "boolean",
+      "title": "Suprimido"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "reprovadas_pelo_revisor",
+     "taxa_erro",
+     "suprimido"
+    ],
+    "title": "AutoAprovadasAuditoriaOut",
+    "description": "Auditorias de leituras auto-aprovadas pela maquina: reprovada = erro da maquina."
    },
    "AutoDecididasOut": {
     "properties": {
@@ -1825,6 +1884,14 @@
         "type": "null"
        }
       ]
+     },
+     "sobredispersao": {
+      "additionalProperties": {
+       "type": "number"
+      },
+      "type": "object",
+      "title": "Sobredispersao",
+      "description": "phi da carta p por fracao (qui-quadrado/(k-1) entre os lotes da baseline)"
      }
     },
     "type": "object",
@@ -1832,7 +1899,8 @@
      "lotes",
      "n_fotos_com_score",
      "n_pares_discordancia",
-     "valores"
+     "valores",
+     "sobredispersao"
     ],
     "title": "BaselineDriftOut"
    },
@@ -1848,6 +1916,7 @@
       },
       "propertyNames": {
        "enum": [
+        "decidida_conta_teste",
         "auto_rejeitada",
         "auto_aprovada",
         "fila_humana",
@@ -1872,6 +1941,7 @@
       },
       "propertyNames": {
        "enum": [
+        "decidida_conta_teste",
         "auto_rejeitada",
         "auto_aprovada",
         "fila_humana",
@@ -1917,12 +1987,34 @@
       "type": "number",
       "title": "Taxa Configurada"
      },
-     "decisoes_na_fila": {
+     "min_pares": {
       "type": "integer",
+      "title": "Min Pares"
+     },
+     "detalhe": {
+      "type": "boolean",
+      "title": "Detalhe"
+     },
+     "decisoes_na_fila": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "Decisoes Na Fila"
      },
      "sorteadas": {
-      "type": "integer",
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "Sorteadas"
      },
      "taxa_observada": {
@@ -1937,15 +2029,32 @@
       "title": "Taxa Observada"
      },
      "pendentes": {
-      "type": "integer",
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "Pendentes"
      },
      "decididas": {
-      "type": "integer",
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "Decididas"
      },
      "total": {
-      "$ref": "#/components/schemas/MedidasConcordanciaOut"
+      "$ref": "#/components/schemas/TotalConcordanciaOut"
+     },
+     "auto_aprovadas": {
+      "$ref": "#/components/schemas/AutoAprovadasAuditoriaOut"
      },
      "por_lote": {
       "items": {
@@ -1965,21 +2074,32 @@
     "type": "object",
     "required": [
      "taxa_configurada",
+     "min_pares",
+     "detalhe",
      "decisoes_na_fila",
      "sorteadas",
      "taxa_observada",
      "pendentes",
      "decididas",
      "total",
+     "auto_aprovadas",
      "por_lote",
      "serie"
     ],
-    "title": "ConcordanciaAuditoriaOut"
+    "title": "ConcordanciaAuditoriaOut",
+    "description": "`detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares."
    },
    "ConcordanciaDiaOut": {
     "properties": {
      "n": {
-      "type": "integer",
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "N"
      },
      "concordancia_decisao": {
@@ -2046,7 +2166,14 @@
    "ConcordanciaLoteOut": {
     "properties": {
      "n": {
-      "type": "integer",
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
       "title": "N"
      },
      "concordancia_decisao": {
@@ -2119,6 +2246,10 @@
       ],
       "title": "Fonte"
      },
+     "escopo": {
+      "type": "string",
+      "title": "Escopo"
+     },
      "politica": {
       "type": "string",
       "title": "Politica"
@@ -2156,6 +2287,7 @@
     "type": "object",
     "required": [
      "fonte",
+     "escopo",
      "politica",
      "n",
      "matriz",
@@ -2274,6 +2406,10 @@
      "subida_zona_cinzenta": {
       "type": "number",
       "title": "Subida Zona Cinzenta"
+     },
+     "z_carta_p": {
+      "type": "number",
+      "title": "Z Carta P"
      }
     },
     "type": "object",
@@ -2288,7 +2424,8 @@
      "queda_confianca",
      "lotes_seguidos_confianca",
      "subida_discordancia",
-     "subida_zona_cinzenta"
+     "subida_zona_cinzenta",
+     "z_carta_p"
     ],
     "title": "CriterioDriftOut"
    },
@@ -2346,6 +2483,7 @@
       },
       "propertyNames": {
        "enum": [
+        "decidida_conta_teste",
         "auto_rejeitada",
         "auto_aprovada",
         "fila_humana",
@@ -2370,6 +2508,7 @@
       },
       "propertyNames": {
        "enum": [
+        "decidida_conta_teste",
         "auto_rejeitada",
         "auto_aprovada",
         "fila_humana",
@@ -2412,6 +2551,7 @@
       },
       "propertyNames": {
        "enum": [
+        "decidida_conta_teste",
         "auto_rejeitada",
         "auto_aprovada",
         "fila_humana",
@@ -2436,6 +2576,7 @@
       },
       "propertyNames": {
        "enum": [
+        "decidida_conta_teste",
         "auto_rejeitada",
         "auto_aprovada",
         "fila_humana",
@@ -2485,6 +2626,60 @@
     ],
     "title": "Defeito",
     "description": "Multirrotulo: zero, um ou varios por foto. Cada um vira uma coluna booleana."
+   },
+   "DiagnosticoZonaOut": {
+    "properties": {
+     "limiar": {
+      "type": "number",
+      "title": "Limiar"
+     },
+     "fonte": {
+      "type": "string",
+      "const": "lab02",
+      "title": "Fonte"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "ilegiveis": {
+      "type": "integer",
+      "title": "Ilegiveis"
+     },
+     "taxa_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Erro"
+     },
+     "limite_inferior_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limite Inferior Erro"
+     }
+    },
+    "type": "object",
+    "required": [
+     "limiar",
+     "fonte",
+     "n",
+     "ilegiveis",
+     "taxa_erro",
+     "limite_inferior_erro"
+    ],
+    "title": "DiagnosticoZonaOut",
+    "description": "Erro que a faixa p_ruim <= limiar teria no Lab 2 (dentro da amostra). Nao e limiar."
    },
    "DriftOut": {
     "properties": {
@@ -2875,7 +3070,7 @@
      },
      "quarentena": {
       "items": {
-       "$ref": "#/components/schemas/QuarentenaOut"
+       "$ref": "#/components/schemas/QuarentenaCegaOut"
       },
       "type": "array",
       "title": "Quarentena"
@@ -3517,67 +3712,6 @@
     "title": "MatrizConcordanciaOut",
     "description": "maquina_humano: `rejeita` = p_ruim >= limiar_rejeita; `ilegivel` = humano."
    },
-   "MedidasConcordanciaOut": {
-    "properties": {
-     "n": {
-      "type": "integer",
-      "title": "N"
-     },
-     "concordancia_decisao": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Concordancia Decisao"
-     },
-     "kappa_decisao": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Kappa Decisao"
-     },
-     "concordancia_motivo": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Concordancia Motivo"
-     },
-     "kappa_motivo": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Kappa Motivo"
-     }
-    },
-    "type": "object",
-    "required": [
-     "n",
-     "concordancia_decisao",
-     "kappa_decisao",
-     "concordancia_motivo",
-     "kappa_motivo"
-    ],
-    "title": "MedidasConcordanciaOut"
-   },
    "MotivoReprovacao": {
     "type": "string",
     "enum": [
@@ -3819,6 +3953,11 @@
       ],
       "title": "Tempo Medio Decisao Segundos"
      },
+     "decididas_conta_teste": {
+      "type": "integer",
+      "title": "Decididas Conta Teste",
+      "description": "decisoes de E2E/demo, fora das medidas"
+     },
      "jobs": {
       "additionalProperties": {
        "additionalProperties": {
@@ -3868,6 +4007,7 @@
      "revisoes_por_decisao",
      "produtividade_por_auditor",
      "tempo_medio_decisao_segundos",
+     "decididas_conta_teste",
      "jobs",
      "baseline",
      "por_lote",
@@ -3875,6 +4015,39 @@
      "concordancia_maquina_humano"
     ],
     "title": "QualidadeOut"
+   },
+   "QuarentenaCegaOut": {
+    "properties": {
+     "tipo": {
+      "type": "string",
+      "title": "Tipo"
+     },
+     "severidade": {
+      "type": "string",
+      "title": "Severidade"
+     },
+     "detalhe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detalhe"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "tipo",
+     "severidade",
+     "detalhe"
+    ],
+    "title": "QuarentenaCegaOut",
+    "description": "Inconsistencia da leitura sem nenhum id (nem da leitura, nem da foto)."
    },
    "QuarentenaOut": {
     "properties": {
@@ -4235,6 +4408,17 @@
      "n": {
       "type": "integer",
       "title": "N"
+     },
+     "z": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Z"
      }
     },
     "type": "object",
@@ -4243,10 +4427,11 @@
      "baseline",
      "desvio",
      "alerta",
-     "n"
+     "n",
+     "z"
     ],
     "title": "SinalOut",
-    "description": "`desvio` = valor - baseline. `n` = denominador do valor no lote."
+    "description": "`desvio` = valor - baseline. `n` = denominador do valor no lote. `z`: carta p com\nsobredispersao (so nas fracoes: classes, auto-rejeicao e zona cinzenta)."
    },
    "TipoInconsistencia": {
     "type": "string",
@@ -4285,6 +4470,80 @@
      "expires_in"
     ],
     "title": "TokenOut"
+   },
+   "TotalConcordanciaOut": {
+    "properties": {
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "concordancia_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Decisao"
+     },
+     "kappa_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Decisao"
+     },
+     "concordancia_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Motivo"
+     },
+     "kappa_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Motivo"
+     },
+     "suprimido": {
+      "type": "boolean",
+      "title": "Suprimido"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "concordancia_decisao",
+     "kappa_decisao",
+     "concordancia_motivo",
+     "kappa_motivo",
+     "suprimido"
+    ],
+    "title": "TotalConcordanciaOut",
+    "description": "`suprimido`: menos de `min_pares` pares; o supervisor nao ve a medida."
    },
    "TrocarSenhaIn": {
     "properties": {

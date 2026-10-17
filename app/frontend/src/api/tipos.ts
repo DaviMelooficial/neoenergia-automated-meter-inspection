@@ -135,8 +135,7 @@ export interface paths {
         };
         /**
          * Obter Leitura
-         * @description Leitura completa. Em auditoria amostral pendente, so o revisor original a ve:
-         *     status, historico e revisao entregariam a primeira decisao ao segundo revisor.
+         * @description Leitura completa; decisao final alheia oculta (ver `ocultar_decisao`).
          */
         get: operations["obter_leitura_leituras__leitura_id__get"];
         put?: never;
@@ -296,7 +295,7 @@ export interface paths {
         /**
          * Proxima
          * @description Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma
-         *     decisao dele mesmo, nunca uma reservada por outro revisor.
+         *     decisao dele mesmo, nunca uma reservada por outro revisor. Admin nao audita.
          */
         post: operations["proxima_auditoria_proxima_post"];
         delete?: never;
@@ -465,7 +464,9 @@ export interface paths {
         };
         /**
          * Concordancia Auditoria
-         * @description Concordancia primeiro x segundo revisor da auditoria amostral (so agregados).
+         * @description Concordancia primeiro x segundo revisor da auditoria amostral. Supervisor ve so os
+         *     totais com ao menos `min_pares` pares; contagens, por lote e serie so admin (que por
+         *     isso nao audita).
          */
         get: operations["concordancia_auditoria_metricas_auditoria_get"];
         put?: never;
@@ -633,15 +634,10 @@ export interface components {
             limiar_aprova: number | null;
             /** Ativa */
             ativa: boolean;
+            /** Contador Aplicavel */
+            contador_aplicavel: boolean;
             /** Motivo */
             motivo: string;
-            /** Limiar Contagem */
-            limiar_contagem: number;
-            /**
-             * Origem Limiar Contagem
-             * @enum {string}
-             */
-            origem_limiar_contagem: "politica" | "candidato";
             /** Alvo Erro */
             alvo_erro: number;
             /** Confianca */
@@ -649,7 +645,7 @@ export interface components {
             /** Necessarias */
             necessarias: number;
             /** Fotos Na Zona */
-            fotos_na_zona: number;
+            fotos_na_zona: number | null;
             /** Rotuladas Na Zona */
             rotuladas_na_zona: number;
             /** Erros */
@@ -660,6 +656,21 @@ export interface components {
             limite_superior_erro: number | null;
             /** Meta Atingida */
             meta_atingida: boolean;
+            diagnostico: components["schemas"]["DiagnosticoZonaOut"] | null;
+        };
+        /**
+         * AutoAprovadasAuditoriaOut
+         * @description Auditorias de leituras auto-aprovadas pela maquina: reprovada = erro da maquina.
+         */
+        AutoAprovadasAuditoriaOut: {
+            /** N */
+            n: number | null;
+            /** Reprovadas Pelo Revisor */
+            reprovadas_pelo_revisor: number | null;
+            /** Taxa Erro */
+            taxa_erro: number | null;
+            /** Suprimido */
+            suprimido: boolean;
         };
         /** AutoDecididasOut */
         AutoDecididasOut: {
@@ -677,6 +688,13 @@ export interface components {
             /** N Pares Discordancia */
             n_pares_discordancia: number;
             valores: components["schemas"]["ValoresBaselineOut"] | null;
+            /**
+             * Sobredispersao
+             * @description phi da carta p por fracao (qui-quadrado/(k-1) entre os lotes da baseline)
+             */
+            sobredispersao: {
+                [key: string]: number;
+            };
         };
         /** BaselineQualidadeOut */
         BaselineQualidadeOut: {
@@ -699,21 +717,29 @@ export interface components {
          * @enum {string}
          */
         Cena: "digital" | "eletromecanico" | "ocorrencia" | "nao_medidor";
-        /** ConcordanciaAuditoriaOut */
+        /**
+         * ConcordanciaAuditoriaOut
+         * @description `detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares.
+         */
         ConcordanciaAuditoriaOut: {
             /** Taxa Configurada */
             taxa_configurada: number;
+            /** Min Pares */
+            min_pares: number;
+            /** Detalhe */
+            detalhe: boolean;
             /** Decisoes Na Fila */
-            decisoes_na_fila: number;
+            decisoes_na_fila: number | null;
             /** Sorteadas */
-            sorteadas: number;
+            sorteadas: number | null;
             /** Taxa Observada */
             taxa_observada: number | null;
             /** Pendentes */
-            pendentes: number;
+            pendentes: number | null;
             /** Decididas */
-            decididas: number;
-            total: components["schemas"]["MedidasConcordanciaOut"];
+            decididas: number | null;
+            total: components["schemas"]["TotalConcordanciaOut"];
+            auto_aprovadas: components["schemas"]["AutoAprovadasAuditoriaOut"];
             /** Por Lote */
             por_lote: components["schemas"]["ConcordanciaLoteOut"][];
             /** Serie */
@@ -722,7 +748,7 @@ export interface components {
         /** ConcordanciaDiaOut */
         ConcordanciaDiaOut: {
             /** N */
-            n: number;
+            n: number | null;
             /** Concordancia Decisao */
             concordancia_decisao: number | null;
             /** Kappa Decisao */
@@ -740,7 +766,7 @@ export interface components {
         /** ConcordanciaLoteOut */
         ConcordanciaLoteOut: {
             /** N */
-            n: number;
+            n: number | null;
             /** Concordancia Decisao */
             concordancia_decisao: number | null;
             /** Kappa Decisao */
@@ -759,6 +785,8 @@ export interface components {
              * @enum {string}
              */
             fonte: "producao" | "lab02";
+            /** Escopo */
+            escopo: string;
             /** Politica */
             politica: string;
             /** N */
@@ -814,6 +842,8 @@ export interface components {
             subida_discordancia: number;
             /** Subida Zona Cinzenta */
             subida_zona_cinzenta: number;
+            /** Z Carta P */
+            z_carta_p: number;
         };
         /**
          * DecisaoHumana
@@ -867,6 +897,27 @@ export interface components {
          * @enum {string}
          */
         Defeito: "reflexo" | "fora_de_foco" | "tampa_suja" | "enquadramento" | "display_apagado";
+        /**
+         * DiagnosticoZonaOut
+         * @description Erro que a faixa p_ruim <= limiar teria no Lab 2 (dentro da amostra). Nao e limiar.
+         */
+        DiagnosticoZonaOut: {
+            /** Limiar */
+            limiar: number;
+            /**
+             * Fonte
+             * @constant
+             */
+            fonte: "lab02";
+            /** N */
+            n: number;
+            /** Ilegiveis */
+            ilegiveis: number;
+            /** Taxa Erro */
+            taxa_erro: number | null;
+            /** Limite Inferior Erro */
+            limite_inferior_erro: number | null;
+        };
         /** DriftOut */
         DriftOut: {
             /** Politica */
@@ -1003,7 +1054,7 @@ export interface components {
             /** Inferencias */
             inferencias: components["schemas"]["InferenciaOut"][];
             /** Quarentena */
-            quarentena: components["schemas"]["QuarentenaOut"][];
+            quarentena: components["schemas"]["QuarentenaCegaOut"][];
             /** Reservado Ate */
             reservado_ate: string | null;
             /** Restantes */
@@ -1210,19 +1261,6 @@ export interface components {
             /** Passa Legivel */
             passa_legivel: number;
         };
-        /** MedidasConcordanciaOut */
-        MedidasConcordanciaOut: {
-            /** N */
-            n: number;
-            /** Concordancia Decisao */
-            concordancia_decisao: number | null;
-            /** Kappa Decisao */
-            kappa_decisao: number | null;
-            /** Concordancia Motivo */
-            concordancia_motivo: number | null;
-            /** Kappa Motivo */
-            kappa_motivo: number | null;
-        };
         /**
          * MotivoReprovacao
          * @description Lista fechada: as 5 classes de qualidade mais `outro`. Vira rotulo de treino.
@@ -1313,6 +1351,11 @@ export interface components {
             produtividade_por_auditor: components["schemas"]["ProdutividadeOut"][];
             /** Tempo Medio Decisao Segundos */
             tempo_medio_decisao_segundos: number | null;
+            /**
+             * Decididas Conta Teste
+             * @description decisoes de E2E/demo, fora das medidas
+             */
+            decididas_conta_teste: number;
             /** Jobs */
             jobs: {
                 [key: string]: {
@@ -1326,6 +1369,20 @@ export interface components {
             por_detector: components["schemas"]["DecisoesDetectorOut"][];
             /** Concordancia Maquina Humano */
             concordancia_maquina_humano: components["schemas"]["ConcordanciaMaquinaOut"][];
+        };
+        /**
+         * QuarentenaCegaOut
+         * @description Inconsistencia da leitura sem nenhum id (nem da leitura, nem da foto).
+         */
+        QuarentenaCegaOut: {
+            /** Tipo */
+            tipo: string;
+            /** Severidade */
+            severidade: string;
+            /** Detalhe */
+            detalhe: {
+                [key: string]: unknown;
+            } | null;
         };
         /** QuarentenaOut */
         QuarentenaOut: {
@@ -1442,7 +1499,8 @@ export interface components {
         };
         /**
          * SinalOut
-         * @description `desvio` = valor - baseline. `n` = denominador do valor no lote.
+         * @description `desvio` = valor - baseline. `n` = denominador do valor no lote. `z`: carta p com
+         *     sobredispersao (so nas fracoes: classes, auto-rejeicao e zona cinzenta).
          */
         SinalOut: {
             /** Valor */
@@ -1455,6 +1513,8 @@ export interface components {
             alerta: boolean;
             /** N */
             n: number;
+            /** Z */
+            z: number | null;
         };
         /**
          * TipoInconsistencia
@@ -1473,6 +1533,24 @@ export interface components {
             token_type: string;
             /** Expires In */
             expires_in: number;
+        };
+        /**
+         * TotalConcordanciaOut
+         * @description `suprimido`: menos de `min_pares` pares; o supervisor nao ve a medida.
+         */
+        TotalConcordanciaOut: {
+            /** N */
+            n: number | null;
+            /** Concordancia Decisao */
+            concordancia_decisao: number | null;
+            /** Kappa Decisao */
+            kappa_decisao: number | null;
+            /** Concordancia Motivo */
+            concordancia_motivo: number | null;
+            /** Kappa Motivo */
+            kappa_motivo: number | null;
+            /** Suprimido */
+            suprimido: boolean;
         };
         /** TrocarSenhaIn */
         TrocarSenhaIn: {

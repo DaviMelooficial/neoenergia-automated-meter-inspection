@@ -232,10 +232,20 @@ describe("Rotulagem", () => {
     expect(mock.consolidacao).toHaveBeenCalledWith(["lab02"]);
   });
 
+  it("admin nao rotula nas rodadas cegas: sem aba Rotular e sem chamar /proxima", async () => {
+    renderizar("admin");
+    await screen.findByTestId("kappa-cena");
+    expect(screen.queryByRole("tab", { name: "Rotular" })).not.toBeInTheDocument();
+    expect(screen.getByText(/não rotula nelas/)).toBeInTheDocument();
+    tecla("1");
+    tecla("s");
+    tecla("Enter");
+    expect(mock.proxima).not.toHaveBeenCalled();
+    expect(mock.gravar).not.toHaveBeenCalled();
+  });
+
   it("painel de kappa sinaliza o gate de 0,6 por classe (admin ve as rodadas cegas)", async () => {
     renderizar("admin");
-    await screen.findByText("foto #1");
-    fireEvent.click(screen.getByRole("tab", { name: "Kappa por classe" }));
     const cena = await screen.findByTestId("kappa-cena");
     expect(within(cena).getByText("0,74")).toBeInTheDocument();
     expect(within(cena).getByText(/passa \(≥ 0,60\)/)).toBeInTheDocument();

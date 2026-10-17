@@ -6,8 +6,8 @@ import { mensagemDeErro } from "../api/client";
 import { rotulagem, type ConsolidacaoOut, type RodadaRotulagem } from "../api/servicos";
 import { useAuth } from "../auth/AuthContext";
 
-// `cega`: rodada ainda em curso. O servidor so mostra o kappa dela para admin (ou
-// para quem nao votou nela); a tela oferece a opcao so para admin.
+// `cega`: rodada em curso. O kappa dela e so de admin (o servidor devolve 403 a
+// supervisor em qualquer combinacao com rodada cega), e admin nao rotula nela.
 const CONJUNTOS: { value: string; label: string; rodadas: RodadaRotulagem[]; cega: boolean }[] = [
   { value: "lab02", label: "Lab 2 (importado)", rodadas: ["lab02"], cega: false },
   { value: "ab", label: "Rodadas A + B", rodadas: ["a", "b"], cega: true },
@@ -31,8 +31,9 @@ function Gate({ kappa, passa, limiar }: { kappa: number | null; passa: boolean; 
  * Kappa de Cohen por classe, media dos pares de rotuladores ponderada pelo n de
  * fotos em comum, com o gate do M6 sinalizado. Mesmo sem rotulo por foto, o kappa
  * de uma rodada em curso vaza por diferenca: com n pequeno, comparar o painel
- * antes e depois do proprio voto revela o voto do outro. Por isso as rodadas
- * cegas so aparecem para admin; o servidor tambem recusa (403).
+ * antes e depois do proprio voto revela o voto do outro, e quem ainda vai votar
+ * (o terceiro do desempate) leria os votos antes. Por isso as rodadas cegas so
+ * aparecem para admin, que nao rotula nelas; o servidor tambem recusa (403).
  */
 export function PainelKappa() {
   const { temPapel } = useAuth();

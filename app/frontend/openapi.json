@@ -1043,7 +1043,7 @@
      "rotulagem"
     ],
     "summary": "Consolidacao",
-    "description": "Kappa de Cohen por classe (media dos pares ponderada por n) e por par.\n\nPadrao: rodada `lab02`. Rodadas cegas: 403 para quem votou em alguma delas\n(exceto admin). Juntar rodadas em que o mesmo rotulador votou duas vezes na\nmesma foto devolve 422, porque inflaria a concordancia.",
+    "description": "Kappa de Cohen por classe (media dos pares ponderada por n) e por par.\n\nPadrao: rodada `lab02`. Qualquer rodada cega na consulta: so admin. Juntar\nrodadas em que o mesmo rotulador votou duas vezes na mesma foto devolve 422,\nporque inflaria a concordancia.",
     "operationId": "consolidacao_rotulagem_consolidacao_get",
     "security": [
      {

@@ -32,6 +32,7 @@ import {
   segundosNaFoto,
   type RascunhoRotulo,
 } from "../components/esquemaRotulagem";
+import { useAuth } from "../auth/AuthContext";
 import { PainelKappa } from "../components/PainelKappa";
 import { useAtalhos } from "../components/useAtalhos";
 import { VisualizadorFoto } from "../components/VisualizadorFoto";
@@ -319,19 +320,32 @@ function Rotular() {
   );
 }
 
+/**
+ * Admin ve o kappa e o consolidado das rodadas cegas, entao nao rotula nelas (o
+ * servidor devolve 403): para ele a tela so tem o painel de kappa.
+ */
 export function Rotulagem() {
-  const [aba, setAba] = useState<string | null>("rotular");
+  const { temPapel } = useAuth();
+  const rotula = !temPapel("admin");
+  const [aba, setAba] = useState<string | null>(rotula ? "rotular" : "kappa");
   return (
     <Stack gap="sm">
       <Title order={3}>Rotulagem</Title>
+      {!rotula && (
+        <Alert color="blue" role="note">
+          Admin acompanha o kappa das rodadas cegas e por isso não rotula nelas.
+        </Alert>
+      )}
       <Tabs value={aba} onChange={setAba} keepMounted={false}>
         <Tabs.List>
-          <Tabs.Tab value="rotular">Rotular</Tabs.Tab>
+          {rotula && <Tabs.Tab value="rotular">Rotular</Tabs.Tab>}
           <Tabs.Tab value="kappa">Kappa por classe</Tabs.Tab>
         </Tabs.List>
-        <Tabs.Panel value="rotular" pt="sm">
-          <Rotular />
-        </Tabs.Panel>
+        {rotula && (
+          <Tabs.Panel value="rotular" pt="sm">
+            <Rotular />
+          </Tabs.Panel>
+        )}
         <Tabs.Panel value="kappa" pt="sm">
           <PainelKappa />
         </Tabs.Panel>

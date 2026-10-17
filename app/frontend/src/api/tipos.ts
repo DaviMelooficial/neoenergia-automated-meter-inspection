@@ -304,7 +304,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/auditoria/{auditoria_id}/liberar": {
+    "/auditoria/{codigo}/liberar": {
         parameters: {
             query?: never;
             header?: never;
@@ -317,14 +317,14 @@ export interface paths {
          * Liberar
          * @description Devolve a reserva propria. Qualquer outro caso: a resposta unica.
          */
-        post: operations["liberar_auditoria__auditoria_id__liberar_post"];
+        post: operations["liberar_auditoria__codigo__liberar_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/auditoria/{auditoria_id}/decisao": {
+    "/auditoria/{codigo}/decisao": {
         parameters: {
             query?: never;
             header?: never;
@@ -342,7 +342,7 @@ export interface paths {
          *     commit). O banco repete a regra (`ck_auditorias_segundo_revisor`, gatilho de
          *     imutabilidade). Toda recusa e a resposta unica.
          */
-        post: operations["decidir_auditoria__auditoria_id__decisao_post"];
+        post: operations["decidir_auditoria__codigo__decisao_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -614,8 +614,11 @@ export interface components {
          * @description So a decisao do proprio segundo revisor.
          */
         AuditoriaDecisaoOut: {
-            /** Auditoria Id */
-            auditoria_id: number;
+            /**
+             * Auditoria
+             * Format: uuid
+             */
+            auditoria: string;
             decisao: components["schemas"]["DecisaoHumana"];
             motivo: components["schemas"]["MotivoReprovacao"] | null;
             /** Observacao */
@@ -740,8 +743,20 @@ export interface components {
             /** Decididas */
             decididas: number | null;
             total: components["schemas"]["TotalConcordanciaOut"];
+            /** @description estrato da politica ativa */
             auto_aprovadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"];
+            /** @description estrato da politica ativa */
             auto_rejeitadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"];
+            /**
+             * Estratos Auto Aprovadas
+             * @description todos os estratos (so admin)
+             */
+            estratos_auto_aprovadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"][];
+            /**
+             * Estratos Auto Rejeitadas
+             * @description todos os estratos (so admin)
+             */
+            estratos_auto_rejeitadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"][];
             /** Por Lote */
             por_lote: components["schemas"]["ConcordanciaLoteOut"][];
             /** Serie */
@@ -851,10 +866,15 @@ export interface components {
         };
         /**
          * DecisaoAutomaticaAuditoriaOut
-         * @description Auditorias de decisao da maquina. Erro: auto-aprovada reprovada pelo revisor, ou
-         *     auto-rejeitada aprovada pelo revisor (falso positivo).
+         * @description Erro da maquina num estrato (detector, politica), uma leitura auditada por estrato.
+         *     Erro de auto-rejeitada: qualquer veredito que nao seja "reprovada por defeito de
+         *     qualidade" (falso positivo); de auto-aprovada: qualquer reprovada.
          */
         DecisaoAutomaticaAuditoriaOut: {
+            /** Detector */
+            detector: string;
+            /** Politica */
+            politica: string;
             /** N */
             n: number | null;
             /** Erros */
@@ -1069,8 +1089,11 @@ export interface components {
          *     anterior, scores da maquina nem id da leitura. O teste de vazamento confere.
          */
         ItemAuditoriaOut: {
-            /** Auditoria Id */
-            auditoria_id: number;
+            /**
+             * Auditoria
+             * Format: uuid
+             */
+            auditoria: string;
             /** Lote */
             lote: string;
             /** Linha Csv */
@@ -2130,12 +2153,12 @@ export interface operations {
             };
         };
     };
-    liberar_auditoria__auditoria_id__liberar_post: {
+    liberar_auditoria__codigo__liberar_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                auditoria_id: number;
+                codigo: string;
             };
             cookie?: never;
         };
@@ -2159,12 +2182,12 @@ export interface operations {
             };
         };
     };
-    decidir_auditoria__auditoria_id__decisao_post: {
+    decidir_auditoria__codigo__decisao_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                auditoria_id: number;
+                codigo: string;
             };
             cookie?: never;
         };

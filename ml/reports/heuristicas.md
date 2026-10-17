@@ -153,4 +153,5 @@ Efeito operacional do recálculo: enquanto `recalcular_decisao` roda num lote, a
 re-decidíveis desse lote ficam travadas até o commit (1 a 2 s nos lotes reais), e
 `/fila-humana/proxima` filtrada por esse lote responde fila vazia nesse intervalo. Itens que um
 auditor estava pegando no instante do recálculo são pulados e aparecem em warning no log do
-worker; rodar `make recalcular-todos` de novo os alcança.
+worker; rodar `make recalcular-todos` de novo os alcança. O warning traz só a contagem por lote
+(aproximada, porque é contada antes do lock), sem os ids das leituras puladas.

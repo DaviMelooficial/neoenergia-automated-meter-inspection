@@ -77,3 +77,25 @@ def test_paridade_nao_declara_identicas_com_saida_sem_sinais(tmp_path):
     r = paridade(feat, exp)
     assert r["fotos"] == 3 and r["fotos_sem_sinais"] == 1
     assert r["fotos_com_diferenca"] == 0 and not r["identicas"]
+
+
+def test_paridade_trata_sinais_null_como_saida_sem_sinais(tmp_path):
+    exp = _exportacao(tmp_path, n=3)
+    caminho = tmp_path / "exp_null.csv"
+    bruto = pd.read_csv(tmp_path / "exp.csv")
+    saida = json.loads(bruto.at[0, "saida"])
+    saida["sinais"] = None
+    bruto.at[0, "saida"] = json.dumps(saida)
+    bruto.to_csv(caminho, index=False)
+    exp = ler_exportacao(caminho)
+    feat = pd.DataFrame([{n: float(i) for n in NOMES_V0} for i in range(3)], index=exp.index)
+    r = paridade(feat, exp)
+    assert r["fotos_sem_sinais"] == 1 and r["fotos"] == 2 and not r["identicas"]
+
+
+def test_paridade_conta_nan_no_calculado_como_diferenca(tmp_path):
+    exp = _exportacao(tmp_path, n=3)
+    feat = pd.DataFrame(list(exp.sinais), index=exp.index)
+    feat.loc["f001.jpg", "lap_var"] = np.nan
+    r = paridade(feat, exp)
+    assert r["fotos_com_diferenca"] == 1 and not r["identicas"]

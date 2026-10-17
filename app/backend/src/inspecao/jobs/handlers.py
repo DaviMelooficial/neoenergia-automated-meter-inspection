@@ -218,7 +218,7 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         # Reconfere a linha antes de reabrir (defesa em profundidade: o lock acima ja
         # impede reserva e decisao vindas de outra transacao).
         if not _travar_redecidiveis(sessao, select(Leitura).where(Leitura.id == leitura.id)):
-            contagem["pulada"] += 1
+            contagem["reconferencia_falhou"] += 1  # reservada ou decidida depois do SELECT
             continue
         ator = f"modelo:{modelo}"
         de = leitura.status_atual
@@ -231,22 +231,33 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         )
         _sair_da_triagem(sessao, leitura, decisao, ator, p_ruim, detalhe | {"recalculo": True})
         contagem[f"{de}->{DESTINO[decisao].value}"] += 1
+    # `candidatas` e contada sem lock, antes do SELECT que trava: uma reserva commitada
+    # entre os dois tira a leitura das candidatas sem ela estar travada por ninguem.
+    # Por isso a diferenca e uma estimativa das linhas travadas por outra transacao.
+    travadas_por_outra = max(candidatas - len(linhas), 0)
     log.info(
-        "lote %s: recalcular_decisao com %s: %d candidatas, %d travadas pelo job: %s",
+        "lote %s: recalcular_decisao com %s: ~%d candidatas, %d travadas pelo job: %s",
         lote.nome,
         politica.versao,
         candidatas,
         len(linhas),
         dict(contagem),
     )
-    if candidatas > len(linhas) or contagem["pulada"]:
+    if travadas_por_outra:
         # SKIP LOCKED: linhas em uso por outra transacao (auditor pegando o item) ficam de
         # fora desta passada, sem erro. O job e idempotente: rodar de novo as alcanca.
         log.warning(
-            "lote %s: %d leituras puladas por estarem travadas por outra transacao; "
-            "rode recalcular_decisao de novo para alcanca-las",
+            "lote %s: ~%d leituras puladas por estarem travadas por outra transacao "
+            "(aproximado: contagem feita antes do lock); rode recalcular_decisao de novo "
+            "para alcanca-las",
             lote.nome,
-            candidatas - len(linhas) + contagem["pulada"],
+            travadas_por_outra,
+        )
+    if contagem["reconferencia_falhou"]:
+        log.warning(
+            "lote %s: %d leituras nao reabertas: reservadas ou decididas depois do SELECT",
+            lote.nome,
+            contagem["reconferencia_falhou"],
         )
 
 

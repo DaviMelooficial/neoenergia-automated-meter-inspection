@@ -61,7 +61,8 @@ def ler_exportacao(caminho: Path) -> pd.DataFrame:
     saidas = df.pop("saida").map(json.loads)
     for c in CLASSES:
         df[c] = saidas.map(lambda s, c=c: s.get(c))
-    df["sinais"] = saidas.map(lambda s: s.get("sinais", {}))
+    # `sinais` ausente ou null: saida sem sinais (a paridade conta a parte).
+    df["sinais"] = saidas.map(lambda s: s.get("sinais") or {})
     df["p_ruim"] = df[CLASSES].max(axis=1)
     df["classe_max"] = df[CLASSES].idxmax(axis=1)
     return df.set_index("arquivo")
@@ -99,7 +100,8 @@ def paridade(feat: pd.DataFrame, exp: pd.DataFrame) -> dict:
     sem_sinais = gravado.isna().any(axis=1)
     gravado = gravado[~sem_sinais]
     calculado = feat.loc[gravado.index, NOMES_V0]
-    dif = (calculado - gravado).abs()
+    # NaN no calculado (feature que nao saiu) conta como diferenca, nao como igualdade.
+    dif = (calculado - gravado).abs().fillna(np.inf)
     rel = dif / gravado.abs().where(gravado.abs() > 0, 1.0)
     com_diferenca = int((dif > 0).any(axis=1).sum())
     return {

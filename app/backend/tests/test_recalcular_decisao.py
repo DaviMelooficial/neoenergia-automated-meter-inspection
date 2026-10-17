@@ -347,9 +347,9 @@ def test_recalcular_pula_item_que_o_auditor_esta_pegando_sem_esperar(
             )
         s_job.commit()
         n = len(ls.LINHAS_COM_FOTO)
-        assert f"{n} candidatas, {n - 1} travadas pelo job" in caplog.text
+        assert f"~{n} candidatas, {n - 1} travadas pelo job" in caplog.text
         avisos = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-        assert len(avisos) == 1 and "1 leituras puladas" in avisos[0]
+        assert len(avisos) == 1 and "~1 leituras puladas" in avisos[0]
         _reservar(s_aud, auditor, pego)
         s_aud.commit()
     finally:
@@ -471,7 +471,7 @@ def test_troca_de_detector_relê_a_leitura_antes_de_reabrir(base_na_fila, acao):
 
 
 def test_reserva_gravada_entre_o_select_e_o_loop_nao_e_reaberta(
-    db_session, contas, staging, tmp_path, monkeypatch
+    db_session, contas, staging, tmp_path, monkeypatch, caplog
 ):
     """Reproducao do gate: a reserva do ultimo item chega quando o job ja selecionou
     os candidatos e esta transicionando o primeiro. Cada linha e reconferida antes de
@@ -497,7 +497,12 @@ def test_reserva_gravada_entre_o_select_e_o_loop_nao_e_reaberta(
         return original(sessao, leitura, *a, **k)
 
     monkeypatch.setattr(handlers, "transicionar", transicionar_com_corrida)
-    recalcular_decisao(ctx, db_session, {"lote_id": lote.id, "politica": "politica@v1"})
+    monkeypatch.setattr(handlers.log, "disabled", False)  # fileConfig do alembic
+    with caplog.at_level("WARNING", logger="inspecao.jobs.handlers"):
+        recalcular_decisao(ctx, db_session, {"lote_id": lote.id, "politica": "politica@v1"})
+    # Contada como reconferencia, nao como travada por outra transacao.
+    avisos = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(avisos) == 1 and "1 leituras nao reabertas" in avisos[0]
     status = status_por_linha(db_session, lote)
     assert status[LINHAS_PRETAS[-1]] == StatusLeitura.FILA_HUMANA.value
     assert [status[n] for n in LINHAS_PRETAS[:-1]] == [StatusLeitura.REJEITADA_QUALIDADE.value] * (

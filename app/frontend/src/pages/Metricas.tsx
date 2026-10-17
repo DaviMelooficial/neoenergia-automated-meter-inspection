@@ -102,23 +102,41 @@ export function PainelAutoAprovacao({ e }: { e: AutoAprovacao }) {
         <Text size="sm" fw={600}>
           Rótulos acumulados na zona de aprovação
         </Text>
-        <Text size="sm" data-testid="contador-600">
-          <b>{num(e.acumuladas_sem_erro)}</b> de {num(e.necessarias)}
-        </Text>
+        <Group gap="md">
+          <Text size="sm" data-testid="contador-600">
+            <b>{num(e.acumuladas_sem_erro)}</b> de {num(e.necessarias)}
+          </Text>
+          <Text size="sm" c="dimmed" data-testid="limite-superior">
+            erro máx. (95%, Clopper-Pearson):{" "}
+            {e.limite_superior_erro == null ? "—" : pct(e.limite_superior_erro, 2)}
+          </Text>
+        </Group>
       </Group>
       <Progress value={progresso} aria-label="rótulos acumulados contra os necessários" />
       <Text size="xs" c="dimmed" mt="xs">
-        Conta as fotos com p_ruim ≤ {dec(e.limiar_contagem)} (
-        {e.origem_limiar_contagem === "politica"
-          ? "limiar da política"
-          : "limiar candidato do M8, só para contagem"}
-        ) que têm decisão de auditor com legibilidade definida: {num(e.rotuladas_na_zona)} de{" "}
-        {num(e.fotos_na_zona)} fotos na zona. Erro é uma delas julgada ilegível pelo auditor; com qualquer
-        erro, o contador volta a zero.
-        {e.erros > 0 && ` Erros encontrados: ${e.erros}.`}
-        {e.limite_superior_erro != null &&
-          ` Hoje o erro máximo demonstrável (95%) é ${pct(e.limite_superior_erro, 2)}; o alvo é ${pct(e.alvo_erro)}.`}
+        {e.contador_aplicavel ? (
+          <>
+            Conta as fotos com p_ruim ≤ {dec(e.limiar_aprova)} (limiar da política) que têm decisão de auditor
+            com legibilidade definida: {num(e.rotuladas_na_zona)} de {num(e.fotos_na_zona ?? 0)} fotos na
+            zona. Erro é uma delas julgada ilegível pelo auditor; depois de um erro, o contador fica em 0 para
+            este detector e limiar até surgir um limiar ou detector novo. O alvo é erro abaixo de{" "}
+            {pct(e.alvo_erro)}.{e.erros > 0 && ` Erros encontrados: ${e.erros}.`}
+          </>
+        ) : (
+          <>
+            O contador não se aplica a esta política: ela não tem zona de aprovação. Ele passa a contar quando
+            um detector tiver limiar_aprova próprio, calibrado (M7).
+          </>
+        )}
       </Text>
+      {e.diagnostico && e.diagnostico.n > 0 && (
+        <Text size="xs" c="dimmed" mt={4} data-testid="diagnostico-zona">
+          Diagnóstico, não candidato a limiar: no Lab 2 (conjunto de calibração, dentro da amostra),{" "}
+          {num(e.diagnostico.ilegiveis)} das {num(e.diagnostico.n)} fotos com p_ruim ≤{" "}
+          {dec(e.diagnostico.limiar)} são ilegíveis ({pct(e.diagnostico.taxa_erro)}; ao menos{" "}
+          {pct(e.diagnostico.limite_inferior_erro)} com 95%).
+        </Text>
+      )}
     </Card>
   );
 }
@@ -177,7 +195,14 @@ function Concordancia({ q }: { q: MetricasQualidade }) {
       <Table.Tbody>
         {q.concordancia_maquina_humano.map((c) => (
           <Table.Tr key={c.fonte}>
-            <Table.Td>{c.fonte === "producao" ? "auditores (produção)" : "Lab 2 (amostra fechada)"}</Table.Td>
+            <Table.Td>
+              {c.fonte === "producao"
+                ? "auditores (produção)"
+                : "Lab 2, conjunto de calibração do M5 (dentro da amostra)"}
+              <Text size="xs" c="dimmed">
+                {c.escopo}
+              </Text>
+            </Table.Td>
             <Table.Td>{num(c.n)}</Table.Td>
             <Table.Td>{c.matriz.rejeita_ilegivel}</Table.Td>
             <Table.Td>{c.matriz.rejeita_legivel}</Table.Td>
@@ -203,7 +228,8 @@ function pontos(lotes: LoteDrift[], sinal: (l: LoteDrift) => SinalDrift) {
       detalhe:
         s.desvio == null
           ? undefined
-          : `desvio ${s.desvio >= 0 ? "+" : ""}${(100 * s.desvio).toFixed(1)} p.p.`,
+          : `desvio ${s.desvio >= 0 ? "+" : ""}${(100 * s.desvio).toFixed(1)} p.p.` +
+            (s.z == null ? "" : ` · z ${s.z >= 0 ? "+" : ""}${s.z.toFixed(1)}`),
     };
   });
 }
@@ -339,11 +365,19 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
         <Cartao
           titulo="Taxa configurada"
           valor={pct(a.taxa_configurada, 0)}
-          sub={`observada ${pct(a.taxa_observada)}`}
+          sub={a.detalhe ? `observada ${pct(a.taxa_observada)}` : undefined}
         />
-        <Cartao titulo="Sorteadas" valor={num(a.sorteadas)} sub={`de ${num(a.decisoes_na_fila)} decisões`} />
-        <Cartao titulo="Pendentes" valor={num(a.pendentes)} />
-        <Cartao titulo="Decididas" valor={num(a.decididas)} />
+        {a.detalhe && (
+          <>
+            <Cartao
+              titulo="Sorteadas"
+              valor={num(a.sorteadas ?? 0)}
+              sub={`de ${num(a.decisoes_na_fila ?? 0)} decisões`}
+            />
+            <Cartao titulo="Pendentes" valor={num(a.pendentes ?? 0)} />
+            <Cartao titulo="Decididas" valor={num(a.decididas ?? 0)} />
+          </>
+        )}
         <Cartao titulo="Concordância" valor={pct(a.total.concordancia_decisao)} sub="aprovar × reprovar" />
         <Cartao
           titulo="Kappa de Cohen"
@@ -351,6 +385,24 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
           sub={`motivo: ${dec(a.total.kappa_motivo, 3)}`}
         />
       </SimpleGrid>
+      {a.total.suprimido && (
+        <Text size="sm" c="dimmed" data-testid="auditoria-suprimida">
+          Menos de {a.min_pares} auditorias decididas: a concordância fica oculta para não revelar quem
+          discordou de quem. Contagens, série e detalhe por lote são só do admin.
+        </Text>
+      )}
+      {!a.detalhe && !a.total.suprimido && (
+        <Text size="xs" c="dimmed">
+          Contagens, série e detalhe por lote são só do admin.
+        </Text>
+      )}
+      <Text size="xs" c="dimmed" data-testid="auditoria-auto">
+        Auto-aprovadas auditadas:{" "}
+        {a.auto_aprovadas.suprimido
+          ? `menos de ${a.min_pares}, oculto`
+          : `${num(a.auto_aprovadas.n ?? 0)}, erro da máquina ${pct(a.auto_aprovadas.taxa_erro)}`}
+        .
+      </Text>
       {a.serie.length > 0 ? (
         <Card withBorder padding="xs">
           <Text size="sm" fw={600}>
@@ -361,14 +413,16 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
             pontos={a.serie.map((p) => ({
               rotulo: new Date(`${p.dia}T12:00:00`).toLocaleDateString("pt-BR"),
               valor: p.concordancia_decisao,
-              n: p.n,
+              n: p.n ?? 0,
             }))}
           />
         </Card>
       ) : (
-        <Text size="sm" c="dimmed">
-          Nenhuma auditoria decidida ainda: a concordância aparece quando o segundo revisor decidir.
-        </Text>
+        a.detalhe && (
+          <Text size="sm" c="dimmed">
+            Nenhuma auditoria decidida ainda: a concordância aparece quando o segundo revisor decidir.
+          </Text>
+        )
       )}
       {a.por_lote.length > 0 && (
         <Table striped>
@@ -386,7 +440,7 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
             {a.por_lote.map((l) => (
               <Table.Tr key={l.lote}>
                 <Table.Td ff="monospace">{loteCurto(l.lote)}</Table.Td>
-                <Table.Td>{l.n}</Table.Td>
+                <Table.Td>{l.n ?? "—"}</Table.Td>
                 <Table.Td>{pct(l.concordancia_decisao)}</Table.Td>
                 <Table.Td>{dec(l.kappa_decisao, 3)}</Table.Td>
                 <Table.Td>{pct(l.concordancia_motivo)}</Table.Td>
@@ -438,6 +492,12 @@ export function Metricas() {
               />
             ))}
           </SimpleGrid>
+          {m.decididas_conta_teste > 0 && (
+            <Text size="xs" c="dimmed" mt="xs" data-testid="contas-teste">
+              {num(m.decididas_conta_teste)} leituras decididas por contas de teste (E2E e demo) ficam fora de
+              aprovada e reprovada e de todas as medidas humanas.
+            </Text>
+          )}
           <TabelaDecisoes q={m} />
           <Title order={6} mt="md">
             Por detector e política

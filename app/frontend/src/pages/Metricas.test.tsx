@@ -64,6 +64,7 @@ const qualidade: MetricasQualidade = {
   revisoes_por_decisao: { aprovada: 4, reprovada: 2 },
   produtividade_por_auditor: [],
   tempo_medio_decisao_segundos: 12,
+  decididas_conta_teste: 55,
   jobs: {},
   baseline: { lotes: [LOTE_A, LOTE_B], ...decisoes(100, 4, 90, 4, 2) },
   por_lote: [
@@ -74,6 +75,7 @@ const qualidade: MetricasQualidade = {
   concordancia_maquina_humano: [
     {
       fonte: "producao",
+      escopo: "decisoes de auditor (fora da amostra)",
       politica: "politica@v1",
       n: 6,
       matriz: { rejeita_ilegivel: 0, rejeita_legivel: 0, passa_ilegivel: 2, passa_legivel: 4 },
@@ -89,6 +91,7 @@ const sinal = (valor: number, baseline: number, alerta = false): SinalDrift => (
   desvio: valor - baseline,
   alerta,
   n: 50,
+  z: null,
 });
 
 function lote(nome: string, na_baseline: boolean, rej: number, alertas: string[]): LoteDrift {
@@ -133,6 +136,7 @@ const drift: MetricasDrift = {
     lotes_seguidos_confianca: 2,
     subida_discordancia: 0.1,
     subida_zona_cinzenta: 0.1,
+    z_carta_p: 3,
   },
   baseline: {
     lotes: [LOTE_A],
@@ -146,6 +150,7 @@ const drift: MetricasDrift = {
       confianca_media: 0.9,
       discordancia: 0.1,
     },
+    sobredispersao: { taxa_auto_rejeicao: 4.9 },
   },
   lotes: [
     lote(LOTE_A, true, 0.02, []),
@@ -159,22 +164,46 @@ const auto: AutoAprovacao = {
   limiar_rejeita: 0.85,
   limiar_aprova: null,
   ativa: false,
-  motivo: "Auto-aprovacao desligada: politica@v1 nao define limiar_aprova. Acumuladas: 12.",
-  limiar_contagem: 0.05,
-  origem_limiar_contagem: "candidato",
+  contador_aplicavel: false,
+  motivo:
+    "Auto-aprovacao desligada: politica@v1 nao define limiar_aprova, e o detector heuristica@v1 nao tem zona de aprovacao com erro baixo.",
   alvo_erro: 0.005,
   confianca: 0.95,
   necessarias: 600,
+  fotos_na_zona: null,
+  rotuladas_na_zona: 0,
+  erros: 0,
+  acumuladas_sem_erro: 0,
+  limite_superior_erro: null,
+  meta_atingida: false,
+  diagnostico: {
+    limiar: 0.05,
+    fonte: "lab02",
+    n: 20,
+    ilegiveis: 7,
+    taxa_erro: 0.35,
+    limite_inferior_erro: 0.18,
+  },
+};
+
+const autoLigada: AutoAprovacao = {
+  ...auto,
+  politica: "politica@vX",
+  limiar_aprova: 0.04,
+  ativa: true,
+  contador_aplicavel: true,
+  motivo: "politica@vX define limiar_aprova = 0.04.",
   fotos_na_zona: 40,
   rotuladas_na_zona: 12,
-  erros: 0,
   acumuladas_sem_erro: 12,
   limite_superior_erro: 0.2209,
-  meta_atingida: false,
 };
 
 const auditoria: ConcordanciaAuditoria = {
   taxa_configurada: 0.07,
+  min_pares: 10,
+  detalhe: true,
+  auto_aprovadas: { n: 0, reprovadas_pelo_revisor: 0, taxa_erro: null, suprimido: false },
   decisoes_na_fila: 100,
   sorteadas: 7,
   taxa_observada: 0.07,
@@ -186,6 +215,7 @@ const auditoria: ConcordanciaAuditoria = {
     kappa_decisao: 0.5,
     concordancia_motivo: 0.5,
     kappa_motivo: 1 / 3,
+    suprimido: false,
   },
   por_lote: [],
   serie: [
@@ -228,15 +258,30 @@ describe("Metricas", () => {
     m.auditoria.mockResolvedValue(auditoria);
   });
 
-  it("explica a auto-aprovacao desligada e mostra o contador contra os 600", async () => {
+  it("explica a auto-aprovacao desligada, sem limiar candidato, e o contador contra os 600", async () => {
     renderizar();
     const painel = await screen.findByTestId("auto-aprovacao");
     expect(within(painel).getByText("auto-aprovação desligada")).toBeInTheDocument();
     expect(within(painel).getByText(/Por que a auto-aprovação está desligada/)).toBeInTheDocument();
     expect(within(painel).getByText(auto.motivo)).toBeInTheDocument();
-    expect(within(painel).getByTestId("contador-600")).toHaveTextContent("12 de 600");
+    expect(within(painel).getByTestId("contador-600")).toHaveTextContent("0 de 600");
+    expect(within(painel).getByTestId("limite-superior")).toHaveTextContent("—");
+    expect(within(painel).getByText(/não se aplica a esta política/)).toBeInTheDocument();
+    expect(within(painel).getByTestId("diagnostico-zona")).toHaveTextContent(
+      "7 das 20 fotos com p_ruim ≤ 0,05 são ilegíveis (35,0%",
+    );
+    expect(painel).not.toHaveTextContent(/candidato do M8/);
     expect(within(painel).getByText("p_ruim ≥ 0,85")).toBeInTheDocument();
+  });
+
+  it("com limiar_aprova, conta e mostra o limite de Clopper-Pearson ao lado", async () => {
+    m.autoAprovacao.mockResolvedValue(autoLigada);
+    renderizar();
+    const painel = await screen.findByTestId("auto-aprovacao");
+    expect(within(painel).getByTestId("contador-600")).toHaveTextContent("12 de 600");
+    expect(within(painel).getByTestId("limite-superior")).toHaveTextContent("22,09%");
     expect(within(painel).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "2");
+    expect(within(painel).getByText(/fica em 0 para este detector e limiar/)).toBeInTheDocument();
   });
 
   it("mostra a baseline dos lotes e as taxas por lote", async () => {
@@ -246,6 +291,8 @@ describe("Metricas", () => {
     expect(linha).toHaveTextContent("4,00%");
     expect(within(tabela).getByText("990526")).toBeInTheDocument();
     expect(screen.getByText("auditores (produção)")).toBeInTheDocument();
+    expect(screen.getByText("decisoes de auditor (fora da amostra)")).toBeInTheDocument();
+    expect(screen.getByTestId("contas-teste")).toHaveTextContent("55 leituras decididas por contas de teste");
   });
 
   it("drift: alerta com icone e rotulo, nunca so a cor", async () => {
@@ -266,6 +313,35 @@ describe("Metricas", () => {
     expect(cartao).toHaveTextContent("75,0%");
     expect(within(painel).getByText("0,500")).toBeInTheDocument();
     expect(within(painel).getByRole("img", { name: "concordância acumulada por dia" })).toBeInTheDocument();
+  });
+
+  it("auditoria para supervisor: sem contagens e com a medida oculta abaixo do minimo", async () => {
+    m.auditoria.mockResolvedValue({
+      ...auditoria,
+      detalhe: false,
+      decisoes_na_fila: null,
+      sorteadas: null,
+      taxa_observada: null,
+      pendentes: null,
+      decididas: null,
+      total: {
+        n: null,
+        concordancia_decisao: null,
+        kappa_decisao: null,
+        concordancia_motivo: null,
+        kappa_motivo: null,
+        suprimido: true,
+      },
+      auto_aprovadas: { n: null, reprovadas_pelo_revisor: null, taxa_erro: null, suprimido: true },
+      por_lote: [],
+      serie: [],
+    });
+    renderizar();
+    const painel = await screen.findByTestId("painel-auditoria");
+    expect(within(painel).queryByText("Sorteadas")).not.toBeInTheDocument();
+    expect(within(painel).getByTestId("auditoria-suprimida")).toHaveTextContent("Menos de 10");
+    expect(within(painel).getByTestId("auditoria-auto")).toHaveTextContent("oculto");
+    expect(within(painel).queryByRole("img")).not.toBeInTheDocument();
   });
 
   it.each(["light", "dark"] as const)("graficos usam so tokens de tema (%s)", async (esquema) => {

@@ -37,7 +37,18 @@ function comoLeitura(item: ItemAuditoria): LeituraOut {
     fotos: item.fotos,
     historico: [],
     inferencias: item.inferencias,
-    quarentena: item.quarentena,
+    // Sem ids no item cego: o painel so usa tipo e severidade; o id local e a posicao.
+    quarentena: item.quarentena.map((q, i) => ({
+      ...q,
+      id: -(i + 1),
+      lote_id: 0,
+      leitura_id: null,
+      foto_id: null,
+      resolvido: false,
+      resolvido_por: null,
+      resolvido_em: null,
+      criado_em: "",
+    })),
     revisoes: [],
   };
 }

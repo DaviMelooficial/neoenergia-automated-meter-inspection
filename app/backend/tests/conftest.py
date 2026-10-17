@@ -1,7 +1,7 @@
 """Infraestrutura de testes.
 
-Banco de teste separado (`inspecao_test`), recriado a cada sessao e migrado
-pelo Alembic, para que os testes tambem exercitem as migracoes. O banco de
+Banco de teste separado (`inspecao_test`, ou o nome em INSPECAO_TEST_DB), recriado
+a cada sessao e migrado pelo Alembic, para que os testes tambem exercitem as migracoes. O banco de
 desenvolvimento (com os 4 lotes reais) so e tocado pelo teste de regressao de
 dados, via `engine_dados_reais`.
 
@@ -23,7 +23,9 @@ from inspecao.config import get_settings
 RAIZ_BACKEND = Path(__file__).resolve().parents[1]
 
 URL_DADOS_REAIS = make_url(get_settings().database_url)
-URL_TESTE = URL_DADOS_REAIS.set(database="inspecao_test")
+# Cada sessao de pytest apaga e recria este banco: duas suites no mesmo servidor
+# (worktrees em paralelo) precisam de nomes diferentes.
+URL_TESTE = URL_DADOS_REAIS.set(database=os.getenv("INSPECAO_TEST_DB", "inspecao_test"))
 URL_MANUTENCAO = URL_DADOS_REAIS.set(database="postgres")
 
 os.environ["DATABASE_URL"] = URL_TESTE.render_as_string(hide_password=False)

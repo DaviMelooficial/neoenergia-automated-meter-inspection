@@ -192,8 +192,8 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     e mesmo que as duas fossem auditadas, contariam uma vez. Estratos diferentes não se somam: na integração com o M7,
     as auditorias da heurística ficam no estrato `heuristica@v1 · politica@v1` e não entram no da v2.
   - O endpoint e a tela mostram o estrato da **última decisão automática gravada no histórico** (quem decide de
-    fato), e não o `POLITICA_ATUAL`, que é constante até a integração com o M7; sem nenhuma decisão, cai na política
-    ativa. Admin vê todos (`estratos_auto_rejeitadas`). Efeito colateral: a última decisão é de qualquer lote, então
+    fato), e não o `POLITICA_ATUAL`; sem nenhuma decisão, cai na política do detector configurado
+    (`politica_para(DETECTOR_QUALIDADE)`, desde a integração com o M7). Admin vê todos (`estratos_auto_rejeitadas`). Efeito colateral: a última decisão é de qualquer lote, então
     um recálculo manual com uma política antiga, ou um lote de teste reprocessado, troca o estrato mostrado na tela
     até a próxima decisão da política vigente.
   - **Estimando:** falso positivo das auto-rejeições **fora dos conjuntos de calibração**. O que o código faz
@@ -202,11 +202,11 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     todos os estratos, o que é conservador. Ela não enxerga calibração sem rótulo: as fotos de 0,62 a 0,64 que o
     agente do M5 olhou nas miniaturas não estão no CSV da inspeção e não são excluídas (só importariam para uma
     política com limiar abaixo de 0,67, que teria de tratá-las).
-  - **Regra que vale para políticas novas (intenção, decidida pelo orquestrador, ainda não implementada):** toda
-    política nova mede o falso positivo **só em lotes ingeridos depois da ativação dela**; os lotes já existentes, que
-    contêm a calibração e o treino dela, nunca entram no estrato dela. A exclusão por `RODADAS_DE_CALIBRACAO` fica
-    como proteção adicional. Motivo: o treino e a calibração de um modelo não deixam, necessariamente, rótulo em
-    `rotulos` (ver a pendência do M7 abaixo).
+  - **Só lotes ingeridos depois da ativação da política** (decidido pelo orquestrador, implementado na integração
+    com o M7, ver a seção "Integração com o M7"): cada política mede o falso positivo só nos lotes que não existiam
+    quando ela decidiu pela primeira vez; os lotes já existentes, que contêm a calibração e o treino dela, nunca
+    entram no estrato dela. A exclusão por `RODADAS_DE_CALIBRACAO` fica como proteção adicional. Motivo: o treino e a
+    calibração de um modelo não deixam, necessariamente, rótulo em `rotulos`.
   - **A inspeção das 200 do M5 também é calibração.** O 0,85 foi escolhido sobre as 200 fotos dos extremos
     (`ml/reports/heuristicas_amostra_200.csv`), e o grupo `pior` contém as 87 auto-rejeitadas. A inspeção vai para um
     CSV; o importador (`make rotulos-importar-inspecao`, rodada `inspecao_m5`, migração `a7c9e2f4b610`) grava toda foto
@@ -332,8 +332,9 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
    - "confiança média (p_ruim)" foi definida como a média de max(p_ruim, 1 − p_ruim), e "queda sustentada" como
      cair mais de 0,05 contra a baseline em 2 lotes seguidos; o plano não fixava a medida nem o limiar;
    - carta p como complemento, com phi só a partir de 5 lotes;
-   - quando o detector for o do M7, a baseline tem de ser trocada junto: o modelo foi treinado e calibrado em maio,
-     e a confiança dele nesses lotes é inflada pelo treino.
+   - a baseline troca junto com o detector: o modelo do M7 foi treinado e calibrado em maio, e a confiança dele
+     nesses lotes é inflada pelo treino. Feito na integração: para detector treinado, a baseline são os lotes de
+     teste dele (o 03/07 para a `qualidade@v1`).
 
 ## Migração editada no lugar
 
@@ -346,27 +347,77 @@ assim no `inspecao_m8`.
 
 A rodada `inspecao_m5` entrou numa migração **nova**, `a7c9e2f4b610` (depois da `e4b7`, que não foi editada de novo):
 amplia `ck_rotulos_rodada` e deixa `inspecao_m5` com campos nulos em `ck_rotulos_completo`. Reversível; o downgrade
-apaga os rótulos `inspecao_m5`. Head atual: `a7c9e2f4b610`.
+apaga os rótulos `inspecao_m5`. Na integração com o M7 entraram mais duas, ver abaixo; head atual: `d2f6a8c4e913`.
 
-## Para depois do merge com o M7 (registro; ajuste feito na integração)
+## Integração com o M7 (branch `feat/integracao`, 2026-10-17)
 
-- `sinais.politica_ativa()` deve usar `politica_para(detector configurado)`, e não `POLITICA_ATUAL`.
-- `sinais.classes_ativas` (distribuição das classes no drift) deve usar `politica.chaves`.
-- `jobs/cli.py`, `--politica default=POLITICA_ATUAL`, fica resolvido pelo M7.
-- `qualidade.LOTES_DE_TESTE` recebe os lotes de teste do detector do M7.
-- `estados.transicionar` já sorteia toda decisão automática gravada; com o M7, as decisões da v2 passam por ali sem
-  mudança, e caem num estrato próprio (`qualidade@v1 · politica@v2 · qualidade`), que recomeça do zero.
-- O bloco da tela usa o estrato da última decisão automática do histórico; depois do merge, ele passa a ser o da v2
-  assim que a v2 decidir a primeira leitura. Se o merge trocar `politica_ativa()` por `politica_para(detector)`, o
-  fallback (sem nenhuma decisão) segue o mesmo caminho.
-- **Pendência obrigatória do merge com o M7: o estrato da v2 só mede lotes ingeridos depois da ativação dela.**
-  `RODADAS_DE_CALIBRACAO` **não** cobre o treino nem a calibração da v2: (a) as 2.500 fotos do estágio 1 do treino
-  foram escolhidas pelo score da heurística e não têm rótulo; (b) a inspeção das 355 fotos que só o modelo rejeita,
-  que é o que ativa a v2, não tem rodada nem mecanismo de importação. Na integração: restringir o estrato de cada
-  política aos lotes ingeridos depois da ativação dela (os 4 lotes atuais nunca entram no estrato da v2) e importar a
-  inspeção das 355 como rodada de calibração **antes** de ativar a onnx; a exclusão por rodada continua como proteção
-  adicional.
-- A baseline do drift troca junto com o detector.
+`feat/integracao` = `feat/m7-modelo` + `merge --no-ff feat/m8-operacao` + `merge --no-ff feat/m9-ocr`. Conflitos:
+`Makefile` (`.PHONY` com os alvos dos dois), `jobs/handlers.recalcular_decisao` (a reconferência do M7 mais a trava
+das auditorias pendentes do M8, com contador e aviso próprios, `auditoria_em_uso`), `test_recalcular_decisao` e
+`heuristicas.md` (versão do M7, com a contagem aproximada), `test_relatorio_heuristicas` (testes do M7).
+`config.py`, `jobs/cli.py`, `.env.example`, `PainelLeitura.tsx`, `pyproject` e `uv.lock` se resolveram sozinhos; os
+cherry-picks repetidos (`9d26aaa` = `20fe94f`, `49fcfe1` = `37273e3`) não conflitaram. O `recalcular` sem `--politica`
+segue o M7 (o worker decide; o CLI não tem `default=POLITICA_ATUAL`). Alembic com **um head**: `1840bea5fdb9` →
+`c3e1a7d9f204` → `e4b7c2a9d815` → `a7c9e2f4b610` → `b5d8f3a1c726` → `d2f6a8c4e913`.
+
+O que cada pendência virou:
+
+- **Política em uso.** `sinais.politica_ativa()` = `politica_para(nome do detector configurado)`, a mesma resolução
+  do worker; `detector.nome_do_detector` dá o nome sem carregar o onnxruntime (no onnx lê a `versao` do
+  `<versao>.json` e confere o contrato contra a política registrada). Vale para o padrão das métricas, o fallback do
+  estrato vigente e a pré-condição da exclusão. `DETECTOR_QUALIDADE=heuristica` continua o padrão.
+- **Drift por `politica.chaves`.** A distribuição de classes usa as chaves que a política lê: as 5 classes de defeito
+  na v1, só `ilegivel` na v2 (a tela ganhou o gráfico "Classe ativa: Ilegível").
+- **Baseline troca com o detector** (`drift.lotes_baseline`): heurística e nulo com `DRIFT_LOTES_BASELINE` (maio);
+  detector treinado com os lotes de teste dele.
+- **`LOTES_DE_TESTE["qualidade@v1"]` = 03/07** (`PSP_EXTRATLEITIMPL_030726_0121`), o teste do `mlinsp.particao`.
+  As 84 fotos do Lab 2 nesse lote são o teste do M7, e a remoção por vazamento não tirou nenhuma delas.
+- **Estrato só com lotes posteriores à ativação (a regra decidida).** Forma escolhida: tabela `ativacoes_politica`
+  (migração `d2f6a8c4e913`), uma linha por política, gravada por `estados.transicionar` na **primeira decisão
+  automática** da política, na mesma transação, com `ON CONFLICT DO NOTHING` entre workers. A linha guarda
+  `ativada_em`, o `historico_id` da decisão e `lotes_anteriores` = os nomes de todos os lotes existentes naquele
+  instante. `_estratos` só conta auditorias de lotes cujo nome **não** está em `lotes_anteriores`
+  (`auditoria.lote_posterior_a_ativacao`); política sem ativação (decisão sem política no histórico) não mede nada.
+  Por que assim:
+  - é derivada do que o sistema já faz (a primeira decisão), sem passo manual que alguém esqueça antes de trocar o
+    detector;
+  - o nome, e não o `ingerido_em`, é o que conta: um lote antigo reingerido com `--reprocessar` ganha outro id e
+    outra data, mas o nome continua na lista e ele segue fora;
+  - o lote em que a política decide pela primeira vez também fica de fora. Não dá para separar um lote novo de um
+    antigo reprocessado, então é o lado conservador.
+
+  Retroativo da migração: toda política com decisão automática no histórico recebe a ativação da primeira decisão
+  dela, com **todos** os lotes do banco no momento da migração em `lotes_anteriores`. A exclusão por
+  `RODADAS_DE_CALIBRACAO` continua como proteção adicional.
+- **Rodada `inspecao_m7`** para a inspeção das 355 fotos que só a `politica@v2` rejeita:
+  - migração `b5d8f3a1c726` (CHECKs de `rotulos`);
+  - importador `make rotulos-importar-inspecao-m7`, com o mesmo formato e as mesmas regras da `inspecao_m5`;
+  - a rodada entrou em `RODADAS_DE_CALIBRACAO` e é obrigatória na pré-condição quando o detector configurado é o
+    `qualidade@v1`;
+  - a amostra foi gerada por `make m7-amostra-inspecao RODADA=20261016-213656` a partir do `p_ilegivel_base.csv` do
+    M7 (`ilegivel` ≥ 0,976 e p_ruim < 0,85): são **355** (89 / 108 / 80 / 78 em 030726 / 200526 / 210526 / 220526),
+    em `ml/reports/20261016-213656/inspecao_355.csv`, sem veredito.
+
+Medido no `inspecao_int` (cópia do `inspecao_m8` migrada até `d2f6a8c4e913`):
+
+| momento | ativações | auditorias auto_rejeitada | no estrato |
+| --- | --- | --- | --- |
+| depois da migração | `politica@v1` (retroativa, decisão 94769, 2026-10-16 23:01 UTC; os 4 lotes) | 87 pendentes | 0 |
+| depois de `DETECTOR_QUALIDADE=onnx` + `reprocessar --todos` | + `politica@v2` (gravada pela 1ª decisão, os 4 lotes) | 512: 425 da v2 (100% sorteadas) + 87 da v1 invalidadas | 0 |
+| depois de `recalcular --todos --politica politica@v1` | as duas | 529: 87 pendentes, 442 invalidadas | 0 |
+
+- Rótulos de calibração: `lab02` 500, `inspecao_m5` 200 e `inspecao_m7` 355 (todos pendentes, 0 não mapeadas).
+  `exclusao_incompleta` vazia com o detector heurístico e com o onnx.
+- Das 529 auditorias, todas estão em lote anterior à ativação da política delas, **e** todas têm rótulo de
+  calibração. As duas proteções cobrem o mesmo conjunto: as 425 da v2 são as 355 da `inspecao_m7` mais as 70 que a
+  v1 também rejeita, que estão na `inspecao_m5`. Nenhuma auditoria dos 4 lotes entra em estrato nenhum.
+- A volta para a v1 restaura o estado do M5: 87 `rejeitada_qualidade`, 11.332 na fila e as 55 decisões humanas
+  intactas. As 70 rejeitadas pelas duas políticas ficam com a decisão da v2 como última linha do histórico (o recálculo
+  não grava decisão inalterada), e por isso 70 das 87 auditorias pendentes apontam decisões da v2.
+- Drift da v2 com a baseline 03/07 (2.795 fotos): auto-rejeição de 3,69% na baseline e de 4,00% / 3,40% / 3,79% em
+  200526 / 210526 / 220526, todos com |z| < 1; classe ativa `ilegivel` de 46,3% na baseline e de 45,2% a 46,6% nos
+  outros lotes; nenhum alerta. Concordância contra o Lab 2 só no lote de teste: 83 pares, 3 rejeita/ilegível, 0
+  rejeita/legível (o mesmo E2 do M7).
 
 ## Fora do escopo do M8
 

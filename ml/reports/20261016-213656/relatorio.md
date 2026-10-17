@@ -224,9 +224,40 @@ O banco de dev foi restaurado na revisão `1840bea5fdb9`, com dump antes.
 - A volta para a v1 restaurou o estado do M5 sem abrir imagem (87 rejeitadas, 11.332 na fila).
 - As 55 decisões humanas não foram tocadas.
 
-## 9. Pendências
+## 9. Integração com o M8 (`feat/integracao`, 2026-10-17)
 
-- Inspeção humana das 355 rejeitadas só pelo modelo (seção 7).
+O M8 (métricas, drift, auditoria amostral) foi escrito sem o código do M7 e entrou por merge. O detalhe está em
+`ml/reports/operacao_m8.md`, seção "Integração com o M7". O que muda para o modelo:
+
+- **A política vem do detector configurado nos dois lados.** O worker já usava `politica_para`. Agora as métricas e
+  a auditoria também usam, por `detector.nome_do_detector`, que lê a `versao` do contrato sem abrir o onnxruntime.
+  Com `DETECTOR_QUALIDADE=onnx`, `/metricas/*` mostra a `politica@v2` sem `?politica=`.
+- **Drift da v2:**
+  - a distribuição de classes usa só `ilegivel` (`politica.chaves`). As 5 classes do modelo seguem informativas e
+    fora do drift;
+  - a baseline é o lote de teste 03/07, não maio, onde a confiança do modelo é inflada pelo treino.
+- **Concordância contra o Lab 2** só nas 84 fotos do lote de teste (`LOTES_DE_TESTE`). No banco de integração deu o
+  mesmo E2 da seção 5: 83 pares com legível, 3 rejeitadas e 0 falso positivo.
+- **Falso positivo da auto-rejeição da v2 só em lotes novos.** A primeira decisão automática da `politica@v2`
+  grava a ativação dela com os 4 lotes atuais (tabela `ativacoes_politica`), e nenhum deles entra no estrato
+  `qualidade@v1 · politica@v2`. As 2.500 fotos do estágio 1 do treino e as fotos de calibração ficam de fora mesmo
+  sem rótulo. Reprocessado no `inspecao_int`: as 425 auto-rejeições da v2 foram sorteadas (100%) e ficaram fora da
+  medida, que começa do zero no primeiro lote ingerido depois da ativação.
+- **A inspeção das 355 está preparada:**
+  - `make m7-amostra-inspecao RODADA=20261016-213656` gerou `inspecao_355.csv` nesta pasta, com 355 fotos: 89 em
+    030726, 108 em 200526, 80 em 210526 e 78 em 220526;
+  - o CSV traz nome do arquivo e scores, sem foto nem leitura;
+  - `make rotulos-importar-inspecao-m7` grava a rodada de calibração `inspecao_m7`;
+  - com o detector onnx configurado, a métrica de auditoria acusa `exclusao_incompleta` até essa importação;
+  - preencher `legivel_inspecao` (1/0) e `inspetor` e reimportar troca o rótulo pendente pelo veredito.
+- **`export_onnx` não regrava o contrato quando o sha256 do `.onnx` não muda.** Assim o json versionado continua
+  citando o commit da exportação original.
+- O modelo continua **desligado** (`DETECTOR_QUALIDADE=heuristica`). Ligar ainda depende do veredito das 355 (seção 7).
+
+## 10. Pendências
+
+- Inspeção humana das 355 rejeitadas só pelo modelo (seção 7). A amostra já existe
+  (`inspecao_355.csv`, seção 9) e o importador também; falta o veredito.
 - Os testes do M3 que falhavam sob carga foram corrigidos no `37273e3` (comparavam o relógio do host
   com o `now()` do banco).
 - Um abort `libc++abi: recursive_mutex lock failed` na saída do pytest, com os testes passando,

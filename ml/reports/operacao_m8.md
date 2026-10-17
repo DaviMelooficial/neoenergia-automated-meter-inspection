@@ -196,10 +196,17 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     ativa. Admin vê todos (`estratos_auto_rejeitadas`). Efeito colateral: a última decisão é de qualquer lote, então
     um recálculo manual com uma política antiga, ou um lote de teste reprocessado, troca o estrato mostrado na tela
     até a próxima decisão da política vigente.
-  - **Estimando:** falso positivo das auto-rejeições **fora dos conjuntos de calibração**. Regra: o estrato de uma
-    política mede só fotos fora de todo conjunto que calibrou aquela política, ou seja, fora do Lab 2, das rodadas
-    cegas (a, b, desempate) e da inspeção do M5 (`RODADAS_DE_CALIBRACAO`). Uma política nova calibrada por outra
-    inspeção começa um estrato novo, e as fotos daquela inspeção ficam fora dele.
+  - **Estimando:** falso positivo das auto-rejeições **fora dos conjuntos de calibração**. O que o código faz
+    hoje: exclui da medida toda foto com rótulo em `RODADAS_DE_CALIBRACAO` (Lab 2, rodadas cegas a/b/desempate,
+    inspeção do M5). A exclusão é **global**, não por política: uma foto que calibrou qualquer política fica fora de
+    todos os estratos, o que é conservador. Ela não enxerga calibração sem rótulo: as fotos de 0,62 a 0,64 que o
+    agente do M5 olhou nas miniaturas não estão no CSV da inspeção e não são excluídas (só importariam para uma
+    política com limiar abaixo de 0,67, que teria de tratá-las).
+  - **Regra que vale para políticas novas (intenção, decidida pelo orquestrador, ainda não implementada):** toda
+    política nova mede o falso positivo **só em lotes ingeridos depois da ativação dela**; os lotes já existentes, que
+    contêm a calibração e o treino dela, nunca entram no estrato dela. A exclusão por `RODADAS_DE_CALIBRACAO` fica
+    como proteção adicional. Motivo: o treino e a calibração de um modelo não deixam, necessariamente, rótulo em
+    `rotulos` (ver a pendência do M7 abaixo).
   - **A inspeção das 200 do M5 também é calibração.** O 0,85 foi escolhido sobre as 200 fotos dos extremos
     (`ml/reports/heuristicas_amostra_200.csv`), e o grupo `pior` contém as 87 auto-rejeitadas. A inspeção vai para um
     CSV; o importador (`make rotulos-importar-inspecao`, rodada `inspecao_m5`, migração `a7c9e2f4b610`) grava toda foto
@@ -217,7 +224,10 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     foto que já conhece.
   - **Pré-condição:** a exclusão depende de `make rotulos-importar` (Lab 2) e `make rotulos-importar-inspecao` terem
     rodado. Sem nenhum rótulo `lab02` ou `inspecao_m5`, o backend loga WARNING e `/metricas/auditoria` lista a rodada
-    em `exclusao_incompleta` (com as contagens em `rotulos_de_calibracao`).
+    em `exclusao_incompleta` (com as contagens em `rotulos_de_calibracao`). Importação parcial (foto do CSV que não está no banco) loga WARNING na hora de importar e não aparece na
+    métrica: a foto fica sem rótulo e fora da exclusão. Comportamento do importador da inspeção: reimportar um CSV com
+    o veredito vazio volta o rótulo daquela foto para pendente, e uma linha removida do CSV deixa o rótulo antigo no
+    banco (o importador só grava as linhas presentes). Para limpar, apagar a rodada `inspecao_m5` e reimportar.
   - Erro, na rejeição de qualidade: qualquer veredito que não seja "reprovada por uma das 5 classes de qualidade":
     aprovada, ou reprovada por `outro`. Na rejeição por divergência (etapa `validacao`), só aprovada é erro, porque
     `outro` é o motivo da divergência. Na auto-aprovada, qualquer reprovada é erro.
@@ -349,8 +359,13 @@ apaga os rótulos `inspecao_m5`. Head atual: `a7c9e2f4b610`.
 - O bloco da tela usa o estrato da última decisão automática do histórico; depois do merge, ele passa a ser o da v2
   assim que a v2 decidir a primeira leitura. Se o merge trocar `politica_ativa()` por `politica_para(detector)`, o
   fallback (sem nenhuma decisão) segue o mesmo caminho.
-- `RODADAS_DE_CALIBRACAO` (lab02, a, b, desempate, inspecao_m5) já exclui as fotos de treino do M7; se o M7 usar outra rodada ou
-  outro conjunto (por exemplo um split próprio), ela precisa entrar ali.
+- **Pendência obrigatória do merge com o M7: o estrato da v2 só mede lotes ingeridos depois da ativação dela.**
+  `RODADAS_DE_CALIBRACAO` **não** cobre o treino nem a calibração da v2: (a) as 2.500 fotos do estágio 1 do treino
+  foram escolhidas pelo score da heurística e não têm rótulo; (b) a inspeção das 355 fotos que só o modelo rejeita,
+  que é o que ativa a v2, não tem rodada nem mecanismo de importação. Na integração: restringir o estrato de cada
+  política aos lotes ingeridos depois da ativação dela (os 4 lotes atuais nunca entram no estrato da v2) e importar a
+  inspeção das 355 como rodada de calibração **antes** de ativar a onnx; a exclusão por rodada continua como proteção
+  adicional.
 - A baseline do drift troca junto com o detector.
 
 ## Fora do escopo do M8

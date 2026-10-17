@@ -58,6 +58,8 @@ class Politica:
         return self.modelo is None or self.modelo == modelo
 
 
+# Versao publicada e imutavel: o historico de status grava o nome da versao que
+# decidiu. Limiar novo = Politica nova (politica@v2), nunca edicao destas.
 POLITICA_V0 = Politica(versao="politica@v0")
 POLITICA_V1 = Politica(versao="politica@v1", modelo="heuristica@v1", limiar_rejeita=0.85)
 

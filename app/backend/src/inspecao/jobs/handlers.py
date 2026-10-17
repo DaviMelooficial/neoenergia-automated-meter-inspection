@@ -5,7 +5,6 @@ import logging
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import exists, func, or_, select
@@ -55,9 +54,29 @@ def _foto_principal(sessao: Session, leitura: Leitura) -> Foto:
     return foto
 
 
-def _reservada(leitura: Leitura) -> bool:
-    """Reservada por um auditor agora: nao se reabre o que alguem esta olhando."""
-    return leitura.reservado_ate is not None and leitura.reservado_ate >= datetime.now(UTC)
+def _redecidivel():
+    """Condicao SQL de leitura que a maquina pode reabrir: decidida pela maquina e sem
+    reserva ativa de auditor. Relogio do banco (`now()`), o mesmo da fila humana."""
+    return Leitura.status_atual.in_([s.value for s in ESTADOS_REDECIDIVEIS]) & or_(
+        Leitura.reservado_ate.is_(None), Leitura.reservado_ate < func.now()
+    )
+
+
+def _travar_redecidiveis(sessao: Session, consulta):
+    """Executa `consulta` (que seleciona Leitura) com FOR UPDATE OF leituras SKIP LOCKED.
+
+    A condicao de `_redecidivel` vai no WHERE do proprio SELECT que trava: no Postgres
+    a linha travada e reavaliada na versao mais recente, entao reserva ou decisao
+    humana gravadas antes do lock tiram a leitura do resultado. Linha travada por
+    outra transacao (auditor pegando o item agora) e pulada, nao esperada. Depois do
+    lock, `/fila-humana/proxima` (tambem SKIP LOCKED) nao entrega esses itens e
+    `/decisao` espera o commit, quando ja ve o status novo.
+    """
+    return sessao.execute(
+        consulta.where(_redecidivel())
+        .with_for_update(of=Leitura, skip_locked=True)
+        .execution_options(populate_existing=True)
+    ).all()
 
 
 def _decidir(
@@ -108,12 +127,17 @@ def triagem_qualidade(ctx: Contexto, sessao: Session, payload: dict) -> None:
         log.info("leitura %s ja esta em %s, triagem ignorada", leitura.id, status)
         return
 
-    foto = _foto_principal(sessao, leitura)
     reaberta = status is not StatusLeitura.RECEBIDA
     if reaberta:
-        if _reservada(leitura) or _ja_inferida(sessao, foto.id, ctx.detector.nome):
-            log.info("leitura %s em %s: nada a reabrir", leitura.id, status)
+        # O status lido acima pode estar velho: trava e reconfere antes de reabrir.
+        if not _travar_redecidiveis(sessao, select(Leitura).where(Leitura.id == leitura.id)):
+            log.info("leitura %s reservada, decidida ou travada: nada a reabrir", leitura.id)
             return
+        status = StatusLeitura(leitura.status_atual)
+    foto = _foto_principal(sessao, leitura)
+    if reaberta and _ja_inferida(sessao, foto.id, ctx.detector.nome):
+        log.info("leitura %s em %s ja tem resultado de %s", leitura.id, status, ctx.detector.nome)
+        return
 
     ator = f"modelo:{ctx.detector.nome}"
     transicionar(
@@ -143,9 +167,10 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
     """Reaplica uma politica aos resultados ja gravados do lote, sem abrir imagem.
 
     Payload: `{lote_id, politica}` (versao, ex.: "politica@v1"; padrao: a do worker).
-    So mexe em leituras em ESTADOS_REDECIDIVEIS sem reserva ativa, usando o
-    resultado mais recente do detector da politica para a foto principal. Leitura
-    cuja decisao nao muda nao ganha linha de historico.
+    So mexe em leituras em ESTADOS_REDECIDIVEIS sem reserva ativa, travadas por
+    `_travar_redecidiveis` ate o commit, usando o resultado mais recente do detector
+    da politica para a foto principal. Leitura cuja decisao nao muda nao ganha linha
+    de historico.
     """
     lote = sessao.get(Lote, int(payload["lote_id"]))
     if lote is None:
@@ -154,6 +179,8 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
 
     ultimo = (
         select(ResultadoInferencia.foto_id, ResultadoInferencia.modelo, ResultadoInferencia.saida)
+        .join(Foto, Foto.id == ResultadoInferencia.foto_id)
+        .where(Foto.lote_id == lote.id, Foto.principal.is_(True))
         .distinct(ResultadoInferencia.foto_id)
         .order_by(ResultadoInferencia.foto_id, ResultadoInferencia.id.desc())
     )
@@ -161,23 +188,25 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         ultimo = ultimo.where(ResultadoInferencia.modelo == politica.modelo)
     ultimo = ultimo.subquery()
 
-    linhas = sessao.execute(
+    linhas = _travar_redecidiveis(
+        sessao,
         select(Leitura, ultimo.c.modelo, ultimo.c.saida)
         .join(Foto, (Foto.leitura_id == Leitura.id) & Foto.principal.is_(True))
         .join(ultimo, ultimo.c.foto_id == Foto.id)
-        .where(
-            Leitura.lote_id == lote.id,
-            Leitura.status_atual.in_([s.value for s in ESTADOS_REDECIDIVEIS]),
-            or_(Leitura.reservado_ate.is_(None), Leitura.reservado_ate < func.now()),
-        )
-        .order_by(Leitura.id)
-    ).all()
+        .where(Leitura.lote_id == lote.id)
+        .order_by(Leitura.id),
+    )
 
     contagem: Counter[str] = Counter()
     for leitura, modelo, saida in linhas:
         decisao, p_ruim, detalhe = _decidir(politica, modelo, saida)
         if DESTINO[decisao].value == leitura.status_atual:
             contagem["inalterada"] += 1
+            continue
+        # Reconfere a linha antes de reabrir (defesa em profundidade: o lock acima ja
+        # impede reserva e decisao vindas de outra transacao).
+        if not _travar_redecidiveis(sessao, select(Leitura).where(Leitura.id == leitura.id)):
+            contagem["pulada"] += 1
             continue
         ator = f"modelo:{modelo}"
         de = leitura.status_atual
@@ -218,7 +247,13 @@ def validacao_leitura(ctx: Contexto, sessao: Session, payload: dict) -> None:
 def reprocessar_lote(ctx: Contexto, sessao: Session, payload: dict) -> None:
     """Enfileira triagem para as leituras do lote em `recebida` e para as ja
     decididas pela maquina que ainda nao tem resultado do detector deste worker
-    (troca de detector). Os resultados antigos ficam, para comparacao."""
+    (troca para um detector novo). Os resultados antigos ficam, para comparacao.
+
+    Voltar para um detector ja usado no lote nao reabre nada: o resultado dele ja
+    esta gravado e a imagem nao e reprocessada. Nesse caso o job avisa no log; quem
+    re-decide a partir desses resultados e `recalcular_decisao` com a politica
+    desse detector.
+    """
     lote = sessao.get(Lote, int(payload["lote_id"]))
     if lote is None:
         raise LookupError(f"lote {payload['lote_id']} nao existe")
@@ -242,6 +277,44 @@ def reprocessar_lote(ctx: Contexto, sessao: Session, payload: dict) -> None:
     ).all()
     n = fila.enfileirar_em_lote(sessao, TipoJob.TRIAGEM_QUALIDADE, ({"leitura_id": i} for i in ids))
     log.info("lote %s: %d jobs de triagem enfileirados (%s)", lote.nome, n, ctx.detector.nome)
+
+    n_volta = _decididas_por_outro_detector(sessao, lote.id, ctx.detector.nome)
+    if n_volta:
+        log.warning(
+            "lote %s: %d leituras ja tem resultado de %s, mas a ultima decisao veio de outro "
+            "detector; nada foi reenfileirado. Use recalcular_decisao com a politica de %s",
+            lote.nome,
+            n_volta,
+            ctx.detector.nome,
+            ctx.detector.nome,
+        )
+
+
+def _decididas_por_outro_detector(sessao: Session, lote_id: int, modelo: str) -> int:
+    """Leituras re-decidiveis do lote com resultado de `modelo` cujo resultado mais
+    recente e de outro detector: o caso "voltar para um detector ja usado"."""
+    ultimo = (
+        select(ResultadoInferencia.foto_id, ResultadoInferencia.modelo)
+        .join(Foto, Foto.id == ResultadoInferencia.foto_id)
+        .where(Foto.lote_id == lote_id, Foto.principal.is_(True))
+        .distinct(ResultadoInferencia.foto_id)
+        .order_by(ResultadoInferencia.foto_id, ResultadoInferencia.id.desc())
+        .subquery()
+    )
+    return sessao.scalar(
+        select(func.count())
+        .select_from(Leitura)
+        .join(Foto, (Foto.leitura_id == Leitura.id) & Foto.principal.is_(True))
+        .join(ultimo, ultimo.c.foto_id == Foto.id)
+        .where(
+            Leitura.lote_id == lote_id,
+            Leitura.status_atual.in_([s.value for s in ESTADOS_REDECIDIVEIS]),
+            ultimo.c.modelo != modelo,
+            exists().where(
+                ResultadoInferencia.foto_id == Foto.id, ResultadoInferencia.modelo == modelo
+            ),
+        )
+    )
 
 
 def ingerir_lote(ctx: Contexto, sessao: Session, payload: dict) -> None:

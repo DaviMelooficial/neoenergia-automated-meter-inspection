@@ -98,7 +98,7 @@ def test_triagem_repetida_e_inofensiva(db_session, staging, tmp_path):
     )
 
 
-def test_reprocessar_lote_so_enfileira_quem_esta_em_recebida(db_session, staging, tmp_path):
+def test_reprocessar_lote_enfileira_recebidas_de_lote_sem_fila(db_session, staging, tmp_path):
     resultado, lote, storage = ls.ingerir_sintetico(db_session, staging, tmp_path / "storage")
     ctx = Contexto(
         settings=get_settings(), detector=DetectorNulo(), storage=storage, politica=POLITICA_V0

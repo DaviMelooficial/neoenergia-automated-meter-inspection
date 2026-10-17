@@ -66,7 +66,7 @@ api-dev:  ## sobe a api no host com reload
 worker-dev:  ## sobe o worker no host
 	cd app/backend && uv run python -m inspecao.jobs.worker
 
-triagem-todos:  ## enfileira triagem: leituras em "recebida" e as sem resultado do detector atual
+triagem-todos:  ## enfileira triagem: "recebida" e as sem resultado do detector atual (volta a detector ja usado: recalcular-todos)
 	cd app/backend && uv run python -m inspecao.jobs.cli reprocessar --todos
 
 recalcular-todos:  ## reaplica a politica aos resultados gravados, sem reabrir imagem (POLITICA=politica@v1)

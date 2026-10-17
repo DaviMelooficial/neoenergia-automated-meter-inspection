@@ -11,19 +11,28 @@ from datetime import UTC, datetime, timedelta
 import cv2
 import numpy as np
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 
 from inspecao.config import get_settings
 from inspecao.enums import StatusLeitura, TipoJob
 from inspecao.estados import transicionar
 from inspecao.inference.detector import DetectorHeuristico, DetectorNulo
 from inspecao.inference.politica import POLITICA_V0, POLITICA_V1
-from inspecao.jobs import fila
-from inspecao.jobs.handlers import Contexto, recalcular_decisao, reprocessar_lote
+from inspecao.jobs import fila, handlers
+from inspecao.jobs.handlers import (
+    Contexto,
+    recalcular_decisao,
+    reprocessar_lote,
+    triagem_qualidade,
+)
 from inspecao.jobs.worker import processar_um
 from inspecao.models import Foto, HistoricoStatus, Job, Leitura, ResultadoInferencia
+from inspecao.routers.fila_humana import consulta_proxima
 from inspecao.storage.local import LocalFileStorage
 from tests import lote_sintetico as ls
+from tests.usuarios_fixture import criar_contas
 
 LINHAS_NITIDAS = {4: ls.foto(3), 6: ls.foto(6)}
 LINHAS_PRETAS = sorted(set(ls.LINHAS_COM_FOTO) - set(LINHAS_NITIDAS))
@@ -242,3 +251,247 @@ def test_troca_de_detector_reabre_o_lote_e_guarda_o_resultado_antigo(db_session,
     historico = n_historico(db_session, preta)
     assert esvaziar_fila(heuristico, db_session) == 1
     assert n_historico(db_session, preta) == historico
+
+
+def test_voltar_para_detector_ja_usado_nao_reabre_e_avisa(
+    db_session, staging, tmp_path, caplog, monkeypatch
+):
+    _, lote, storage = ls.ingerir_sintetico(db_session, staging, tmp_path / "storage")
+    nulo, heuristico = (
+        ctx_com(DetectorNulo(), storage, POLITICA_V0),
+        ctx_com(DetectorHeuristico(), storage),
+    )
+    esvaziar_fila(heuristico, db_session)
+    reprocessar_lote(nulo, db_session, {"lote_id": lote.id})
+    esvaziar_fila(nulo, db_session)  # agora o resultado mais recente e do nulo
+
+    # O fileConfig do alembic (migracao do banco de teste) desliga os loggers existentes.
+    monkeypatch.setattr(handlers.log, "disabled", False)
+    with caplog.at_level("WARNING", logger="inspecao.jobs.handlers"):
+        reprocessar_lote(heuristico, db_session, {"lote_id": lote.id})
+    assert esvaziar_fila(heuristico, db_session) == 0
+    assert "use recalcular_decisao" in caplog.text.lower()
+    assert f"{len(ls.LINHAS_COM_FOTO)} leituras ja tem resultado de heuristica@v1" in caplog.text
+
+
+# ------------------------------------------------- concorrencia com a fila humana
+# Estes testes precisam de duas conexoes de verdade: dados commitados no banco de
+# teste e limpos ao final, como em test_revisao_m3.base_comprometida.
+
+
+@pytest.fixture
+def base_na_fila(staging, tmp_path):
+    """Lote commitado, triado pela heuristica e devolvido inteiro para a fila (v0)."""
+    from tests.conftest import SERVIDOR_OK
+
+    if not SERVIDOR_OK:
+        pytest.skip("servidor postgres indisponivel")
+    from inspecao.db import engine
+
+    fabrica = sessionmaker(bind=engine, expire_on_commit=False)
+    with fabrica() as s:
+        contas = criar_contas(s)
+        _, lote, storage = ls.ingerir_sintetico(s, staging, tmp_path / "storage")
+        esvaziar_fila(ctx_com(DetectorHeuristico(), storage), s)
+        recalcular_decisao(
+            ctx_com(DetectorHeuristico(), storage),
+            s,
+            {"lote_id": lote.id, "politica": "politica@v0"},
+        )
+        s.commit()
+        lote_id = lote.id
+    yield fabrica, contas, lote_id, storage
+    with engine.begin() as c:
+        c.execute(text("DELETE FROM lotes"))
+        c.execute(text("DELETE FROM notas_ocorrencia WHERE codigo IN ('Z901','Z902','T111')"))
+        c.execute(text("TRUNCATE jobs, log_acesso, refresh_tokens RESTART IDENTITY"))
+        c.execute(text("DELETE FROM usuarios"))
+
+
+def _status(fabrica, lote_id) -> dict[int, tuple[str, int | None]]:
+    with fabrica() as s:
+        return {
+            linha: (st, por)
+            for linha, st, por in s.execute(
+                select(Leitura.linha_csv, Leitura.status_atual, Leitura.reservado_por).where(
+                    Leitura.lote_id == lote_id, Leitura.linha_csv.in_(ls.LINHAS_COM_FOTO)
+                )
+            )
+        }
+
+
+def _reservar(sessao, usuario_id: int, leitura_id: int) -> None:
+    leitura = sessao.get(Leitura, leitura_id)
+    leitura.reservado_por = usuario_id
+    leitura.reservado_ate = datetime.now(UTC) + timedelta(minutes=10)
+
+
+def test_recalcular_pula_item_que_o_auditor_esta_pegando_sem_esperar(base_na_fila):
+    """Auditor com o item travado em /proxima: o job pula a linha (nao espera o lock)
+    e a reserva que o auditor grava em seguida continua valendo."""
+    fabrica, contas, lote_id, storage = base_na_fila
+    auditor = contas["auditor"].id
+    s_aud, s_job = fabrica(), fabrica()
+    try:
+        pego = s_aud.scalar(consulta_proxima(auditor, ls.LOTE))  # lock aberto
+        assert pego is not None
+        s_job.execute(text("SET LOCAL lock_timeout = '2s'"))  # sem o SKIP LOCKED, estoura
+        recalcular_decisao(
+            ctx_com(DetectorHeuristico(), StorageProibido(raiz=storage.raiz)),
+            s_job,
+            {"lote_id": lote_id, "politica": "politica@v1"},
+        )
+        s_job.commit()
+        _reservar(s_aud, auditor, pego)
+        s_aud.commit()
+    finally:
+        s_aud.close()
+        s_job.close()
+
+    with fabrica() as s:
+        linha_pega = s.get(Leitura, pego).linha_csv
+    status = _status(fabrica, lote_id)
+    assert status[linha_pega] == (StatusLeitura.FILA_HUMANA.value, auditor)
+    for linha in LINHAS_PRETAS:
+        if linha != linha_pega:
+            assert status[linha] == (StatusLeitura.REJEITADA_QUALIDADE.value, None)
+
+
+def test_reserva_ou_decisao_entre_o_select_e_o_loop_nao_pega_item_travado(
+    base_na_fila, monkeypatch
+):
+    """O auditor tenta pegar e decidir itens no meio do recalculo: os candidatos ja
+    estao travados, entao /proxima nao os entrega e a decisao teria de esperar."""
+    fabrica, contas, lote_id, storage = base_na_fila
+    auditor = contas["auditor"].id
+    tentativas: dict[str, object] = {}
+    decidir_original = handlers._decidir
+
+    def decidir_com_auditor_no_meio(*args, **kwargs):
+        if not tentativas:
+            with fabrica() as s_aud:
+                tentativas["proxima"] = s_aud.scalar(consulta_proxima(auditor, ls.LOTE))
+                if tentativas["proxima"] is not None:
+                    _reservar(s_aud, auditor, tentativas["proxima"])
+                    s_aud.commit()
+            with fabrica() as s_aud:
+                alvo = s_aud.scalar(
+                    select(Leitura.id).where(
+                        Leitura.lote_id == lote_id, Leitura.linha_csv == LINHAS_PRETAS[0]
+                    )
+                )
+                try:
+                    s_aud.execute(
+                        select(Leitura).where(Leitura.id == alvo).with_for_update(nowait=True)
+                    )
+                    tentativas["lock_decisao"] = "conseguiu"
+                except OperationalError:
+                    tentativas["lock_decisao"] = "travado"
+                s_aud.rollback()
+        return decidir_original(*args, **kwargs)
+
+    monkeypatch.setattr(handlers, "_decidir", decidir_com_auditor_no_meio)
+    with fabrica() as s_job:
+        recalcular_decisao(
+            ctx_com(DetectorHeuristico(), StorageProibido(raiz=storage.raiz)),
+            s_job,
+            {"lote_id": lote_id, "politica": "politica@v1"},
+        )
+        s_job.commit()
+
+    # Todas as leituras com foto do lote eram candidatas e estavam travadas.
+    assert tentativas == {"proxima": None, "lock_decisao": "travado"}
+    status = _status(fabrica, lote_id)
+    assert {linha: status[linha] for linha in LINHAS_PRETAS} == {
+        linha: (StatusLeitura.REJEITADA_QUALIDADE.value, None) for linha in LINHAS_PRETAS
+    }
+
+
+@pytest.mark.parametrize("acao", ["reserva", "decisao_humana"])
+def test_troca_de_detector_relê_a_leitura_antes_de_reabrir(base_na_fila, acao):
+    """O job carregou a leitura em fila_humana; antes da reabertura um auditor reservou
+    ou decidiu (outra conexao, commitada). A triagem reconfere com lock e nao reabre."""
+    fabrica, contas, lote_id, storage = base_na_fila
+    auditor = contas["auditor"].id
+    with fabrica() as s:
+        alvo = s.scalar(
+            select(Leitura.id).where(
+                Leitura.lote_id == lote_id, Leitura.linha_csv == LINHAS_PRETAS[0]
+            )
+        )
+        # Resultado de heuristica@v1 apagado: sem isso a triagem pularia por "ja inferida".
+        s.execute(
+            ResultadoInferencia.__table__.delete().where(
+                ResultadoInferencia.foto_id.in_(select(Foto.id).where(Foto.leitura_id == alvo))
+            )
+        )
+        s.commit()
+
+    s_job = fabrica()
+    try:
+        # Referencia mantida: o identity map e fraco e soltaria o objeto velho.
+        lida = s_job.get(Leitura, alvo)
+        assert lida.status_atual == StatusLeitura.FILA_HUMANA.value
+        with fabrica() as s_aud:
+            if acao == "reserva":
+                _reservar(s_aud, auditor, alvo)
+            else:
+                transicionar(
+                    s_aud,
+                    s_aud.get(Leitura, alvo),
+                    StatusLeitura.APROVADA_HUMANO,
+                    f"usuario:{auditor}",
+                )
+            s_aud.commit()
+        triagem_qualidade(ctx_com(DetectorHeuristico(), storage), s_job, {"leitura_id": alvo})
+        s_job.commit()
+    finally:
+        s_job.close()
+
+    esperado = {
+        "reserva": (StatusLeitura.FILA_HUMANA.value, auditor),
+        "decisao_humana": (StatusLeitura.APROVADA_HUMANO.value, None),
+    }[acao]
+    assert _status(fabrica, lote_id)[LINHAS_PRETAS[0]] == esperado
+    with fabrica() as s:
+        assert not s.scalar(
+            select(func.count())
+            .select_from(ResultadoInferencia)
+            .join(Foto)
+            .where(Foto.leitura_id == alvo)
+        )
+
+
+def test_reserva_gravada_entre_o_select_e_o_loop_nao_e_reaberta(
+    db_session, contas, staging, tmp_path, monkeypatch
+):
+    """Reproducao do gate: a reserva do ultimo item chega quando o job ja selecionou
+    os candidatos e esta transicionando o primeiro. Cada linha e reconferida antes de
+    reabrir, entao a reservada fica na fila."""
+    lote, storage = triar_com_heuristica(db_session, staging, tmp_path)
+    ctx = ctx_com(DetectorHeuristico(), StorageProibido(raiz=storage.raiz))
+    recalcular_decisao(ctx, db_session, {"lote_id": lote.id, "politica": "politica@v0"})
+    alvo_id = leitura_da_linha(db_session, lote, LINHAS_PRETAS[-1]).id
+    original = handlers.transicionar
+    feito = []
+
+    def transicionar_com_corrida(sessao, leitura, *a, **k):
+        if not feito:
+            feito.append(True)
+            sessao.execute(
+                update(Leitura)
+                .where(Leitura.id == alvo_id)
+                .values(
+                    reservado_por=contas["auditor"].id,
+                    reservado_ate=datetime.now(UTC) + timedelta(minutes=10),
+                )
+            )
+        return original(sessao, leitura, *a, **k)
+
+    monkeypatch.setattr(handlers, "transicionar", transicionar_com_corrida)
+    recalcular_decisao(ctx, db_session, {"lote_id": lote.id, "politica": "politica@v1"})
+    status = status_por_linha(db_session, lote)
+    assert status[LINHAS_PRETAS[-1]] == StatusLeitura.FILA_HUMANA.value
+    assert [status[n] for n in LINHAS_PRETAS[:-1]] == [StatusLeitura.REJEITADA_QUALIDADE.value] * (
+        len(LINHAS_PRETAS) - 1
+    )

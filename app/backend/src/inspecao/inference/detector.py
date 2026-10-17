@@ -78,6 +78,12 @@ def carregar_detector(settings: Settings) -> Detector:
     raise RuntimeError(f"DETECTOR_QUALIDADE={escolha!r}; use um de {list(DETECTORES)}")
 
 
+class DetectorMalConfigurado(RuntimeError):
+    """A configuracao do detector nao resolve para um detector com politica registrada
+    (contrato do onnx ausente ou divergente, detector desconhecido). A API responde 503
+    com o motivo (`main.py`); o worker nem sobe."""
+
+
 def nome_do_detector(settings: Settings) -> str:
     """Nome do detector que `carregar_detector` daria, sem carregar o modelo.
 
@@ -104,6 +110,12 @@ def nome_do_detector(settings: Settings) -> str:
             )
         contrato = json.loads(caminho_json.read_text(encoding="utf-8"))
         validar_contrato_onnx(contrato)
+        # A mesma checagem do DetectorOnnx: o arquivo de cada versao se chama <versao>.onnx.
+        if caminho_json.stem != contrato["versao"]:
+            raise RuntimeError(
+                f"{caminho_json.with_suffix('.onnx').name} contem {contrato['versao']}: o "
+                "arquivo de cada versao se chama <versao>.onnx (ex.: qualidade@v1.onnx)"
+            )
         return contrato["versao"]
     raise RuntimeError(f"DETECTOR_QUALIDADE={escolha!r}; use um de {list(DETECTORES)}")
 

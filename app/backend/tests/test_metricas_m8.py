@@ -441,6 +441,33 @@ def test_politica_ativa_segue_o_detector_configurado(monkeypatch, tmp_path):
     (tmp_path / "qualidade@v1.json").write_text(json.dumps(contrato), "utf-8")
     with pytest.raises(RuntimeError, match="rodada"):
         sinais.politica_ativa()
+    # mesmo contrato num arquivo com outro nome: o DetectorOnnx recusa, e aqui tambem
+    monkeypatch.setattr(s, "modelo_qualidade_path", tmp_path / "outro.onnx")
+    (tmp_path / "outro.json").write_text(CONTRATO_M7.read_text("utf-8"), "utf-8")
+    with pytest.raises(RuntimeError, match="se chama <versao>.onnx"):
+        sinais.politica_ativa()
+
+
+@pytest.mark.parametrize("contrato", ["ausente", "divergente"])
+def test_detector_mal_configurado_da_503_com_o_motivo(
+    client, contas, monkeypatch, tmp_path, contrato
+):
+    """Sem politica do detector configurado, metricas e auditoria (inclusive pela
+    pre-condicao da exclusao) respondem 503 com o motivo, e nao 500."""
+    s = get_settings()
+    monkeypatch.setattr(s, "modelo_qualidade_ativo", False)
+    monkeypatch.setattr(s, "detector_qualidade", "onnx")
+    monkeypatch.setattr(s, "modelo_qualidade_path", tmp_path / "qualidade@v1.onnx")
+    if contrato == "divergente":
+        dados = json.loads(CONTRATO_M7.read_text("utf-8")) | {"limiar_rejeita": 0.5}
+        (tmp_path / "qualidade@v1.json").write_text(json.dumps(dados), "utf-8")
+    cab = login(client, contas["admin"])
+    for rota in ("/metricas/qualidade", "/metricas/drift", "/metricas/auditoria"):
+        r = client.get(rota, headers=cab)
+        assert r.status_code == 503, (rota, r.text)
+        motivo = "ausente" if contrato == "ausente" else "limiar_rejeita"
+        assert "detector de qualidade mal configurado" in r.json()["detail"]
+        assert motivo in r.json()["detail"]
 
 
 def test_qualidade_v1_tem_o_lote_de_teste_do_split_do_m7():

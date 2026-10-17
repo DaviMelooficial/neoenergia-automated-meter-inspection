@@ -13,6 +13,7 @@ from sqlalchemy import text
 from inspecao.auth.service import garantir_admin
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal, engine
+from inspecao.inference.detector import DetectorMalConfigurado
 from inspecao.routers import (
     auditoria,
     auth,
@@ -51,6 +52,13 @@ app = FastAPI(
     root_path="/api",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(DetectorMalConfigurado)
+async def detector_mal_configurado(_: Request, erro: DetectorMalConfigurado) -> JSONResponse:
+    # Metricas e auditoria dependem da politica do detector configurado: sem ela, o servico
+    # esta indisponivel (o worker tambem nao sobe), e o motivo vai no detail.
+    return JSONResponse(status_code=503, content={"detail": str(erro)})
 
 
 @app.middleware("http")

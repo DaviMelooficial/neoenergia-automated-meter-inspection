@@ -1408,3 +1408,172 @@ def test_inspecao_m7_e_calibracao_e_obrigatoria_com_o_detector_onnx(
     db_session.flush()
     contagem, faltando = auditoria.precondicao_da_exclusao(db_session)
     assert contagem["inspecao_m7"] == 1 and "inspecao_m7" not in faltando
+
+
+def test_v1_v2_v1_devolve_a_atribuicao_e_o_estrato_a_v1(
+    client, db_session, reais, lote_aud, sempre
+):
+    """Bloqueante do gate de dados da integracao: voltar da v2 para a v1 pelo recalcular
+    nao pode deixar a ultima decisao citando a v2. A leitura que as duas rejeitam (e a que
+    as duas mandam para a fila) ganha a decisao da v1 de novo, com auditoria nova; a
+    decisao humana nao e tocada."""
+    from inspecao.inference.detector import DetectorNulo
+    from inspecao.jobs.handlers import recalcular_decisao
+    from inspecao.models import ResultadoInferencia
+    from inspecao.monitoramento import qualidade as qualidade_mod
+    from tests.test_recalcular_decisao import ctx_com
+
+    # (status pela v1, p_ruim da heuristica, ilegivel do modelo)
+    casos = {
+        "as_duas_rejeitam": (S.REJEITADA_QUALIDADE, 0.95, 0.99),
+        "so_a_v1": (S.REJEITADA_QUALIDADE, 0.95, 0.10),
+        "so_a_v2": (S.FILA_HUMANA, 0.10, 0.99),
+        "nenhuma": (S.FILA_HUMANA, 0.10, 0.10),
+        "humana": (S.APROVADA_HUMANO, 0.10, 0.99),
+    }
+    leituras = {}
+    for nome, (status, p_heur, p_modelo) in casos.items():
+        lei, foto = fx.leitura(db_session, lote_aud, status, fx.scores(p_heur))
+        db_session.add(
+            ResultadoInferencia(
+                foto_id=foto.id, modelo="qualidade@v1", saida={"ilegivel": p_modelo}
+            )
+        )
+        leituras[nome] = lei
+    fx.decisao(db_session, leituras["humana"], reais["auditor"].id, "aprovada")
+    auditoria.sortear_automaticas(db_session)
+    db_session.flush()
+    ctx = ctx_com(DetectorNulo(), None)
+    for versao in ("politica@v2", "politica@v1"):
+        recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": versao})
+        db_session.flush()
+    db_session.expire_all()
+
+    grupos = {
+        (g["detector"], g["politica"]): g["com_foto"]
+        for g in qualidade_mod.por_detector(db_session)
+    }
+    assert grupos == {("heuristica@v1", "politica@v1"): 5}
+    assert db_session.get(Leitura, leituras["humana"].id).status_atual == S.APROVADA_HUMANO.value
+    # cada rejeitada vigente tem auditoria valida da decisao da v1, e so ela
+    validas = db_session.execute(
+        select(AuditoriaAmostral.leitura_id, HistoricoStatus.detalhe["politica"].astext)
+        .join(HistoricoStatus, HistoricoStatus.id == AuditoriaAmostral.historico_id)
+        .where(AuditoriaAmostral.invalidada_em.is_(None))
+    ).all()
+    rejeitadas = {leituras["as_duas_rejeitam"].id, leituras["so_a_v1"].id}
+    assert sorted(validas) == sorted((lid, "politica@v1") for lid in rejeitadas)
+    for aud in db_session.scalars(
+        select(AuditoriaAmostral).where(AuditoriaAmostral.invalidada_em.is_(None))
+    ):
+        _decidir_auditoria(db_session, aud, reais["auditor2"].id, "reprovada", "fora_de_foco")
+    db_session.flush()
+    estrato = auditoria._estratos(db_session, "auto_rejeitada")[
+        ("heuristica@v1", "politica@v1", "qualidade")
+    ]
+    assert len(estrato) == 2
+
+
+def test_lotes_de_calibracao_da_politica_entram_mesmo_fora_do_banco(
+    db_session, reais, lote_aud, sempre, monkeypatch
+):
+    """Lote de treino/calibracao declarado na politica, que ainda nao foi ingerido quando
+    ela ativa, entra em `lotes_anteriores` e nunca e medido quando chegar."""
+    from inspecao.inference import politica as politica_mod
+    from inspecao.inference.politica import Politica
+    from inspecao.models import AtivacaoPolitica
+
+    fora = "PSP_EXTRATLEITIMPL_990126_0099"
+    p = Politica(versao="politica@teste-split", lotes_de_calibracao=(fora,))
+    monkeypatch.setitem(politica_mod.POLITICAS, p.versao, p)
+    _auto_rejeitada_auditada(db_session, lote_aud, p.versao, reais["auditor2"].id)
+    ativacao = db_session.get(AtivacaoPolitica, p.versao)
+    assert fora in ativacao.lotes_anteriores and lote_aud.nome in ativacao.lotes_anteriores
+    chegou = fx.lote(db_session, "0126_0099", date(2026, 1, 9))
+    assert chegou.nome == fora
+    _auto_rejeitada_auditada(db_session, chegou, p.versao, reais["auditor2"].id)
+    db_session.flush()
+    assert _estrato(db_session, p.versao) == []
+
+
+def test_ativacao_e_gravada_so_por_decisao_da_maquina(db_session, lote_aud):
+    """O mesmo filtro do retroativo da migracao: ator `modelo:*`."""
+    from inspecao.models import AtivacaoPolitica
+
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    registro = HistoricoStatus(
+        leitura_id=lei.id,
+        status=S.REJEITADA_QUALIDADE.value,
+        ator="usuario:1",
+        detalhe={"politica": "politica@teste-ator"},
+    )
+    db_session.add(registro)
+    db_session.flush()
+    auditoria.registrar_ativacao(db_session, registro)
+    assert db_session.get(AtivacaoPolitica, "politica@teste-ator") is None
+
+
+@pytest.mark.parametrize("desfecho", ["commit", "rollback"])
+def test_corrida_de_duas_primeiras_decisoes_na_ativacao(desfecho):
+    """Duas transacoes reais ativam a mesma politica ao mesmo tempo. A segunda espera o
+    lock da chave; se a primeira commita, a segunda nao grava nada (vale a primeira
+    decisao); se a primeira desfaz, a segunda grava a dela. Nenhuma das duas falha."""
+    import threading
+
+    from inspecao.db import engine
+    from inspecao.models import AtivacaoPolitica
+
+    politica = f"politica@teste-corrida-{desfecho}"
+    prep = Session(engine, expire_on_commit=False)
+    lote = fx.lote(prep, "0126_0097", date(2026, 1, 8))
+    lei_a, _ = fx.leitura(prep, lote, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    lei_b, _ = fx.leitura(prep, lote, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    prep.commit()
+
+    def decisao(sessao, leitura_id):
+        h = HistoricoStatus(
+            leitura_id=leitura_id,
+            status=S.REJEITADA_QUALIDADE.value,
+            ator="modelo:heuristica@v1",
+            detalhe={"politica": politica},
+        )
+        sessao.add(h)
+        sessao.flush()
+        auditoria.registrar_ativacao(sessao, h)
+        return h.id
+
+    a, b = Session(engine), Session(engine)
+    resultado: dict = {}
+    try:
+        b.execute(text("SET lock_timeout = '10s'"))
+        h_a = decisao(a, lei_a.id)
+
+        def segunda():
+            try:
+                resultado["h_b"] = decisao(b, lei_b.id)
+                b.commit()
+            except Exception as erro:  # o teste falha abaixo com o erro
+                resultado["erro"] = erro
+
+        t = threading.Thread(target=segunda, daemon=True)
+        t.start()
+        t.join(1.0)
+        assert t.is_alive()  # B espera o lock da chave de A
+        getattr(a, desfecho)()
+        t.join(15)
+        assert not t.is_alive() and "erro" not in resultado, resultado.get("erro")
+        with Session(engine) as s:
+            ativacao = s.get(AtivacaoPolitica, politica)
+            esperado = h_a if desfecho == "commit" else resultado["h_b"]
+            assert ativacao.historico_id == esperado
+            assert lote.nome in ativacao.lotes_anteriores
+    finally:
+        a.close()
+        b.rollback()
+        b.execute(text("RESET lock_timeout"))
+        b.commit()
+        b.close()
+        with engine.begin() as c:
+            c.execute(text("DELETE FROM ativacoes_politica WHERE politica = :p"), {"p": politica})
+            c.execute(text("DELETE FROM lotes WHERE id = :i"), {"i": lote.id})
+        prep.close()

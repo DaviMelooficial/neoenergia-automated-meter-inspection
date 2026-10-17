@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -25,6 +26,7 @@ import pandas as pd
 # politica@v1 (app/backend/src/inspecao/inference/politica.py), o mesmo de mlinsp.evaluate,
 # que nao e importado aqui para nao carregar o torch.
 LIMIAR_V1 = 0.85
+log = logging.getLogger(__name__)
 RAIZ_ML = Path(__file__).resolve().parents[2]
 COLUNAS = ["arquivo", "lote", "p_ilegivel", "p_ruim_heuristica", "legivel_inspecao", "inspetor"]
 PREENCHIDAS = ["legivel_inspecao", "inspetor"]
@@ -45,10 +47,21 @@ def so_o_modelo_rejeita(
 
 def preservar_inspecao(nova: pd.DataFrame, anterior: pd.DataFrame | None) -> pd.DataFrame:
     """Copia `legivel_inspecao` e `inspetor` ja preenchidos na amostra anterior (mesmo
-    arquivo). Arquivo que saiu da amostra nova nao volta."""
+    arquivo). Arquivo que saiu da amostra nova nao volta; se ele ja tinha veredito, avisa
+    (WARNING): o rotulo dele continua no banco ate a rodada ser apagada e reimportada."""
     if anterior is None:
         return nova
     feito = anterior.set_index("arquivo")[PREENCHIDAS].fillna("").astype(str)
+    perdidos = sorted(
+        a for a in feito.index[feito["legivel_inspecao"] != ""] if a not in set(nova["arquivo"])
+    )
+    if perdidos:
+        log.warning(
+            "%d fotos ja inspecionadas sairam da amostra regerada (o veredito fica so no CSV "
+            "antigo e no banco): %s",
+            len(perdidos),
+            ", ".join(perdidos),
+        )
     saida = nova.copy()
     for c in PREENCHIDAS:
         saida[c] = saida["arquivo"].map(feito[c]).fillna(saida[c])
@@ -66,6 +79,7 @@ def gerar(rodada: str, raiz: Path = RAIZ_ML) -> tuple[Path, int]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--rodada", required=True)
     args = ap.parse_args(argv)

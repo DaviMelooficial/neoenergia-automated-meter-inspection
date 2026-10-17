@@ -1,4 +1,5 @@
 import json
+import logging
 
 import pandas as pd
 
@@ -32,7 +33,7 @@ def test_so_entra_o_que_so_o_modelo_rejeita_com_limiar_inclusivo():
     assert (a["legivel_inspecao"] == "").all() and (a["inspetor"] == "").all()
 
 
-def test_regerar_preserva_o_que_ja_foi_inspecionado():
+def test_regerar_preserva_o_que_ja_foi_inspecionado(caplog):
     nova = so_o_modelo_rejeita(_base(), 0.976)
     anterior = pd.DataFrame(
         {
@@ -41,7 +42,10 @@ def test_regerar_preserva_o_que_ja_foi_inspecionado():
             "inspetor": ["davi", "davi"],
         }
     )
-    r = preservar_inspecao(nova, anterior).set_index("arquivo")
+    with caplog.at_level(logging.WARNING, logger="mlinsp.amostra_inspecao_m7"):
+        r = preservar_inspecao(nova, anterior).set_index("arquivo")
+    avisos = [x.getMessage() for x in caplog.records if x.levelname == "WARNING"]
+    assert len(avisos) == 1 and "1 fotos ja inspecionadas" in avisos[0] and "fora.jpg" in avisos[0]
     assert (r.at["a.jpg", "legivel_inspecao"], r.at["a.jpg", "inspetor"]) == ("0", "davi")
     assert (r.at["d.jpg", "legivel_inspecao"], r.at["d.jpg", "inspetor"]) == ("", "")
     assert "fora.jpg" not in r.index

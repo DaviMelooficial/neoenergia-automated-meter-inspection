@@ -159,8 +159,10 @@ def test_recalcular_decisao_muda_status_sem_abrir_imagem(db_session, staging, tm
         "politica": "politica@v0",
     }
     assert decisao.detalhe == {"politica": "politica@v0", "decisao": "humano", "recalculo": True}
-    # Decisao que nao muda nao ganha historico.
-    assert n_historico(db_session, nitida) == historico_nitida
+    # Mesma decisao (fila), mas de outra politica: e regravada, para a ultima linha do
+    # historico dizer quem decide (atribuicao por politica, estrato e sorteio).
+    assert n_historico(db_session, nitida) == historico_nitida + 2
+    assert nitida.historico[-1].detalhe["politica"] == "politica@v0"
 
     # E de volta para v1, sem payload de politica: usa a do worker.
     fila.enfileirar(db_session, TipoJob.RECALCULAR_DECISAO, {"lote_id": lote.id})
@@ -168,6 +170,13 @@ def test_recalcular_decisao_muda_status_sem_abrir_imagem(db_session, staging, tm
     assert status_por_linha(db_session, lote)[LINHAS_PRETAS[0]] == (
         StatusLeitura.REJEITADA_QUALIDADE.value
     )
+    db_session.expire_all()
+    assert nitida.historico[-1].detalhe["politica"] == "politica@v1"
+    # Decisao que nao muda, da mesma politica que ja decidiu: nao ganha historico.
+    antes = n_historico(db_session, nitida)
+    fila.enfileirar(db_session, TipoJob.RECALCULAR_DECISAO, {"lote_id": lote.id})
+    assert esvaziar_fila(proibido, db_session) == 1
+    assert n_historico(db_session, nitida) == antes
     # Nenhum resultado novo: so os da triagem original.
     assert db_session.scalar(
         select(func.count())

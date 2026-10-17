@@ -87,15 +87,27 @@ def publicar(temporario: Path, destino: Path) -> None:
 
 
 def gravar_contrato(contrato: dict, caminhos: list[Path]) -> list[Path]:
-    """Grava o json do contrato em cada caminho, menos onde ja ha um contrato com o mesmo
-    `onnx_sha256`: reexportar o mesmo arquivo nao troca o commit e a data que o json
-    versionado cita pelos da reexportacao. Devolve os caminhos gravados."""
+    """Grava o json do contrato em cada caminho. Onde ja ha um contrato com o mesmo
+    `onnx_sha256`: identico, nao regrava; diferente em qualquer campo (commit, limiar,
+    temperatura, paridade...), recusa, porque o mesmo .onnx passaria a ser descrito por
+    outro contrato e o json versionado deixaria de dizer de onde ele veio. Devolve os
+    caminhos gravados."""
+    normalizado = json.loads(json.dumps(contrato, default=qualidade._json_padrao))
     gravados = []
     for caminho in caminhos:
         if caminho.is_file():
             atual = json.loads(caminho.read_text(encoding="utf-8"))
-            if atual.get("onnx_sha256") == contrato["onnx_sha256"]:
-                continue
+            if atual.get("onnx_sha256") == normalizado["onnx_sha256"]:
+                if atual == normalizado:
+                    continue
+                campos = sorted(
+                    k for k in set(atual) | set(normalizado) if atual.get(k) != normalizado.get(k)
+                )
+                raise SystemExit(
+                    f"{caminho} ja descreve este .onnx (mesmo sha256) com outro contrato "
+                    f"(campos diferentes: {', '.join(campos)}). O json versionado nao e "
+                    "regravado: se a mudanca e intencional, exporte com --versao nova."
+                )
         qualidade.salvar_json(caminho, contrato)
         gravados.append(caminho)
     return gravados

@@ -17,7 +17,14 @@ from inspecao.inference import politica as politica_mod
 from inspecao.inference.detector import Detector, decodificar
 from inspecao.inference.politica import POLITICA_ATUAL, Decisao, Politica
 from inspecao.jobs import fila
-from inspecao.models import AuditoriaAmostral, Foto, Leitura, Lote, ResultadoInferencia
+from inspecao.models import (
+    AuditoriaAmostral,
+    Foto,
+    HistoricoStatus,
+    Leitura,
+    Lote,
+    ResultadoInferencia,
+)
 from inspecao.storage.local import LocalFileStorage
 
 log = logging.getLogger(__name__)
@@ -220,14 +227,50 @@ def triagem_qualidade(ctx: Contexto, sessao: Session, payload: dict) -> None:
     _sair_da_triagem(sessao, leitura, decisao, ator, p_ruim, detalhe)
 
 
+# Saidas da triagem: a linha do historico que diz qual detector e politica decidiram por
+# ultimo (a mesma definicao de `monitoramento.qualidade.por_detector`).
+SAIDAS_DA_TRIAGEM = (
+    StatusLeitura.REJEITADA_QUALIDADE.value,
+    StatusLeitura.VALIDACAO_LEITURA.value,
+    StatusLeitura.FILA_HUMANA.value,
+)
+
+
+def _ultima_decisao_automatica(
+    sessao: Session, leitura_ids: list[int]
+) -> dict[int, tuple[str, str | None]]:
+    """leitura_id -> (ator, politica) da ultima saida da triagem gravada pela maquina."""
+    if not leitura_ids:
+        return {}
+    consulta = (
+        select(
+            HistoricoStatus.leitura_id,
+            HistoricoStatus.ator,
+            HistoricoStatus.detalhe["politica"].astext,
+        )
+        .where(
+            HistoricoStatus.leitura_id.in_(leitura_ids),
+            HistoricoStatus.ator.like("modelo:%"),
+            HistoricoStatus.status.in_(SAIDAS_DA_TRIAGEM),
+        )
+        .distinct(HistoricoStatus.leitura_id)
+        .order_by(HistoricoStatus.leitura_id, HistoricoStatus.id.desc())
+    )
+    return {lid: (ator, politica) for lid, ator, politica in sessao.execute(consulta)}
+
+
 def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
     """Reaplica uma politica aos resultados ja gravados do lote, sem abrir imagem.
 
     Payload: `{lote_id, politica}` (versao, ex.: "politica@v1"; padrao: a do worker).
     So mexe em leituras em ESTADOS_REDECIDIVEIS sem reserva ativa, travadas por
     `_travar_redecidiveis` ate o commit, usando o resultado mais recente do detector
-    da politica para a foto principal. Leitura cuja decisao nao muda nao ganha linha
-    de historico.
+    da politica para a foto principal. Leitura cuja decisao nao muda E cuja ultima
+    decisao automatica ja e desta politica (mesmo ator) nao ganha linha de historico.
+    Decisao igual vinda de outra politica e regravada (reabre e decide de novo, pelo
+    `transicionar`): sem isso, voltar da v2 para a v1 deixaria a ultima linha citando a
+    v2, e a atribuicao por politica (`/metricas/qualidade`), o estrato de falso positivo
+    e o sorteio da auditoria da v1 ficariam com a v2.
     """
     lote = sessao.get(Lote, int(payload["lote_id"]))
     if lote is None:
@@ -256,11 +299,13 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         select(func.count()).select_from(consulta.where(_redecidivel()).order_by(None).subquery())
     )
     linhas = _travar_redecidiveis(sessao, consulta)
+    ultimas = _ultima_decisao_automatica(sessao, [leitura.id for leitura, _, _ in linhas])
 
     contagem: Counter[str] = Counter()
     for leitura, modelo, saida in linhas:
         decisao, p_ruim, detalhe = _decidir(politica, modelo, saida)
-        if DESTINO[decisao].value == leitura.status_atual:
+        mesma = DESTINO[decisao].value == leitura.status_atual
+        if mesma and ultimas.get(leitura.id) == (f"modelo:{modelo}", politica.versao):
             contagem["inalterada"] += 1
             continue
         # Reconfere a linha antes de reabrir (defesa em profundidade: o lock acima ja

@@ -54,6 +54,10 @@ class Politica:
     # outro arquivo (outra semente da mesma rodada muda o sha).
     rodada: str | None = None
     onnx_sha256: str | None = None
+    # Lotes que treinaram, validaram ou calibraram a politica (e o detector dela). Entram em
+    # `ativacoes_politica.lotes_anteriores` mesmo que nao estejam no banco na ativacao: o
+    # falso positivo da politica nunca e medido neles (`auditoria.registrar_ativacao`).
+    lotes_de_calibracao: tuple[str, ...] = ()
 
     def decidir(self, saida: Mapping[str, Any]) -> tuple[Decisao, float | None]:
         """Devolve (decisao, p_ruim). p_ruim = maior score entre as `chaves` presentes."""
@@ -73,8 +77,23 @@ class Politica:
 
 # Versao publicada e imutavel: o historico de status grava o nome da versao que
 # decidiu. Limiar novo = Politica nova (proximo numero livre), nunca edicao destas.
+# Os 4 lotes da "Base cliente". A v1 foi calibrada neles (Lab 2 e a inspecao das 200 do M5
+# sorteiam nos 4); a v2 usa o split temporal do M7 (`ml/src/mlinsp/particao.py`,
+# SPLIT_POR_LOTE): treino 200526 e 210526, validacao 220526, teste 030726, e a inspecao das
+# 355 (calibracao da ativacao) cai nos 4.
+LOTES_DA_BASE = (
+    "PSP_EXTRATLEITIMPL_200526_0352",
+    "PSP_EXTRATLEITIMPL_210526_0335",
+    "PSP_EXTRATLEITIMPL_220526_0408",
+    "PSP_EXTRATLEITIMPL_030726_0121",
+)
 POLITICA_V0 = Politica(versao="politica@v0")
-POLITICA_V1 = Politica(versao="politica@v1", modelo="heuristica@v1", limiar_rejeita=0.85)
+POLITICA_V1 = Politica(
+    versao="politica@v1",
+    modelo="heuristica@v1",
+    limiar_rejeita=0.85,
+    lotes_de_calibracao=LOTES_DA_BASE,
+)
 # Rodada 20261016-213656, semente 0: menor p_ilegivel rejeitado corretamente acima da foto
 # lida mais alta da validacao (0,9613), 0,97527, arredondado para cima em 3 casas. Os mesmos
 # valores estao em ml/artifacts/qualidade@v1.json (e na copia em ml/reports/<rodada>/).
@@ -85,6 +104,7 @@ POLITICA_V2 = Politica(
     chaves=("ilegivel",),
     rodada="20261016-213656",
     onnx_sha256="ab653b59e90e5e8e16637bc5ead99f1beac988df693291f724459b8e53304b72",
+    lotes_de_calibracao=LOTES_DA_BASE,
 )
 
 POLITICAS: dict[str, Politica] = {p.versao: p for p in (POLITICA_V0, POLITICA_V1, POLITICA_V2)}

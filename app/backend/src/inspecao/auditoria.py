@@ -41,8 +41,8 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, exists, func, or_, select, text
-from sqlalchemy.dialects.postgresql import aggregate_order_by, insert
+from sqlalchemy import String, case, column, exists, func, literal, or_, select, text
+from sqlalchemy.dialects.postgresql import ARRAY, aggregate_order_by, insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -149,25 +149,37 @@ def sortear_decisao_automatica(
 def registrar_ativacao(db: Session, decisao: HistoricoStatus) -> None:
     """Grava a ativacao da politica de `decisao` (decisao automatica), se for a primeira.
 
-    `lotes_anteriores` = os lotes que existem agora, inclusive o da propria decisao: a
-    medida de falso positivo da politica so conta lotes ingeridos depois dela
-    (`_estratos`). O lote em que ela decide pela primeira vez fica de fora, o lado
-    conservador: nao da para separar um lote novo de um antigo reprocessado. Concorrente
-    com outro worker: `ON CONFLICT DO NOTHING`, vale a primeira. Sem commit."""
-    politica = (decisao.detalhe or {}).get("politica")
-    if not politica:
+    `lotes_anteriores` = os lotes que existem agora, inclusive o da propria decisao, mais
+    os lotes de treino, validacao e calibracao declarados na politica
+    (`Politica.lotes_de_calibracao`), que podem ainda nao estar no banco: a medida de
+    falso positivo da politica so conta lotes ingeridos depois dela (`_estratos`). O lote em
+    que ela decide pela primeira vez fica de fora, o lado conservador: nao da para separar
+    um lote novo de um antigo reprocessado. So decisao da maquina (`ator` modelo:*), o
+    mesmo filtro do retroativo da migracao. Concorrente com outro worker:
+    `ON CONFLICT DO NOTHING`, vale a primeira. Sem commit."""
+    from inspecao.inference import politica as politica_mod
+
+    versao = (decisao.detalhe or {}).get("politica")
+    if not versao or not (decisao.ator or "").startswith("modelo:"):
         return
-    if db.get(AtivacaoPolitica, politica) is not None:
+    if db.get(AtivacaoPolitica, versao) is not None:
         return
+    registrada = politica_mod.POLITICAS.get(versao)
+    declarados = registrada.lotes_de_calibracao if registrada else ()
+    no_banco = select(Lote.nome).union(
+        select(func.unnest(literal(list(declarados), ARRAY(String))))
+    )
     lotes = select(
-        func.coalesce(func.array_agg(aggregate_order_by(Lote.nome, Lote.nome)), text("'{}'"))
-    ).scalar_subquery()
+        func.coalesce(
+            func.array_agg(aggregate_order_by(column("nome"), column("nome"))), text("'{}'")
+        )
+    ).select_from(no_banco.subquery())
     db.execute(
         insert(AtivacaoPolitica)
-        .values(politica=politica, historico_id=decisao.id, lotes_anteriores=lotes)
+        .values(politica=versao, historico_id=decisao.id, lotes_anteriores=lotes.scalar_subquery())
         .on_conflict_do_nothing(index_elements=[AtivacaoPolitica.politica])
     )
-    log.info("politica %s ativada na decisao %s (historico)", politica, decisao.id)
+    log.info("politica %s ativada na decisao %s (historico)", versao, decisao.id)
 
 
 def _travar(db: Session, leitura_id: int) -> bool:

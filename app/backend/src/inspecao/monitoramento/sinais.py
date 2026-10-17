@@ -45,9 +45,12 @@ def politica_ativa() -> Politica:
     """A politica que o worker aplica hoje: a do detector configurado (`politica_para`,
     a mesma resolucao do worker), e nao `POLITICA_ATUAL`."""
     from inspecao.config import get_settings
-    from inspecao.inference.detector import nome_do_detector
+    from inspecao.inference.detector import DetectorMalConfigurado, nome_do_detector
 
-    return politica_mod.politica_para(nome_do_detector(get_settings()))
+    try:
+        return politica_mod.politica_para(nome_do_detector(get_settings()))
+    except (RuntimeError, LookupError) as erro:
+        raise DetectorMalConfigurado(f"detector de qualidade mal configurado: {erro}") from erro
 
 
 def obter_politica(versao: str | None) -> Politica:

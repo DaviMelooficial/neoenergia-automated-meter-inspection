@@ -151,8 +151,10 @@ def test_contrato_nao_e_regravado_quando_o_sha_nao_muda(tmp_path):
     artefato, copia = tmp_path / "qualidade@v1.json", tmp_path / "r1" / "qualidade.json"
     primeiro = {"versao": "qualidade@v1", "onnx_sha256": "aaa", "commit": "c1"}
     assert gravar_contrato(primeiro, [artefato, copia]) == [artefato, copia]  # primeira vez
+    assert gravar_contrato(dict(primeiro), [artefato, copia]) == []  # identico: mantido
     reexportado = primeiro | {"commit": "c2"}
-    assert gravar_contrato(reexportado, [artefato, copia]) == []
+    with pytest.raises(SystemExit, match="campos diferentes: commit"):
+        gravar_contrato(reexportado, [artefato, copia])
     assert '"c1"' in artefato.read_text() and '"c1"' in copia.read_text()
     outro = primeiro | {"onnx_sha256": "bbb", "commit": "c3"}
     assert gravar_contrato(outro, [artefato, copia]) == [artefato, copia]

@@ -7,7 +7,7 @@ sem tocar em imagem.
 | Implementacao       | Marco | Descricao                                          |
 | DetectorNulo        | M3    | devolve {}, tudo vai para a fila humana            |
 | DetectorHeuristico  | M5    | OpenCV, ver plano 04 e inference/heuristics.py     |
-| DetectorOnnx        | M7    | modelo treinado via onnxruntime                    |
+| DetectorOnnx        | M7    | modelo treinado via onnxruntime, qualidade_onnx.py |
 """
 
 from typing import Any, Protocol, runtime_checkable
@@ -19,9 +19,10 @@ from inspecao.config import Settings
 
 @runtime_checkable
 class Detector(Protocol):
-    """`avaliar` devolve o que vai para `resultados_inferencia.saida`: um score em
-    [0, 1] por classe de qualidade (chaves de `politica.CLASSES`) e, opcionalmente,
-    outras chaves de diagnostico, que a politica ignora."""
+    """`avaliar` devolve o que vai para `resultados_inferencia.saida`: scores em [0, 1]
+    no nivel de cima (as classes de `politica.CLASSES` e, no modelo treinado, `ilegivel`)
+    e, opcionalmente, outras chaves de diagnostico. Cada politica declara quais chaves le
+    (`Politica.chaves`)."""
 
     nome: str  # ex.: "nulo@v0", "heuristica@v1", "qualidade@v2"
 
@@ -52,23 +53,24 @@ class DetectorHeuristico:
         return heuristics.avaliar(imagem)
 
 
-DETECTORES: dict[str, type[DetectorNulo] | type[DetectorHeuristico]] = {
-    "nulo": DetectorNulo,
-    "heuristica": DetectorHeuristico,
-}
+DETECTORES = ("nulo", "heuristica", "onnx")
 
 
 def carregar_detector(settings: Settings) -> Detector:
-    """Escolhe o detector por configuracao. Chamado UMA vez por worker."""
-    if settings.modelo_qualidade_ativo:
-        # DetectorOnnx entra no marco M7. Ate la, ativar o modelo e erro de config.
-        raise RuntimeError("MODELO_QUALIDADE_ATIVO=true, mas DetectorOnnx so existe a partir do M7")
-    try:
-        return DETECTORES[settings.detector_qualidade]()
-    except KeyError:
-        raise RuntimeError(
-            f"DETECTOR_QUALIDADE={settings.detector_qualidade!r}; use um de {sorted(DETECTORES)}"
-        ) from None
+    """Escolhe o detector por configuracao. Chamado UMA vez por worker: o modelo ONNX
+    e carregado aqui e reaproveitado em todos os jobs.
+
+    MODELO_QUALIDADE_ATIVO=true equivale a DETECTOR_QUALIDADE=onnx (nome antigo do M3)."""
+    escolha = "onnx" if settings.modelo_qualidade_ativo else settings.detector_qualidade
+    if escolha == "nulo":
+        return DetectorNulo()
+    if escolha == "heuristica":
+        return DetectorHeuristico()
+    if escolha == "onnx":
+        from inspecao.inference.qualidade_onnx import DetectorOnnx
+
+        return DetectorOnnx(settings.caminho_absoluto(settings.modelo_qualidade_path))
+    raise RuntimeError(f"DETECTOR_QUALIDADE={escolha!r}; use um de {list(DETECTORES)}")
 
 
 def decodificar(dados: bytes) -> np.ndarray:

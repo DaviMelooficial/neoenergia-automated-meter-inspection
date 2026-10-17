@@ -1,9 +1,10 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo tipos-front \
-        api-dev worker-dev front-dev test lint up down logs reset health lab02
+        api-dev worker-dev front-dev test lint up down logs reset health lab02 \
+        m7-treinar m7-calibrar m7-avaliar m7-exportar m7-paridade
 
 help:  ## lista os alvos disponiveis
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	 | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,34 @@ lint:  ## roda os linters
 
 lab02:  ## consolida os rotulos e executa lab-02/lab02.ipynb do zero (saidas no .ipynb)
 	bash lab-02/executar.sh
+
+# ---------------------------------------------------------------------------
+# M7 (modelo de qualidade). Exige ml/artifacts/heuristicas_exportacao.csv
+# (make relatorio-heuristicas). RODADA = pasta criada em ml/reports/ pelo m7-treinar.
+# ---------------------------------------------------------------------------
+
+M7_ENTRADAS = --base "../Base cliente" --exportacao artifacts/heuristicas_exportacao.csv
+
+m7-treinar:  ## treina o modelo de qualidade (2 estagios, 3 sementes + repeticao); cria a RODADA
+	cd ml && uv run python -m mlinsp.train_quality $(M7_ENTRADAS)
+
+m7-calibrar:  ## temperatura e limiar de rejeicao na validacao (uso: make m7-calibrar RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-calibrar RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.calibrate --rodada $(RODADA)
+
+m7-avaliar:  ## metricas no teste contra a heuristica e criterio de entrada (RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-avaliar RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.evaluate --rodada $(RODADA) $(M7_ENTRADAS)
+
+m7-exportar:  ## gera ml/artifacts/qualidade.onnx + qualidade.json com paridade < 1e-4 (RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-exportar RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.export_onnx --rodada $(RODADA) --base "../Base cliente"
+
+m7-paridade:  ## DetectorOnnx do backend contra o torch na base inteira, sem banco (RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-paridade RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd app/backend && uv run python -m inspecao.inference.paridade_onnx \
+	  --referencia ../../ml/artifacts/m7/$(RODADA)/p_ilegivel_base.csv \
+	  --base "../../Base cliente" --saida ../../ml/reports/$(RODADA)/paridade_backend.json
 
 # ---------------------------------------------------------------------------
 # Stack completa

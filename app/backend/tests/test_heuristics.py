@@ -6,6 +6,8 @@ este teste quebrar, o backend deixou de calcular o mesmo numero que o notebook.
 A paridade nas 12.340 fotos reais esta medida em ml/reports/heuristicas.md.
 """
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -174,8 +176,11 @@ def test_carregar_detector_por_configuracao():
     assert isinstance(carregar_detector(Settings(detector_qualidade="nulo")), DetectorNulo)
     with pytest.raises(RuntimeError, match="DETECTOR_QUALIDADE"):
         carregar_detector(Settings(detector_qualidade="inexistente"))
-    with pytest.raises(RuntimeError, match="M7"):
-        carregar_detector(Settings(modelo_qualidade_ativo=True))
+    # Sem o .onnx no caminho configurado, o worker nao sobe (nao cai em outro detector).
+    with pytest.raises(RuntimeError, match="ausente"):
+        carregar_detector(
+            Settings(modelo_qualidade_ativo=True, modelo_qualidade_path=Path("/nao/existe.onnx"))
+        )
 
 
 def test_politica_v1_so_rejeita_acima_do_limiar_e_nunca_aprova():
@@ -203,7 +208,7 @@ def test_politica_v0_manda_tudo_para_humano():
 def test_registro_de_politicas():
     assert POLITICA_ATUAL is POLITICA_V1
     assert obter("politica@v0") is POLITICA_V0
-    assert set(POLITICAS) == {"politica@v0", "politica@v1"}
+    assert set(POLITICAS) == {"politica@v0", "politica@v1", "politica@v2"}
     assert not POLITICA_V1.aceita("nulo@v0")
     with pytest.raises(LookupError):
         obter("politica@v9")

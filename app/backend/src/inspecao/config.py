@@ -79,8 +79,9 @@ class Settings(BaseSettings):
     worker_poll_segundos: int = 2
     worker_max_tentativas: int = 3
 
-    # Modelos. DETECTOR_QUALIDADE escolhe o detector do worker enquanto nao ha
-    # modelo treinado: "heuristica" (M5, padrao) ou "nulo" (tudo para humano).
+    # Modelos. DETECTOR_QUALIDADE escolhe o detector do worker: "heuristica" (M5,
+    # padrao), "onnx" (modelo do M7 em MODELO_QUALIDADE_PATH, com o qualidade.json ao
+    # lado) ou "nulo" (tudo para humano). A politica segue o detector (politica_para).
     detector_qualidade: str = "heuristica"
     modelo_qualidade_path: Path = Path("./ml/artifacts/qualidade.onnx")
     modelo_qualidade_ativo: bool = False

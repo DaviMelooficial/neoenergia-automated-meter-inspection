@@ -13,10 +13,15 @@ Regras de cada rodada (garantidas aqui, nao na interface):
   cego: a resposta tambem nao traz as versoes divergentes (desvio consciente da
   regra 4 do doc 05, secao 4, pendente de decisao).
 
-Cegueira tambem vale para os agregados: o kappa por par de `a`/`b`/`desempate`
-com n pequeno revela, por diferenca antes e depois do proprio voto, o voto do
-outro. Por isso so admin ou quem nao votou nas rodadas consultadas ve esses
-numeros (`pode_ver_consolidacao`).
+Cegueira tambem vale para os agregados, e a regra e simples: o kappa e a
+consolidacao de qualquer consulta que inclua `a`, `b` ou `desempate` sao so de
+admin, e admin nao rotula nessas rodadas. Decidir pelo voto passado nao basta: o
+terceiro do desempate nunca votou em a/b, consultaria a+b e depois receberia a
+foto divergente ja sabendo os votos; quem votou na a compararia `lab02+b` com o
+`rotulos.csv` versionado.
+
+A ordem do `/proxima` e propria de cada rotulador (md5 de foto e usuario): com
+uma ordem unica, um rotulador saberia qual foto o outro vai receber.
 """
 
 import csv
@@ -108,8 +113,8 @@ def proxima_foto(db: Session, usuario_id: int, rodada: RodadaRotulagem) -> tuple
     """Proxima foto da rodada e quantas ainda restam para este usuario.
 
     Fica de fora a foto que ja tem rotulo nesta rodada, de qualquer pessoa: cada
-    rodada rotula cada foto uma vez. A ordem e pelo md5 do nome do arquivo, que
-    intercala os lotes e e estavel entre chamadas.
+    rodada rotula cada foto uma vez. A ordem e pelo md5 de "foto:usuario": estavel
+    entre chamadas, intercala os lotes e e diferente para cada rotulador.
     """
     filtro = and_(
         condicao_elegivel(db, usuario_id, rodada),
@@ -118,7 +123,10 @@ def proxima_foto(db: Session, usuario_id: int, rodada: RodadaRotulagem) -> tuple
     )
     restantes = db.scalar(select(func.count()).select_from(Foto).where(filtro)) or 0
     foto = db.scalars(
-        select(Foto).where(filtro).order_by(func.md5(Foto.nome_arquivo), Foto.id).limit(1)
+        select(Foto)
+        .where(filtro)
+        .order_by(func.md5(func.concat(Foto.id, ":", usuario_id)), Foto.id)
+        .limit(1)
     ).first()
     return foto, restantes
 
@@ -128,16 +136,22 @@ def foto_elegivel(db: Session, usuario_id: int, rodada: RodadaRotulagem, foto_id
     return db.scalar(consulta) is not None
 
 
-def pode_ver_consolidacao(db: Session, usuario: Usuario, rodadas: list[RodadaRotulagem]) -> bool:
-    """Admin sempre; os demais so quando nao votaram em nenhuma rodada cega consultada.
+def eh_admin(usuario: Usuario) -> bool:
+    return ORDEM_PAPEL[Papel(usuario.papel)] >= ORDEM_PAPEL[Papel.ADMIN]
 
-    A rodada `lab02` ja fechou (importada), entao seu kappa nao revela nada a ninguem.
-    """
-    cegas = [r.value for r in rodadas if r in RODADAS_DA_TELA]
-    if not cegas or ORDEM_PAPEL[Papel(usuario.papel)] >= ORDEM_PAPEL[Papel.ADMIN]:
-        return True
-    voto = select(Rotulo.id).where(Rotulo.usuario_id == usuario.id, Rotulo.rodada.in_(cegas))
-    return db.scalar(voto.limit(1)) is None
+
+def tem_rodada_cega(rodadas: list[RodadaRotulagem]) -> bool:
+    return any(r in RODADAS_DA_TELA for r in rodadas)
+
+
+def pode_ver_consolidacao(usuario: Usuario, rodadas: list[RodadaRotulagem]) -> bool:
+    """Rodada cega na consulta (sozinha ou com lab02): so admin. O lab02 ja fechou."""
+    return not tem_rodada_cega(rodadas) or eh_admin(usuario)
+
+
+def pode_rotular(usuario: Usuario, rodada: RodadaRotulagem) -> bool:
+    """Admin ve o kappa e o consolidado das rodadas cegas, entao nao vota nelas."""
+    return rodada not in RODADAS_DA_TELA or not eh_admin(usuario)
 
 
 def controle_por_foto(db: Session, foto_ids: list[int]) -> dict[int, bool]:

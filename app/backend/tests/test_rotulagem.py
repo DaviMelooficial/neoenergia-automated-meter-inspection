@@ -130,6 +130,10 @@ def test_migracao_reversivel():
     indices = {i["name"]: i for i in insp.get_indexes("rotulos")}
     assert indices["uq_rotulos_foto_rodada_usuario"]["unique"]
     assert indices["uq_rotulos_foto_rodada_externo"]["unique"]
+    dupla = indices["uq_rotulos_foto_usuario_dupla_cega"]
+    assert dupla["unique"] and dupla["column_names"] == ["foto_id", "usuario_id"]
+    colunas = {c["name"]: c for c in insp.get_columns("rotulos")}
+    assert colunas["controle"]["nullable"]
 
 
 def _inserir(db_session, **campos):
@@ -459,27 +463,112 @@ def test_consolidacao_das_rodadas_a_e_b_pareia_os_usuarios(client, lab02, rotula
     assert r.status_code == 200 and r.json()["pares"][0]["n"] == 1
 
 
-def test_consolidacao_das_rodadas_cegas_nao_vaza_por_diferencial(client, lab02, rotuladores):
-    """Com n = 1, kappa n/d quer dizer que concordaram e 0 que divergiram: quem votou
-    nao pode consultar o kappa das rodadas cegas, nem antes nem depois do voto."""
+COMBINACOES_CEGAS = [
+    ["a"],
+    ["b"],
+    ["desempate"],
+    ["a", "b"],
+    ["b", "desempate"],
+    ["a", "b", "desempate"],
+    ["lab02", "a"],
+    ["lab02", "b"],
+    ["lab02", "desempate"],
+]
+
+
+def _consultar(client, cab, rodadas):
+    return client.get("/rotulagem/consolidacao", params={"rodada": rodadas}, headers=cab)
+
+
+def test_consolidacao_das_rodadas_cegas_so_para_admin(client, lab02, rotuladores):
+    """Com n = 1, kappa n/d quer dizer que concordaram e 0 que divergiram. Supervisor
+    nao ve nenhuma combinacao com rodada cega, tenha votado ou nao; so o lab02."""
     cab = {k: login(client, rotuladores[k]) for k in ("sup1", "sup2", "sup3", "admin")}
     f1 = lab02[1].id
 
-    def consultar(quem, rodadas):
-        return client.get("/rotulagem/consolidacao", params={"rodada": rodadas}, headers=cab[quem])
+    def barrado(quem):
+        for rodadas in COMBINACOES_CEGAS:
+            r = _consultar(client, cab[quem], rodadas)
+            assert r.status_code == 403, (quem, rodadas, r.text)
+            assert "pares" not in r.json() and "rotuladores" not in r.json()
+        assert _consultar(client, cab[quem], ["lab02"]).status_code == 200
 
-    assert consultar("sup2", ["a", "b"]).status_code == 200  # ainda nao votou: nada a vazar
+    for quem in ("sup1", "sup2", "sup3"):
+        barrado(quem)  # antes de qualquer voto
     assert client.post(f"/rotulagem/{f1}", json=rotulo("a"), headers=cab["sup1"]).status_code == 201
     assert client.post(f"/rotulagem/{f1}", json=rotulo("b"), headers=cab["sup2"]).status_code == 201
-    for quem, propria in (("sup1", "a"), ("sup2", "b")):
-        for rodadas in (["a", "b"], [propria], ["a", "b", "desempate"], ["lab02", propria]):
-            r = consultar(quem, rodadas)
-            assert r.status_code == 403, (quem, rodadas, r.text)
-            assert "kappa" not in r.json() and "pares" not in r.json()
-        assert consultar(quem, ["lab02"]).status_code == 200  # lab02 ja fechou
-        assert consultar(quem, ["desempate"]).status_code == 200  # nao votou no desempate
-    assert consultar("sup3", ["a", "b"]).status_code == 200
-    assert consultar("admin", ["a", "b"]).json()["pares"][0]["n"] == 1
+    for quem in ("sup1", "sup2", "sup3"):
+        barrado(quem)  # depois: quem votou e quem nao votou
+    for rodadas in COMBINACOES_CEGAS:
+        assert _consultar(client, cab["admin"], rodadas).status_code == 200, rodadas
+    assert _consultar(client, cab["admin"], ["a", "b"]).json()["pares"][0]["n"] == 1
+
+
+def test_terceiro_do_desempate_nao_ve_a_e_b_antes_de_desempatar(client, lab02, rotuladores):
+    """O terceiro nunca votou em a/b: com a regra 'quem nao votou ve', ele leria os votos
+    de a e b e depois receberia a foto divergente. Agora: 403, e a foto chega cega."""
+    cab = {k: login(client, rotuladores[k]) for k in ("sup1", "sup2", "sup3")}
+    f2 = lab02[2].id
+    client.post(f"/rotulagem/{f2}", json=rotulo("a"), headers=cab["sup1"])
+    client.post(f"/rotulagem/{f2}", json=rotulo("b", "digital", False), headers=cab["sup2"])
+    for rodadas in (["a", "b"], ["a"], ["b"], ["lab02", "a"], ["desempate"]):
+        assert _consultar(client, cab["sup3"], rodadas).status_code == 403, rodadas
+    r = client.post("/rotulagem/proxima", params={"rodada": "desempate"}, headers=cab["sup3"])
+    assert r.status_code == 200 and r.json()["foto_id"] == f2
+    assert set(r.json()) == CAMPOS_PROXIMA
+
+
+@pytest.mark.parametrize("rodada", ["a", "b", "desempate"])
+def test_admin_nao_rotula_nas_rodadas_cegas(client, lab02, rotuladores, rodada):
+    cab = login(client, rotuladores["admin"])
+    r = client.post("/rotulagem/proxima", params={"rodada": rodada}, headers=cab)
+    assert r.status_code == 403 and "foto_id" not in r.json()
+    r = client.post(f"/rotulagem/{lab02[1].id}", json=rotulo(rodada), headers=cab)
+    assert r.status_code == 403
+    # continua consultando e exportando
+    assert _consultar(client, cab, [rodada]).status_code == 200
+    assert (
+        client.get("/rotulagem/export", params={"rodada": [rodada]}, headers=cab).status_code == 200
+    )
+
+
+def test_ordem_do_proxima_e_propria_de_cada_rotulador(
+    client, db_session, fotos, rotuladores, tmp_path
+):
+    """Com a mesma ordem para todos, sup1 saberia qual foto sup2 vai receber. Com
+    md5(foto:usuario), a sequencia de cada um e estavel e diferente da do outro."""
+    caminho = tmp_path / "rotulos.csv"
+    escrever_csv(caminho, [linha(i, "ext_x", "digital") for i in fotos])  # amostra de 6
+    importador.importar(db_session, caminho)
+    db_session.flush()
+
+    # sem gravar, o /proxima repete a mesma foto: estavel por usuario
+    for quem in ("sup1", "sup2"):
+        cab = login(client, rotuladores[quem])
+        ids = {
+            client.post("/rotulagem/proxima", params={"rodada": "a"}, headers=cab).json()["foto_id"]
+            for _ in range(3)
+        }
+        assert len(ids) == 1, quem
+
+    esperadas = {
+        quem: sorted(
+            (f.id for f in fotos.values()),
+            key=lambda fid, uid=rotuladores[quem].id: (
+                hashlib.md5(f"{fid}:{uid}".encode()).hexdigest(),
+                fid,
+            ),
+        )
+        for quem in ("sup1", "sup2")
+    }
+    assert esperadas["sup1"] != esperadas["sup2"]
+    primeira = {
+        quem: client.post(
+            "/rotulagem/proxima", params={"rodada": "a"}, headers=login(client, rotuladores[quem])
+        ).json()["foto_id"]
+        for quem in ("sup1", "sup2")
+    }
+    assert primeira == {quem: esperadas[quem][0] for quem in ("sup1", "sup2")}
 
 
 def test_rodadas_cegas_se_excluem_por_rotulador_e_foto(client, db_session, lab02, rotuladores):
@@ -541,7 +630,7 @@ def test_colisao_em_a_e_b_nao_derruba_o_desempate(client, db_session, lab02, rot
 
 def test_consolidacao_colisao_de_rotulador_da_422(client, db_session, lab02, rotuladores):
     _inserir(db_session, foto_id=lab02[1].id, rotulador_externo="ext_x", rodada="a")
-    cab = login(client, rotuladores["sup1"])
+    cab = login(client, rotuladores["admin"])
     r = client.get("/rotulagem/consolidacao", params={"rodada": ["lab02", "a"]}, headers=cab)
     assert r.status_code == 422 and "ext_x" in r.text
 

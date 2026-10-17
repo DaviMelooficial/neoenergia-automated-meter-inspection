@@ -1,9 +1,10 @@
 """Rotulagem dupla-cega (marco M6), esquema v2 do Lab 2.
 
-Supervisor ou acima rotula e ve o kappa do `lab02`. O kappa das rodadas cegas
-(a, b, desempate) e so de admin ou de quem nao votou nelas: com n pequeno, o
-kappa por par antes e depois do proprio voto revela o voto do outro. O export traz
-o rotulo consolidado de cada foto; por isso e so de admin.
+Supervisor rotula nas rodadas cegas (a, b, desempate) e ve so o kappa do `lab02`.
+Admin ve o kappa, a consolidacao e o export das rodadas cegas, e por isso nao
+rotula nelas (403). Assim ninguem que vota consegue ver, por agregado ou por
+diferenca, o voto de outra pessoa. Regra em `servico.pode_ver_consolidacao` e
+`servico.pode_rotular`.
 """
 
 from typing import Annotated
@@ -31,6 +32,7 @@ from inspecao.schemas import (
 
 router = APIRouter(prefix="/rotulagem", tags=["rotulagem"])
 DB = Annotated[Session, Depends(get_db)]
+ADMIN_NAO_ROTULA = "admin ve o kappa das rodadas cegas e por isso nao rotula nelas"
 Rodadas = Annotated[list[RodadaRotulagem] | None, Query(max_length=5)]
 
 
@@ -57,6 +59,8 @@ def proxima(db: DB, usuario: Supervisor, rodada: RodadaTela = "a") -> FotoRotula
     A resposta so identifica a foto: nenhum rotulo alheio, decisao da maquina,
     score, posicao lida nem nota do leiturista.
     """
+    if not servico.pode_rotular(usuario, RodadaRotulagem(rodada)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_NAO_ROTULA)
     try:
         foto, restantes = servico.proxima_foto(db, usuario.id, RodadaRotulagem(rodada))
     except servico.ColisaoDeRotulador as erro:
@@ -78,15 +82,14 @@ def proxima(db: DB, usuario: Supervisor, rodada: RodadaTela = "a") -> FotoRotula
 def consolidacao(db: DB, usuario: Supervisor, rodada: Rodadas = None) -> ConsolidacaoOut:
     """Kappa de Cohen por classe (media dos pares ponderada por n) e por par.
 
-    Padrao: rodada `lab02`. Rodadas cegas: 403 para quem votou em alguma delas
-    (exceto admin). Juntar rodadas em que o mesmo rotulador votou duas vezes na
-    mesma foto devolve 422, porque inflaria a concordancia.
+    Padrao: rodada `lab02`. Qualquer rodada cega na consulta: so admin. Juntar
+    rodadas em que o mesmo rotulador votou duas vezes na mesma foto devolve 422,
+    porque inflaria a concordancia.
     """
     rodadas = rodada or [RodadaRotulagem.LAB02]
-    if not servico.pode_ver_consolidacao(db, usuario, rodadas):
+    if not servico.pode_ver_consolidacao(usuario, rodadas):
         raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "voce votou nestas rodadas: o kappa delas so fica visivel para admin",
+            status.HTTP_403_FORBIDDEN, "kappa de rodada cega (a, b, desempate) so para admin"
         )
     try:
         r = servico.resumir(db, rodadas)
@@ -131,6 +134,8 @@ def exportar(db: DB, _: Admin, rodada: Rodadas = None) -> Response:
 def gravar(foto_id: int, dados: RotuloIn, db: DB, usuario: Supervisor) -> RotuloOut:
     """Grava o rotulo do usuario atual. Um por foto e rodada; nao ha edicao."""
     rodada = RodadaRotulagem(dados.rodada)
+    if not servico.pode_rotular(usuario, rodada):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_NAO_ROTULA)
     if db.get(Foto, foto_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "foto nao encontrada")
     ja_tem = db.scalar(

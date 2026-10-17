@@ -157,5 +157,7 @@ def test_relatorio_kappa_md_traz_gate_desvios_e_aceite_pendente():
         "POST /rotulagem/proxima",
         "## Risco residual",
         "T-M6-02",
+        "o kappa das rodadas cegas é só para admin, e admin\n   não rotula nelas",
+        "editada no lugar",
     ):
         assert trecho in md, trecho

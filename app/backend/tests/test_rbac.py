@@ -41,6 +41,8 @@ ROTAS = [
     ("POST", "/ingest/webhook", Papel.ADMIN, None),
 ]
 ORDEM = {Papel.AUDITOR: 1, Papel.SUPERVISOR: 2, Papel.ADMIN: 3}
+# Excecao a hierarquia: admin ve o kappa das rodadas cegas, entao nao rotula nelas.
+ADMIN_BARRADO = {("POST", "/rotulagem/proxima"), ("POST", "/rotulagem/1")}
 
 
 def chamar(client, metodo, rota, corpo, headers):
@@ -57,7 +59,7 @@ def test_sem_token_da_401(client, contas, metodo, rota, minimo, corpo):
 def test_papel_contra_rota(client, contas, papel, metodo, rota, minimo, corpo):
     cab = login(client, contas[papel.value])
     status = chamar(client, metodo, rota, corpo, cab).status_code
-    if ORDEM[papel] < ORDEM[minimo]:
+    if ORDEM[papel] < ORDEM[minimo] or (papel is Papel.ADMIN and (metodo, rota) in ADMIN_BARRADO):
         assert status == 403, (papel, metodo, rota, status)
     else:
         # Autorizado: a rota pode devolver 404/409/422/501 pelo estado vazio do banco,

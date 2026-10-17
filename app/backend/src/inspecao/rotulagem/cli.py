@@ -35,6 +35,9 @@ def _fmt(k: float | None) -> str:
 def importar_lab02(caminho: Path, caminho_controle: Path) -> int:
     caminho = get_settings().caminho_absoluto(caminho)
     caminho_controle = get_settings().caminho_absoluto(caminho_controle)
+    if not caminho.is_file():
+        log.error("csv nao encontrado: %s", caminho)
+        return 1
     with SessionLocal() as sessao:
         try:
             controle = None
@@ -106,6 +109,9 @@ def exportar(saida: Path, rodadas: list[RodadaRotulagem]) -> int:
 
 def importar_inspecao_m5(caminho: Path) -> int:
     caminho = get_settings().caminho_absoluto(caminho)
+    if not caminho.is_file():
+        log.error("csv nao encontrado: %s", caminho)
+        return 1
     with SessionLocal() as sessao:
         try:
             resumo = inspecao_m5.importar(sessao, caminho)
@@ -113,6 +119,12 @@ def importar_inspecao_m5(caminho: Path) -> int:
             log.error("csv invalido: %s", erro)
             return 1
         sessao.commit()
+    if resumo.nao_mapeadas:
+        # Foto da inspecao que nao esta no banco fica sem rotulo e a exclusao nao a enxerga.
+        log.warning(
+            "importacao parcial: %d fotos da inspecao nao estao no banco e ficam fora da exclusao",
+            len(resumo.nao_mapeadas),
+        )
     print(f"linhas lidas        {resumo.linhas}")
     print(
         f"rotulos inspecao_m5 {resumo.gravados} ({resumo.inspecionados} inspecionadas, "

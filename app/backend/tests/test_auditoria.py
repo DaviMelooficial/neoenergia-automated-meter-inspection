@@ -1143,6 +1143,8 @@ def test_troca_de_detector_adiada_com_auditoria_travada(sempre):
     s, lote, lei, _revisor, aud_id = _cenario_corrida()
     trava = Session(engine)
     job = Session(engine, expire_on_commit=False)
+    # Se a guarda regredir e o job esperar o lock, o teste falha em 5 s em vez de travar.
+    job.execute(text("SET lock_timeout = '5s'"))
     try:
         trava.execute(
             select(AuditoriaAmostral.id).where(AuditoriaAmostral.id == aud_id).with_for_update()

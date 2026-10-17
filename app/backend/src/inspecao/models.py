@@ -466,7 +466,7 @@ class Rotulo(Base):
     )
     rotulador_externo: Mapped[str | None] = mapped_column(String(60), nullable=True)
     rodada: Mapped[str] = mapped_column(String(20))
-    # Nulos so na rodada `producao` (ck_rotulos_completo).
+    # Nulos so nas rodadas `producao` e `inspecao_m5` (ck_rotulos_completo).
     cena: Mapped[str | None] = mapped_column(String(20), nullable=True)
     reflexo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fora_de_foco: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

@@ -8,7 +8,7 @@ ou `transicionar_em_lote`; nenhum deles toca a coluna diretamente. Um teste
 
 from collections.abc import Iterable, Sequence
 
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 from sqlalchemy.orm import Session
 
 from inspecao.enums import StatusLeitura
@@ -105,7 +105,9 @@ def transicionar(
 
     if destino is StatusLeitura.TRIAGEM_QUALIDADE and leitura.status_atual != ESTADO_INICIAL:
         # Reabertura pela maquina: a decisao automatica conferida deixa de existir, e a
-        # auditoria PENDENTE dela deixa de valer (M8). A decidida fica como medida.
+        # auditoria PENDENTE dela deixa de valer (M8). A decidida fica como medida. Quem
+        # reabre ja travou essas auditorias (`handlers._travar_auditorias_pendentes`);
+        # o predicado da reserva se repete aqui para nunca apagar uma reserva ativa.
         sessao.execute(
             update(AuditoriaAmostral)
             .where(
@@ -113,6 +115,10 @@ def transicionar(
                 AuditoriaAmostral.origem != "fila",
                 AuditoriaAmostral.decisao.is_(None),
                 AuditoriaAmostral.invalidada_em.is_(None),
+                or_(
+                    AuditoriaAmostral.reservado_ate.is_(None),
+                    AuditoriaAmostral.reservado_ate < func.now(),
+                ),
             )
             .values(invalidada_em=func.now(), reservado_por=None, reservado_ate=None)
         )

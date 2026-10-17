@@ -540,6 +540,7 @@ class DecisaoAutomaticaAuditoriaOut(BaseModel):
 
     detector: str
     politica: str
+    etapa: str = Field(description="qualidade (triagem) ou validacao (divergencia, ponto B)")
 
     n: int | None
     erros: int | None

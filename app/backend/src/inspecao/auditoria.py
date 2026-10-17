@@ -41,19 +41,21 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from inspecao.config import get_settings
 from inspecao.contas_teste import email_de_teste, usuario_real
-from inspecao.enums import MotivoReprovacao, StatusLeitura
+from inspecao.enums import MotivoReprovacao, RodadaRotulagem, StatusLeitura
 from inspecao.models import (
     AuditoriaAmostral,
+    Foto,
     HistoricoStatus,
     Leitura,
     Lote,
     RevisaoHumana,
+    Rotulo,
     Usuario,
 )
 from inspecao.monitoramento.auto_aprovacao import amostras_necessarias, limite_superior
@@ -123,6 +125,10 @@ def sortear_decisao_automatica(
     o sorteio retroativo) nao derruba a transacao de quem chama. Sem commit."""
     origem = ORIGEM_AUTOMATICA.get(decisao.status)
     if origem is None or not _sorteia(origem, decisao.id):
+        return None
+    if db.scalar(select(foto_de_calibracao(leitura_id))):
+        # Foto que calibrou o limiar (Lab 2) ou treinou o modelo: acerto por construcao, e
+        # quem a rotulou poderia recebe-la. Nao entra na auditoria automatica.
         return None
     try:
         with db.begin_nested():
@@ -309,32 +315,73 @@ def _suprimido(medidas: dict[str, Any]) -> dict[str, Any]:
 
 
 MOTIVOS_DE_QUALIDADE = {m.value for m in MotivoReprovacao} - {MotivoReprovacao.OUTRO.value}
+# Etapa da decisao automatica, que entra no estrato: rejeicao de qualidade (triagem) e
+# rejeicao por divergencia (validacao_leitura, ponto B; hoje inalcancavel) medem coisas
+# diferentes e nao se somam.
+ETAPA = {
+    StatusLeitura.REJEITADA_QUALIDADE.value: "qualidade",
+    StatusLeitura.AUTO_REJEITADA.value: "validacao",
+    StatusLeitura.AUTO_APROVADA.value: "validacao",
+}
+# Rodadas de rotulo que calibraram (M5) ou treinaram (M7): foto com rotulo nelas nao e
+# evidencia fora da amostra e nao e sorteada para auditoria automatica.
+RODADAS_DE_CALIBRACAO = (
+    RodadaRotulagem.LAB02.value,
+    RodadaRotulagem.A.value,
+    RodadaRotulagem.B.value,
+    RodadaRotulagem.DESEMPATE.value,
+)
 
 
-def e_erro_da_maquina(origem: str, decisao: str, motivo: str | None) -> bool:
+def foto_de_calibracao(coluna_leitura_id):
+    """A foto principal da leitura tem rotulo de calibracao ou treino."""
+    return exists().where(
+        Foto.leitura_id == coluna_leitura_id,
+        Foto.principal.is_(True),
+        Rotulo.foto_id == Foto.id,
+        Rotulo.rodada.in_(RODADAS_DE_CALIBRACAO),
+    )
+
+
+def e_erro_da_maquina(
+    origem: str, decisao: str, motivo: str | None, etapa: str = "qualidade"
+) -> bool:
     """Veredito do segundo revisor que contradiz a maquina.
 
-    Auto-rejeitada: so "reprovada por uma das 5 classes de qualidade" confirma; aprovada, ou
-    reprovada por `outro`, e erro (o revisor nao viu a foto como ilegivel).
-    Auto-aprovada: qualquer reprovada e erro (conservador: `outro` pode ser divergencia
-    de leitura, mas aprovar sozinho uma leitura que o humano reprova e o risco caro)."""
-    if origem == "auto_rejeitada":
+    Auto-rejeitada na qualidade: so "reprovada por uma das 5 classes de qualidade"
+    confirma; aprovada, ou reprovada por `outro`, e erro (o revisor nao viu a foto como
+    ilegivel). Auto-rejeitada na validacao (divergencia): so aprovada e erro, porque
+    `outro` e justamente o motivo de divergencia. Auto-aprovada: qualquer reprovada e erro
+    (conservador)."""
+    if origem == "auto_rejeitada" and etapa == "qualidade":
         return not (decisao == "reprovada" and motivo in MOTIVOS_DE_QUALIDADE)
+    if origem == "auto_rejeitada":
+        return decisao == "aprovada"
     return decisao == "reprovada"
 
 
-def _estratos(db: Session, origem: str) -> dict[tuple[str, str], list[tuple[str, str | None]]]:
-    """(detector, politica) -> vereditos, uma auditoria decidida por leitura por estrato.
+Estrato = tuple[str, str, str]  # (detector, politica, etapa)
+
+
+def _chave(ator: str | None, politica: str | None, status: str) -> Estrato:
+    detector = (ator or "").removeprefix("modelo:") or "sem_registro"
+    return detector, politica or "sem_registro", ETAPA.get(status, status)
+
+
+def _estratos(db: Session, origem: str) -> dict[Estrato, list[tuple[str, str | None]]]:
+    """(detector, politica, etapa) -> vereditos, uma auditoria decidida por leitura.
 
     O estrato vem da linha do historico da decisao (`ator` = modelo:<detector>,
-    `detalhe.politica`). A mesma leitura pode ter varias decisoes auditadas (reaberta e
-    decidida de novo pela maquina, com auditoria a 100%): dentro de um estrato so a
-    auditoria decidida MAIS ANTIGA conta, para a unidade ser a foto e nao a decisao.
+    `detalhe.politica`, `status` -> etapa). A mesma leitura pode ter varias decisoes
+    auditadas (reaberta e decidida de novo pela maquina, com auditoria a 100%): dentro de
+    um estrato so a auditoria decidida MAIS ANTIGA conta, para a unidade ser a foto e nao a
+    decisao. Foto de calibracao ou treino (`RODADAS_DE_CALIBRACAO`) fica fora.
     """
     linhas = db.execute(
         select(
             HistoricoStatus.ator,
             HistoricoStatus.detalhe["politica"].astext,
+            HistoricoStatus.status,
             AuditoriaAmostral.leitura_id,
             AuditoriaAmostral.decisao,
             AuditoriaAmostral.motivo,
@@ -344,34 +391,34 @@ def _estratos(db: Session, origem: str) -> dict[tuple[str, str], list[tuple[str,
             AuditoriaAmostral.origem == origem,
             AuditoriaAmostral.decisao.is_not(None),
             usuario_real(AuditoriaAmostral.revisor_id),
+            ~foto_de_calibracao(AuditoriaAmostral.leitura_id),
         )
         .order_by(AuditoriaAmostral.decidida_em, AuditoriaAmostral.id)
     ).all()
-    vistos: set[tuple[str, str, int]] = set()
-    estratos: dict[tuple[str, str], list[tuple[str, str | None]]] = defaultdict(list)
-    for ator, politica, leitura_id, decisao, motivo in linhas:
-        chave = ((ator or "").removeprefix("modelo:") or "sem_registro", politica or "sem_registro")
-        if (*chave, leitura_id) in vistos:
+    vistos: set[tuple[Estrato, int]] = set()
+    estratos: dict[Estrato, list[tuple[str, str | None]]] = defaultdict(list)
+    for ator, politica, status, leitura_id, decisao, motivo in linhas:
+        chave = _chave(ator, politica, status)
+        if (chave, leitura_id) in vistos:
             continue
-        vistos.add((*chave, leitura_id))
+        vistos.add((chave, leitura_id))
         estratos[chave].append((decisao, motivo))
     return estratos
 
 
 def _medida_automatica(
-    origem: str, estrato: tuple[str, str], vereditos: list, detalhe: bool
+    origem: str, estrato: Estrato, vereditos: list, detalhe: bool
 ) -> dict[str, Any]:
     """Erro da maquina num estrato, com o limite superior de 95% (Clopper-Pearson) e
     quantas leituras auditadas sustentariam o alvo com os erros de hoje (o total, nao o que
     falta). `alvo_atingido` quando o limite superior e menor ou igual ao alvo, nunca pela
     taxa observada."""
     n = len(vereditos)
-    erros = sum(e_erro_da_maquina(origem, d, m) for d, m in vereditos)
+    erros = sum(e_erro_da_maquina(origem, d, m, estrato[2]) for d, m in vereditos)
     alvo = ALVO_ERRO[origem]
     teto = limite_superior(erros, n)
-    bloco = {
-        "detector": estrato[0],
-        "politica": estrato[1],
+    rotulo = {"detector": estrato[0], "politica": estrato[1], "etapa": estrato[2]}
+    bloco = rotulo | {
         "n": n,
         "erros": erros,
         "taxa_erro": erros / n if n else None,
@@ -382,19 +429,37 @@ def _medida_automatica(
     }
     if detalhe or n >= MIN_PARES:
         return bloco | {"suprimido": False}
-    return _suprimido(bloco) | {"alvo_erro": alvo, "detector": estrato[0], "politica": estrato[1]}
+    return _suprimido(bloco) | {"alvo_erro": alvo} | rotulo
+
+
+def _estrato_vigente(db: Session, origem: str) -> Estrato:
+    """O estrato da ULTIMA decisao automatica desta origem gravada no historico: e quem
+    esta decidindo de fato. Sem nenhuma, cai na politica ativa (`POLITICA_ATUAL`)."""
+    from inspecao.monitoramento.sinais import politica_ativa
+
+    status = [s for s, o in ORIGEM_AUTOMATICA.items() if o == origem]
+    ultima = db.execute(
+        select(
+            HistoricoStatus.ator, HistoricoStatus.detalhe["politica"].astext, HistoricoStatus.status
+        )
+        .where(HistoricoStatus.status.in_(status), HistoricoStatus.ator.like("modelo:%"))
+        .order_by(HistoricoStatus.id.desc())
+        .limit(1)
+    ).first()
+    if ultima is not None:
+        return _chave(*ultima)
+    ativa = politica_ativa()
+    etapa = "qualidade" if origem == "auto_rejeitada" else "validacao"
+    return ativa.modelo or "sem_registro", ativa.versao, etapa
 
 
 def _bloco_automatico(db: Session, origem: str, detalhe: bool) -> tuple[dict, list[dict]]:
-    """(estrato da politica ativa, todos os estratos). A tela e o supervisor usam o da
-    politica ativa; admin ve os demais. Erro e unidade em `e_erro_da_maquina` e
-    `_estratos`."""
-    from inspecao.monitoramento.sinais import politica_ativa
-
-    ativa = politica_ativa()
-    chave_ativa = (ativa.modelo or "sem_registro", ativa.versao)
+    """(estrato vigente, todos os estratos). A tela e o supervisor usam o vigente (o da
+    ultima decisao automatica); admin ve os demais. Erro e unidade em
+    `e_erro_da_maquina` e `_estratos`."""
+    vigente = _estrato_vigente(db, origem)
     estratos = _estratos(db, origem)
-    principal = _medida_automatica(origem, chave_ativa, estratos.get(chave_ativa, []), detalhe)
+    principal = _medida_automatica(origem, vigente, estratos.get(vigente, []), detalhe)
     todos = [_medida_automatica(origem, k, v, detalhe) for k, v in sorted(estratos.items())]
     return principal, (todos if detalhe else [])
 

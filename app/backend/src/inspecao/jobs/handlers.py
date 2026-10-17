@@ -89,6 +89,33 @@ def _travar_redecidiveis(sessao: Session, consulta):
     ).all()
 
 
+def _travar_auditorias_pendentes(sessao: Session, leitura_id: int) -> bool:
+    """Trava (FOR UPDATE SKIP LOCKED) as auditorias pendentes da leitura antes de reabri-la.
+
+    O `/auditoria/proxima` disputa o mesmo lock (`reservar_proxima` tambem e SKIP LOCKED):
+    - se o revisor esta reservando agora, a linha dele esta travada e a leitura e pulada;
+    - se ele ja reservou (commit antes), a reserva ativa aparece aqui e a leitura e pulada;
+    - se o job trava primeiro, o `/proxima` pula essa auditoria e nao a entrega, e a
+      invalidacao em `transicionar` acontece sem ninguem com o item na mao.
+    Assim nenhum revisor ve a auditoria sumir depois de reservada (o 404 diria a origem).
+    """
+    pendente = (
+        AuditoriaAmostral.leitura_id == leitura_id,
+        AuditoriaAmostral.decisao.is_(None),
+        AuditoriaAmostral.invalidada_em.is_(None),
+    )
+    total = sessao.scalar(select(func.count()).select_from(AuditoriaAmostral).where(*pendente))
+    travadas = sessao.execute(
+        select(AuditoriaAmostral.id, AuditoriaAmostral.reservado_ate)
+        .where(*pendente)
+        .with_for_update(skip_locked=True)
+    ).all()
+    if len(travadas) < (total or 0):
+        return False
+    agora = sessao.scalar(select(func.now()))
+    return not any(ate is not None and ate > agora for _, ate in travadas)
+
+
 def _decidir(
     politica: Politica, modelo: str, saida: dict[str, Any]
 ) -> tuple[Decisao, float | None, dict]:
@@ -152,6 +179,13 @@ def triagem_qualidade(ctx: Contexto, sessao: Session, payload: dict) -> None:
                 )
             else:
                 log.info("leitura %s reservada ou decidida: nada a reabrir", leitura.id)
+            return
+        if not _travar_auditorias_pendentes(sessao, leitura.id):
+            log.warning(
+                "leitura %s com auditoria amostral em uso: troca para %s adiada; reenfileire",
+                leitura.id,
+                ctx.detector.nome,
+            )
             return
         status = StatusLeitura(leitura.status_atual)
     foto = _foto_principal(sessao, leitura)
@@ -228,7 +262,9 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
             continue
         # Reconfere a linha antes de reabrir (defesa em profundidade: o lock acima ja
         # impede reserva e decisao vindas de outra transacao).
-        if not _travar_redecidiveis(sessao, select(Leitura).where(Leitura.id == leitura.id)):
+        if not _travar_redecidiveis(
+            sessao, select(Leitura).where(Leitura.id == leitura.id)
+        ) or not _travar_auditorias_pendentes(sessao, leitura.id):
             contagem["pulada"] += 1
             continue
         ator = f"modelo:{modelo}"

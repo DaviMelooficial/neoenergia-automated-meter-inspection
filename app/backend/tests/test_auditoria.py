@@ -877,15 +877,22 @@ def test_falso_positivo_uma_leitura_por_estrato(db_session, client, reais, lote_
         )
     db_session.commit()
     admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
-    ativa = admin["auto_rejeitadas"]
-    assert (ativa["detector"], ativa["politica"], ativa["n"], ativa["erros"]) == (
-        "heuristica@v1",
-        "politica@v1",
-        1,
-        1,
+    # o bloco principal e o estrato da ULTIMA decisao automatica (quem decide de fato)
+    vigente = admin["auto_rejeitadas"]
+    assert (vigente["detector"], vigente["politica"], vigente["etapa"]) == (
+        "qualidade@v1",
+        "politica@v2",
+        "qualidade",
     )
-    estratos = {(e["detector"], e["politica"]): e["n"] for e in admin["estratos_auto_rejeitadas"]}
-    assert estratos == {("heuristica@v1", "politica@v1"): 1, ("qualidade@v1", "politica@v2"): 1}
+    assert (vigente["n"], vigente["erros"]) == (1, 0)
+    estratos = {
+        (e["detector"], e["politica"], e["etapa"]): (e["n"], e["erros"])
+        for e in admin["estratos_auto_rejeitadas"]
+    }
+    assert estratos == {
+        ("heuristica@v1", "politica@v1", "qualidade"): (1, 1),  # a mais antiga, a aprovada
+        ("qualidade@v1", "politica@v2", "qualidade"): (1, 0),
+    }
 
 
 @pytest.mark.parametrize(
@@ -977,3 +984,207 @@ def test_violacao_inesperada_no_sorteio_propaga(db_session, lote_aud):
     lei, _ = fx.leitura(db_session, lote_aud, S.FILA_HUMANA, fx.scores(0.2))
     with pytest.raises(IntegrityError):
         auditoria.sortear_decisao_automatica(db_session, lei.id, fantasma)
+
+
+# ------------------------------------------------------------------ gate 5
+
+
+def test_colisao_tolerada_devolve_none_e_avisa(db_session, lote_aud, sempre, caplog, monkeypatch):
+    """A mesma decisao sorteada duas vezes (corrida com o sorteio retroativo): a segunda
+    colide em `uq_auditorias_historico`, devolve None e loga em WARNING."""
+    import logging
+
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    decisao = db_session.scalar(
+        select(HistoricoStatus).where(
+            HistoricoStatus.leitura_id == lei.id, HistoricoStatus.status == S.REJEITADA_QUALIDADE
+        )
+    )
+    assert auditoria.sortear_decisao_automatica(db_session, lei.id, decisao) is not None
+    # o fileConfig do alembic (migracao do banco de teste) desliga os loggers ja criados
+    monkeypatch.setattr(logging.getLogger("inspecao.auditoria"), "disabled", False)
+    with caplog.at_level(logging.WARNING, logger="inspecao.auditoria"):
+        assert auditoria.sortear_decisao_automatica(db_session, lei.id, decisao) is None
+    assert any(
+        r.levelno == logging.WARNING and "ja tem auditoria" in r.getMessage()
+        for r in caplog.records
+    )
+    assert len(db_session.scalars(select(AuditoriaAmostral)).all()) == 1
+
+
+def test_em_lote_recusa_destino_automatico(db_session, lote_aud):
+    from inspecao.estados import TransicaoInvalida, transicionar_em_lote
+
+    lei, _ = fx.leitura(db_session, lote_aud, S.TRIAGEM_QUALIDADE, fx.scores(0.95))
+    with pytest.raises(TransicaoInvalida, match="use transicionar"):
+        transicionar_em_lote(
+            db_session, [lei.id], S.TRIAGEM_QUALIDADE, S.REJEITADA_QUALIDADE, ator="modelo:x"
+        )
+
+
+def test_foto_de_calibracao_nao_e_sorteada_nem_medida(client, db_session, reais, lote_aud, sempre):
+    """Bloqueante de dados do gate 5: foto com rotulo de calibracao/treino (lab02, a, b,
+    desempate) e acerto por construcao. Nao e sorteada; e se ja tiver auditoria decidida
+    (de antes da regra), fica fora do estrato."""
+    from inspecao.estados import transicionar
+
+    cal, foto_cal = fx.leitura(db_session, lote_aud, S.TRIAGEM_QUALIDADE, fx.scores(0.95))
+    db_session.add(
+        Rotulo(
+            foto_id=foto_cal.id,
+            rotulador_externo="ext_x",
+            rodada="lab02",
+            cena="digital",
+            legivel=False,
+            reflexo=False,
+            fora_de_foco=True,
+            tampa_suja=False,
+            enquadramento=False,
+            display_apagado=False,
+        )
+    )
+    db_session.flush()
+    registro = transicionar(
+        db_session,
+        cal,
+        S.REJEITADA_QUALIDADE,
+        "modelo:heuristica@v1",
+        detalhe={"politica": "politica@v1"},
+    )
+    assert db_session.scalar(select(AuditoriaAmostral)) is None  # nao sorteada
+    # auditoria antiga dessa foto, decidida, criada por fora da regra: nao conta
+    db_session.add(
+        AuditoriaAmostral(
+            leitura_id=cal.id,
+            origem="auto_rejeitada",
+            historico_id=registro.id,
+            revisor_id=reais["auditor2"].id,
+            decisao="reprovada",
+            motivo="fora_de_foco",
+            decidida_em=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+    admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
+    assert admin["auto_rejeitadas"]["n"] == 0 and admin["estratos_auto_rejeitadas"] == []
+
+
+@pytest.mark.parametrize(
+    ("etapa", "decisao", "motivo", "erro"),
+    [
+        ("qualidade", "reprovada", "outro", True),
+        ("validacao", "reprovada", "outro", False),  # divergencia confirmada
+        ("validacao", "aprovada", None, True),
+    ],
+)
+def test_erro_depende_da_etapa(etapa, decisao, motivo, erro):
+    assert auditoria.e_erro_da_maquina("auto_rejeitada", decisao, motivo, etapa) is erro
+
+
+def test_rejeicao_por_divergencia_tem_estrato_proprio(client, db_session, reais, lote_aud, sempre):
+    """AUTO_REJEITADA (validacao, ponto B) nao se soma a rejeitada_qualidade (triagem)."""
+    from inspecao.estados import transicionar
+
+    for status in (S.REJEITADA_QUALIDADE, S.AUTO_REJEITADA):
+        lei, _ = fx.leitura(db_session, lote_aud, S.TRIAGEM_QUALIDADE, fx.scores(0.95))
+        if status is S.AUTO_REJEITADA:
+            transicionar(db_session, lei, S.VALIDACAO_LEITURA, "modelo:heuristica@v1")
+        transicionar(
+            db_session, lei, status, "modelo:heuristica@v1", detalhe={"politica": "politica@v1"}
+        )
+    for aud in db_session.scalars(select(AuditoriaAmostral)):
+        _decidir_auditoria(db_session, aud, reais["auditor2"].id, "reprovada", "outro")
+    db_session.commit()
+    admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
+    estratos = {e["etapa"]: (e["n"], e["erros"]) for e in admin["estratos_auto_rejeitadas"]}
+    assert estratos == {"qualidade": (1, 1), "validacao": (1, 0)}
+
+
+def _cenario_corrida():
+    """Dados commitados de verdade (duas conexoes): leitura auto-rejeitada com auditoria."""
+    from inspecao.db import engine
+
+    s = Session(engine, expire_on_commit=False)
+    lote = fx.lote(s, "0126_0098", date(2026, 1, 9))
+    revisor = fx.contas_reais(s)["auditor2"]
+    lei, _ = fx.leitura(s, lote, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    s.commit()
+    auditoria.sortear_automaticas(s)
+    s.commit()
+    aud_id = s.scalar(select(AuditoriaAmostral.id).where(AuditoriaAmostral.leitura_id == lei.id))
+    return s, lote, lei, revisor, aud_id
+
+
+def _limpar_corrida(s, lote_id):
+    from inspecao.db import engine
+
+    s.close()
+    with engine.begin() as c:
+        c.execute(text("DELETE FROM lotes WHERE id = :i"), {"i": lote_id})
+        c.execute(text("DELETE FROM usuarios WHERE email LIKE :d"), {"d": f"%{fx.DOMINIO_REAL}"})
+
+
+def test_corrida_reserva_durante_o_recalcular(monkeypatch, sempre):
+    """Bloqueante do gate 5, com a sonda do gate como base: o segundo revisor tenta
+    reservar NO MEIO do recalcular (outra conexao, commit real). O job ja travou a
+    auditoria pendente, entao o `/proxima` nao a entrega; a reabertura invalida sem
+    ninguem com o item na mao, e nao ha 404 depois de reserva."""
+    from inspecao.db import engine
+    from inspecao.inference.detector import DetectorNulo
+    from inspecao.jobs import handlers
+    from tests.test_recalcular_decisao import ctx_com
+
+    s, lote, lei, revisor, aud_id = _cenario_corrida()
+    entregue = {}
+    original = handlers.transicionar
+
+    def com_corrida(sess, leitura, novo, *a, **k):
+        if novo is S.TRIAGEM_QUALIDADE and "feito" not in entregue:
+            entregue["feito"] = True
+            with Session(engine) as outra:
+                entregue["aud"] = auditoria.reservar_proxima(outra, revisor.id)
+                outra.commit()
+        return original(sess, leitura, novo, *a, **k)
+
+    monkeypatch.setattr(handlers, "transicionar", com_corrida)
+    job = Session(engine, expire_on_commit=False)
+    try:
+        handlers.recalcular_decisao(
+            ctx_com(DetectorNulo(), None), job, {"lote_id": lote.id, "politica": "politica@v0"}
+        )
+        job.commit()
+        assert entregue["aud"] is None  # travada pelo job: nao entregue
+        s.expire_all()
+        a = s.get(AuditoriaAmostral, aud_id)
+        assert a.invalidada_em is not None and a.reservado_por is None
+        assert s.get(Leitura, lei.id).status_atual == S.FILA_HUMANA.value
+    finally:
+        job.close()
+        _limpar_corrida(s, lote.id)
+
+
+def test_reserva_antes_do_recalcular_pula_a_leitura(sempre):
+    """A outra ordem: a reserva foi commitada antes do job. O recalcular pula a leitura e a
+    auditoria segue valida e reservada."""
+    from inspecao.db import engine
+    from inspecao.inference.detector import DetectorNulo
+    from inspecao.jobs import handlers
+    from tests.test_recalcular_decisao import ctx_com
+
+    s, lote, lei, revisor, aud_id = _cenario_corrida()
+    with Session(engine) as outra:
+        assert auditoria.reservar_proxima(outra, revisor.id).id == aud_id
+        outra.commit()
+    job = Session(engine, expire_on_commit=False)
+    try:
+        handlers.recalcular_decisao(
+            ctx_com(DetectorNulo(), None), job, {"lote_id": lote.id, "politica": "politica@v0"}
+        )
+        job.commit()
+        s.expire_all()
+        a = s.get(AuditoriaAmostral, aud_id)
+        assert a.invalidada_em is None and a.reservado_por == revisor.id
+        assert s.get(Leitura, lei.id).status_atual == S.REJEITADA_QUALIDADE.value
+    finally:
+        job.close()
+        _limpar_corrida(s, lote.id)

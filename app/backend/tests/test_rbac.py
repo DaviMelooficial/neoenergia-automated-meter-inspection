@@ -20,6 +20,15 @@ ROTAS = [
     ("POST", "/quarentena/1/resolver", Papel.SUPERVISOR, {}),
     ("GET", "/metricas/qualidade", Papel.SUPERVISOR, None),
     ("GET", "/metricas/drift", Papel.SUPERVISOR, None),
+    ("POST", "/rotulagem/proxima", Papel.SUPERVISOR, None),
+    (
+        "POST",
+        "/rotulagem/1",
+        Papel.SUPERVISOR,
+        {"rodada": "a", "cena": "digital", "legivel": True, "defeitos": []},
+    ),
+    ("GET", "/rotulagem/consolidacao", Papel.SUPERVISOR, None),
+    ("GET", "/rotulagem/export", Papel.ADMIN, None),
     ("GET", "/usuarios", Papel.ADMIN, None),
     (
         "POST",

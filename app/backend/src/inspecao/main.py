@@ -13,7 +13,15 @@ from sqlalchemy import text
 from inspecao.auth.service import garantir_admin
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal, engine
-from inspecao.routers import auth, fila_humana, metricas, operacao, quarentena, usuarios
+from inspecao.routers import (
+    auth,
+    fila_humana,
+    metricas,
+    operacao,
+    quarentena,
+    rotulagem,
+    usuarios,
+)
 from inspecao.storage.local import LocalFileStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -120,5 +128,5 @@ def health() -> dict:
     }
 
 
-for roteador in (auth, operacao, fila_humana, quarentena, metricas, usuarios):
+for roteador in (auth, operacao, fila_humana, quarentena, metricas, rotulagem, usuarios):
     app.include_router(roteador.router)

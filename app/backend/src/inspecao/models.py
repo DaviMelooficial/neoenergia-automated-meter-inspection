@@ -12,10 +12,12 @@ evita a circularidade sem perder informacao:
 """
 
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -31,7 +33,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from inspecao.db import Base
-from inspecao.enums import StatusLeitura
+from inspecao.enums import Cena, RodadaRotulagem, StatusLeitura
 
 
 class Lote(Base):
@@ -359,3 +361,71 @@ class RevisaoHumana(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     leitura: Mapped["Leitura"] = relationship(back_populates="revisoes")
+
+
+# ---------------------------------------------------------------------------
+# Rotulagem (marco M6)
+# ---------------------------------------------------------------------------
+
+
+def _lista_sql(enum: type[StrEnum]) -> str:
+    return ", ".join(f"'{m.value}'" for m in enum)
+
+
+class Rotulo(Base):
+    """Rotulo humano de uma foto no esquema v2: cena, 5 defeitos e legivel.
+
+    A unidade e a foto, nao a leitura (`fotos.leitura_id` liga as duas). Quem
+    rotulou e um usuario da plataforma ou, para a rodada `lab02` importada do app
+    `rotulador/`, um identificador externo (`davi_melo`, `ivan`...): exatamente um
+    dos dois. Um rotulador tem no maximo um rotulo por foto e rodada; como
+    `usuario_id` e `rotulador_externo` sao anulaveis, a regra vive em dois indices
+    unicos parciais em vez de uma UNIQUE comum (NULL nunca colide).
+    """
+
+    __tablename__ = "rotulos"
+    __table_args__ = (
+        CheckConstraint(
+            "(usuario_id IS NULL) <> (rotulador_externo IS NULL)", name="ck_rotulos_um_rotulador"
+        ),
+        CheckConstraint(f"rodada IN ({_lista_sql(RodadaRotulagem)})", name="ck_rotulos_rodada"),
+        CheckConstraint(f"cena IN ({_lista_sql(Cena)})", name="ck_rotulos_cena"),
+        Index(
+            "uq_rotulos_foto_rodada_usuario",
+            "foto_id",
+            "rodada",
+            "usuario_id",
+            unique=True,
+            postgresql_where="usuario_id IS NOT NULL",
+        ),
+        Index(
+            "uq_rotulos_foto_rodada_externo",
+            "foto_id",
+            "rodada",
+            "rotulador_externo",
+            unique=True,
+            postgresql_where="rotulador_externo IS NOT NULL",
+        ),
+        Index("ix_rotulos_rodada_foto", "rodada", "foto_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    foto_id: Mapped[int] = mapped_column(ForeignKey("fotos.id", ondelete="CASCADE"))
+    usuario_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    rotulador_externo: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    rodada: Mapped[str] = mapped_column(String(20))
+    cena: Mapped[str] = mapped_column(String(20))
+    reflexo: Mapped[bool] = mapped_column(Boolean)
+    fora_de_foco: Mapped[bool] = mapped_column(Boolean)
+    tampa_suja: Mapped[bool] = mapped_column(Boolean)
+    enquadramento: Mapped[bool] = mapped_column(Boolean)
+    display_apagado: Mapped[bool] = mapped_column(Boolean)
+    legivel: Mapped[bool] = mapped_column(Boolean)
+    segundos_na_foto: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Quando o rotulador decidiu (no lab02, o `gravado_em` do CSV do app).
+    gravado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    foto: Mapped["Foto"] = relationship()

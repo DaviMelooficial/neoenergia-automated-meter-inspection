@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo tipos-front \
+        rotulos-importar rotulos-kappa rotulos-exportar \
         api-dev worker-dev front-dev test lint up down logs reset health lab02
 
 help:  ## lista os alvos disponiveis
@@ -79,6 +80,15 @@ relatorio-heuristicas:  ## exporta os scores do banco e gera ml/reports/heuristi
 	  -v ON_ERROR_STOP=1 -q < ml/reports/heuristicas_exportacao.sql > ml/artifacts/heuristicas_exportacao.csv
 	cd ml && uv run python -m mlinsp.relatorio_heuristicas --exportacao artifacts/heuristicas_exportacao.csv \
 	  --base "../Base cliente" --limiar $(LIMIAR)
+
+rotulos-importar:  ## importa os 500 rotulos do Lab 2 (lab-02/rotulos/rotulos.csv) na rodada lab02; idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-lab02
+
+rotulos-kappa:  ## kappa de Cohen por classe e por par (RODADAS="a b" para outras rodadas; padrao lab02)
+	cd app/backend && uv run python -m inspecao.rotulagem.cli kappa $(foreach r,$(RODADAS),--rodada $(r))
+
+rotulos-exportar:  ## grava ml/artifacts/rotulos.csv consolidado por maioria (RODADAS="..." opcional)
+	cd app/backend && uv run python -m inspecao.rotulagem.cli exportar $(foreach r,$(RODADAS),--rodada $(r))
 
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo

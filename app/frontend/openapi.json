@@ -1946,6 +1946,22 @@
    },
    "ConcordanciaAuditoriaOut": {
     "properties": {
+     "rotulos_de_calibracao": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Rotulos De Calibracao",
+      "description": "rotulos por rodada de calibracao/treino excluida da medida"
+     },
+     "exclusao_incompleta": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Exclusao Incompleta",
+      "description": "rodadas obrigatorias (lab02, inspecao_m5) sem nenhum rotulo importado"
+     },
      "taxa_configurada": {
       "type": "number",
       "title": "Taxa Configurada"
@@ -2072,6 +2088,8 @@
     },
     "type": "object",
     "required": [
+     "rotulos_de_calibracao",
+     "exclusao_incompleta",
      "taxa_configurada",
      "taxa_auto_rejeitada",
      "min_pares",
@@ -4337,7 +4355,8 @@
      "a",
      "b",
      "desempate",
-     "producao"
+     "producao",
+     "inspecao_m5"
     ],
     "title": "RodadaRotulagem",
     "description": "`lab02` e importada do app `rotulador/`; `a`, `b` e `desempate` sao feitas na\ntela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8)."

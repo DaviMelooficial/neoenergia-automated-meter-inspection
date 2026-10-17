@@ -722,6 +722,18 @@ export interface components {
          * @description `detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares.
          */
         ConcordanciaAuditoriaOut: {
+            /**
+             * Rotulos De Calibracao
+             * @description rotulos por rodada de calibracao/treino excluida da medida
+             */
+            rotulos_de_calibracao: {
+                [key: string]: number;
+            };
+            /**
+             * Exclusao Incompleta
+             * @description rodadas obrigatorias (lab02, inspecao_m5) sem nenhum rotulo importado
+             */
+            exclusao_incompleta: string[];
             /** Taxa Configurada */
             taxa_configurada: number;
             /** Taxa Auto Rejeitada */
@@ -1501,7 +1513,7 @@ export interface components {
          *     tela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8).
          * @enum {string}
          */
-        RodadaRotulagem: "lab02" | "a" | "b" | "desempate" | "producao";
+        RodadaRotulagem: "lab02" | "a" | "b" | "desempate" | "producao" | "inspecao_m5";
         /**
          * RotuloIn
          * @description Esquema v2. As regras de consistencia sao recusadas (422), nao corrigidas.

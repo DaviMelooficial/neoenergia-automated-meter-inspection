@@ -721,6 +721,8 @@ export interface components {
         ConcordanciaAuditoriaOut: {
             /** Taxa Configurada */
             taxa_configurada: number;
+            /** Taxa Auto Rejeitada */
+            taxa_auto_rejeitada: number;
             /** Min Pares */
             min_pares: number;
             /** Detalhe */
@@ -733,6 +735,8 @@ export interface components {
             taxa_observada: number | null;
             /** Pendentes */
             pendentes: number | null;
+            /** Invalidadas */
+            invalidadas: number | null;
             /** Decididas */
             decididas: number | null;
             total: components["schemas"]["TotalConcordanciaOut"];
@@ -857,6 +861,20 @@ export interface components {
             erros: number | null;
             /** Taxa Erro */
             taxa_erro: number | null;
+            /**
+             * Limite Superior Erro
+             * @description limite superior unilateral de 95% (Clopper-Pearson) do erro
+             */
+            limite_superior_erro: number | null;
+            /** Alvo Erro */
+            alvo_erro: number;
+            /**
+             * Necessarias
+             * @description auditorias que sustentariam erro <= alvo com 95%, com os erros de hoje
+             */
+            necessarias: number | null;
+            /** Alvo Atingido */
+            alvo_atingido: boolean | null;
             /** Suprimido */
             suprimido: boolean;
         };
@@ -1071,8 +1089,8 @@ export interface components {
             quarentena: components["schemas"]["QuarentenaCegaOut"][];
             /** Reservado Ate */
             reservado_ate: string | null;
-            /** Restantes */
-            restantes: number;
+            /** Ha Mais */
+            ha_mais: boolean;
         };
         /** JobOut */
         JobOut: {

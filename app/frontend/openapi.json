@@ -1947,6 +1947,10 @@
       "type": "number",
       "title": "Taxa Configurada"
      },
+     "taxa_auto_rejeitada": {
+      "type": "number",
+      "title": "Taxa Auto Rejeitada"
+     },
      "min_pares": {
       "type": "integer",
       "title": "Min Pares"
@@ -1999,6 +2003,17 @@
       ],
       "title": "Pendentes"
      },
+     "invalidadas": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Invalidadas"
+     },
      "decididas": {
       "anyOf": [
        {
@@ -2037,12 +2052,14 @@
     "type": "object",
     "required": [
      "taxa_configurada",
+     "taxa_auto_rejeitada",
      "min_pares",
      "detalhe",
      "decisoes_na_fila",
      "sorteadas",
      "taxa_observada",
      "pendentes",
+     "invalidadas",
      "decididas",
      "total",
      "auto_aprovadas",
@@ -2433,6 +2450,45 @@
       ],
       "title": "Taxa Erro"
      },
+     "limite_superior_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limite Superior Erro",
+      "description": "limite superior unilateral de 95% (Clopper-Pearson) do erro"
+     },
+     "alvo_erro": {
+      "type": "number",
+      "title": "Alvo Erro"
+     },
+     "necessarias": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Necessarias",
+      "description": "auditorias que sustentariam erro <= alvo com 95%, com os erros de hoje"
+     },
+     "alvo_atingido": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alvo Atingido"
+     },
      "suprimido": {
       "type": "boolean",
       "title": "Suprimido"
@@ -2443,6 +2499,10 @@
      "n",
      "erros",
      "taxa_erro",
+     "limite_superior_erro",
+     "alvo_erro",
+     "necessarias",
+     "alvo_atingido",
      "suprimido"
     ],
     "title": "DecisaoAutomaticaAuditoriaOut",
@@ -3099,9 +3159,9 @@
       ],
       "title": "Reservado Ate"
      },
-     "restantes": {
-      "type": "integer",
-      "title": "Restantes"
+     "ha_mais": {
+      "type": "boolean",
+      "title": "Ha Mais"
      }
     },
     "additionalProperties": false,
@@ -3118,7 +3178,7 @@
      "fotos",
      "quarentena",
      "reservado_ate",
-     "restantes"
+     "ha_mais"
     ],
     "title": "ItemAuditoriaOut",
     "description": "O que o segundo revisor recebe, igual para as origens fila, auto_aprovada e\nauto_rejeitada. Lista fechada (extra=\"forbid\"): nada de status, historico, revisao\nanterior, scores da maquina nem id da leitura. O teste de vazamento confere."

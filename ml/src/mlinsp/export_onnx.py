@@ -2,8 +2,10 @@
 
     uv run python -m mlinsp.export_onnx --rodada <timestamp> --base "../Base cliente"
 
-Gera `artifacts/qualidade.onnx` e `artifacts/qualidade.json` (o contrato lido pelo
-`DetectorOnnx` do backend) e copia o json para `reports/<rodada>/`.
+Gera `artifacts/<versao>.onnx` e `artifacts/<versao>.json` (ex.: `qualidade@v1.onnx`; o
+json e o contrato lido pelo `DetectorOnnx` do backend) e copia o json para
+`reports/<rodada>/qualidade.json`. Cada versao tem o seu arquivo: exportar a proxima nao
+sobrescreve a que o worker carrega (MODELO_QUALIDADE_PATH aponta a versao em uso).
 
 - opset 17, eixo de lote dinamico, entrada `float32[N, 3, 224, 224]` ja normalizada;
   saidas = LOGITS de cena (4), defeitos (5) e legivel (1). Temperatura, sigmoide e
@@ -14,10 +16,11 @@ Gera `artifacts/qualidade.onnx` e `artifacts/qualidade.json` (o contrato lido pe
 
 O .onnx NAO vai para o git: ml/artifacts/ e ignorado (binario de ~4 MB que muda a cada
 treino, derivado de pesos ImageNet de terceiros e de fotos do cliente). O json registra o
-sha256 do .onnx exportado, e a copia em reports/<rodada>/ versiona esse hash: o backend
-recusa um .onnx cujo hash nao bate com o json, e um json cuja versao, rodada ou limiar
-diverge da politica registrada para aquela versao. Por isso uma rodada nova so exporta com
-`--versao` nova (a guarda olha os qualidade.json ja versionados em reports/).
+sha256 do .onnx exportado, e a copia em reports/<rodada>/ versiona esse hash. O backend
+recusa um .onnx cujo hash nao bate com o json, e um json cuja versao, rodada, limiar ou
+sha256 diverge da politica registrada para aquela versao (o sha amarra tambem a semente).
+Por isso uma rodada nova so exporta com `--versao` nova (a guarda olha os qualidade.json ja
+versionados em reports/), e a politica nova dela entra no backend com o sha impresso aqui.
 """
 
 from __future__ import annotations
@@ -140,13 +143,14 @@ def main(argv: list[str] | None = None) -> int:
     amostra = sorted(rng.choice(teste, size=N_PARIDADE, replace=False))
     imagens = qualidade.carregar_lote(list(part.loc[amostra, "caminho"]))
 
-    temporario = args.artefatos / "qualidade.onnx.tmp"
+    # Um arquivo por versao: exportar a proxima nao sobrescreve a que o worker usa.
+    temporario = args.artefatos / f"{args.versao}.onnx.tmp"
     exportar(m, temporario)
     par = paridade(m, temporario, imagens)
     if not par["criterio"] < TOLERANCIA:
         temporario.unlink()
         raise SystemExit(f"paridade torch x onnxruntime falhou: {par} (tolerancia {TOLERANCIA})")
-    destino = args.artefatos / "qualidade.onnx"
+    destino = args.artefatos / f"{args.versao}.onnx"
     temporario.replace(destino)
 
     contrato = {
@@ -177,9 +181,9 @@ def main(argv: list[str] | None = None) -> int:
             "criterio_entrada": av["criterio_entrada"],
         },
     }
-    qualidade.salvar_json(args.artefatos / "qualidade.json", contrato)
+    qualidade.salvar_json(args.artefatos / f"{args.versao}.json", contrato)
     qualidade.salvar_json(dir_rep / "qualidade.json", contrato)
-    print(f"qualidade.onnx ({contrato['onnx_bytes'] / 1e6:.1f} MB, sha256 "
+    print(f"{destino.name} ({contrato['onnx_bytes'] / 1e6:.1f} MB, sha256 "
           f"{contrato['onnx_sha256'][:12]}), paridade {par} em {N_PARIDADE} fotos")
     return 0
 

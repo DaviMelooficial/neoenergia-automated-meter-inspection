@@ -1,6 +1,7 @@
 """Detector do modelo de qualidade treinado (marco M7), via onnxruntime. Sem torch.
 
-O contrato vem de `qualidade.json`, gerado ao lado do `.onnx` por
+O contrato vem de `<versao>.json` (ex.: `qualidade@v1.json`), gerado ao lado do
+`<versao>.onnx` por
 `ml/src/mlinsp/export_onnx.py`: pre-processamento, nomes das saidas, temperaturas e o
 sha256 do `.onnx`, a rodada e o limiar, conferidos contra a politica registrada para a
 versao (`politica.validar_contrato_onnx`). O pre-processamento abaixo repete
@@ -72,7 +73,7 @@ class DetectorOnnx:
         if not caminho_onnx.is_file() or not caminho_json.is_file():
             raise RuntimeError(
                 f"modelo de qualidade ausente: {caminho_onnx} e {caminho_json.name} "
-                "(gere com `make m7-exportar`)"
+                "(gere com `make m7-exportar`; MODELO_QUALIDADE_PATH aponta a versao em uso)"
             )
         self.contrato: dict[str, Any] = json.loads(caminho_json.read_text(encoding="utf-8"))
         obtido = _sha256(caminho_onnx)
@@ -83,7 +84,13 @@ class DetectorOnnx:
             )
         from inspecao.inference.politica import validar_contrato_onnx
 
-        self.politica = validar_contrato_onnx(self.contrato)
+        # So valida: quem escolhe a politica e o worker, por `politica_para(nome)`.
+        validar_contrato_onnx(self.contrato)
+        if caminho_onnx.stem != self.contrato["versao"]:
+            raise RuntimeError(
+                f"{caminho_onnx.name} contem {self.contrato['versao']}: o arquivo de cada versao "
+                "se chama <versao>.onnx (ex.: qualidade@v1.onnx)"
+            )
         self.nome: str = self.contrato["versao"]
         opcoes = ort.SessionOptions()
         # Lote 1 em CPU: 1 thread por worker e o mais rapido (medido no Lab 2) e nao

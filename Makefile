@@ -129,13 +129,15 @@ m7-avaliar:  ## metricas no teste contra a heuristica e criterio de entrada (ROD
 	@test -n "$(RODADA)" || (echo 'uso: make m7-avaliar RODADA=AAAAMMDD-HHMMSS'; exit 1)
 	cd ml && uv run python -m mlinsp.evaluate --rodada $(RODADA) $(M7_ENTRADAS)
 
-m7-exportar:  ## gera ml/artifacts/qualidade.onnx + qualidade.json com paridade < 1e-4 (RODADA=...)
+m7-exportar:  ## gera ml/artifacts/<versao>.onnx + .json com paridade < 1e-4 (RODADA=..., VERSAO=qualidade@v1)
 	@test -n "$(RODADA)" || (echo 'uso: make m7-exportar RODADA=AAAAMMDD-HHMMSS'; exit 1)
-	cd ml && uv run python -m mlinsp.export_onnx --rodada $(RODADA) --base "../Base cliente"
+	cd ml && uv run python -m mlinsp.export_onnx --rodada $(RODADA) --base "../Base cliente" \
+	  $(if $(VERSAO),--versao $(VERSAO),)
 
-m7-paridade:  ## DetectorOnnx do backend contra o torch na base inteira, sem banco (RODADA=...)
+m7-paridade:  ## DetectorOnnx do backend contra o torch na base inteira, sem banco (RODADA=..., VERSAO=)
 	@test -n "$(RODADA)" || (echo 'uso: make m7-paridade RODADA=AAAAMMDD-HHMMSS'; exit 1)
-	cd app/backend && uv run python -m inspecao.inference.paridade_onnx \
+	cd app/backend && MODELO_QUALIDADE_PATH=./ml/artifacts/$(or $(VERSAO),qualidade@v1).onnx \
+	  uv run python -m inspecao.inference.paridade_onnx \
 	  --referencia ../../ml/artifacts/m7/$(RODADA)/p_ilegivel_base.csv \
 	  --base "../../Base cliente" --saida ../../ml/reports/$(RODADA)/paridade_backend.json
 

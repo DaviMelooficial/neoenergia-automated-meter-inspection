@@ -3,7 +3,7 @@
 Usado por `train_quality`, `calibrate`, `evaluate` e `export_onnx` (um modulo por etapa do
 plano 04, secao 4). O contrato com o backend esta aqui e em nenhum outro lugar:
 `letterbox` + `normalizar` e exatamente o que `app/backend/.../qualidade_onnx.py` repete em
-numpy, e `qualidade.json` (gerado por `export_onnx`) carrega os mesmos numeros.
+numpy, e `<versao>.json` (gerado por `export_onnx`) carrega os mesmos numeros.
 
 Decisoes, com a evidencia de cada uma:
 - Entrada 224 letterbox, nao 480x360 nativa: no Lab 2 (K1) nenhuma metrica de qualidade

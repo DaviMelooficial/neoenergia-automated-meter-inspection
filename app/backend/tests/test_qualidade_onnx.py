@@ -6,6 +6,7 @@ preto sai ilegivel. O pre-processamento e conferido contra valores gerados por
 `ml/src/mlinsp/qualidade.py` (letterbox + normalizar), que e o que o modelo real viu.
 """
 
+import dataclasses
 import hashlib
 import json
 
@@ -18,6 +19,7 @@ from sqlalchemy import select
 
 from inspecao.config import Settings, get_settings
 from inspecao.enums import StatusLeitura
+from inspecao.inference import politica as politica_mod
 from inspecao.inference.detector import carregar_detector
 from inspecao.inference.politica import (
     CLASSES,
@@ -104,12 +106,20 @@ def modelo_minusculo() -> onnx.ModelProto:
 
 
 @pytest.fixture
-def modelo_onnx(tmp_path):
-    caminho = tmp_path / "qualidade.onnx"
+def modelo_onnx(tmp_path, monkeypatch):
+    """O modelo minusculo como qualidade@v1, com a politica@v2 registrada para o sha dele
+    (a real aponta o sha do .onnx exportado no ml, que nao existe no teste)."""
+    caminho = tmp_path / "qualidade@v1.onnx"
     caminho.write_bytes(modelo_minusculo().SerializeToString())
+    sha = hashlib.sha256(caminho.read_bytes()).hexdigest()
+    monkeypatch.setitem(
+        politica_mod.POLITICA_DO_DETECTOR,
+        "qualidade@v1",
+        dataclasses.replace(POLITICA_V2, onnx_sha256=sha),
+    )
     contrato = {
         "versao": "qualidade@v1",
-        "onnx_sha256": hashlib.sha256(caminho.read_bytes()).hexdigest(),
+        "onnx_sha256": sha,
         "entrada": ENTRADA,
         "saidas": {"cena": CENAS, "defeitos": DEFEITOS, "legivel": ["legivel"]},
         "defeito_para_classe": {
@@ -187,6 +197,8 @@ def test_recusa_onnx_que_nao_bate_com_o_hash_do_contrato(modelo_onnx):
         ({"limiar_rejeita": 0.5}, "limiar_rejeita"),
         ({"versao": "heuristica@v1"}, "sem politica calibrada"),  # herdaria a politica@v1
         ({"versao": "qualidade@v9"}, "sem politica calibrada"),  # versao sem politica
+        ({"versao": None}, "sem politica calibrada"),  # json sem versao
+        ({"onnx_sha256": "f" * 64}, "sha256"),  # outro arquivo (ex.: outra semente)
     ],
 )
 def test_recusa_contrato_que_diverge_da_politica_registrada(modelo_onnx, campos, mensagem):
@@ -197,15 +209,38 @@ def test_recusa_contrato_que_diverge_da_politica_registrada(modelo_onnx, campos,
         carregar_detector(Settings(detector_qualidade="onnx", modelo_qualidade_path=modelo_onnx))
 
 
-def test_recalcular_usa_a_politica_do_detector_configurado(modelo_onnx):
-    from inspecao.jobs.cli import politica_padrao
+def test_limiar_do_contrato_compara_com_tolerancia(modelo_onnx):
+    reescrever_contrato(modelo_onnx, limiar_rejeita=POLITICA_V2.limiar_rejeita + 1e-12)
+    DetectorOnnx(modelo_onnx)  # mesmo numero depois de ida e volta por json/float
+    reescrever_contrato(modelo_onnx, limiar_rejeita=POLITICA_V2.limiar_rejeita + 1e-3)
+    with pytest.raises(RuntimeError, match="limiar_rejeita"):
+        DetectorOnnx(modelo_onnx)
 
-    assert (
-        politica_padrao(Settings(detector_qualidade="onnx", modelo_qualidade_path=modelo_onnx))
-        == "politica@v2"
-    )
-    assert politica_padrao(Settings(detector_qualidade="heuristica")) == "politica@v1"
-    assert politica_padrao(Settings(detector_qualidade="nulo")) == "politica@v0"
+
+def test_arquivo_tem_o_nome_da_versao(modelo_onnx):
+    """Um arquivo por versao: exportar a proxima nao sobrescreve a que o worker usa."""
+    outro = modelo_onnx.with_name("qualidade@v2.onnx")
+    outro.write_bytes(modelo_onnx.read_bytes())
+    outro.with_suffix(".json").write_text(modelo_onnx.with_suffix(".json").read_text())
+    with pytest.raises(RuntimeError, match="qualidade@v2.onnx contem qualidade@v1"):
+        DetectorOnnx(outro)
+
+
+def test_recalcular_sem_politica_deixa_o_worker_decidir():
+    """Sem --politica o payload vai sem `politica`: o handler usa a do worker, que validou o
+    contrato do modelo. O CLI nao resolve pela config (que pode apontar versao sem politica
+    e cair na v0, mandando toda rejeitada para a fila)."""
+    from inspecao.jobs.cli import payload_recalcular
+
+    assert payload_recalcular(None) == {}
+    assert payload_recalcular("politica@v1") == {"politica": "politica@v1"}
+    with pytest.raises(LookupError):
+        payload_recalcular("politica@v9")
+
+
+def test_detector_sem_politica_registrada_e_erro():
+    with pytest.raises(LookupError, match="sem politica registrada"):
+        politica_para("qualidade@v2")
 
 
 def test_recusa_modelo_sem_contrato(modelo_onnx):
@@ -238,7 +273,6 @@ def test_cada_detector_tem_a_sua_politica():
     assert politica_para("nulo@v0") is POLITICA_V0
     assert politica_para("heuristica@v1") is POLITICA_V1
     assert politica_para("qualidade@v1") is POLITICA_V2
-    assert politica_para("desconhecido@v9") is POLITICA_V0  # sem calibracao: nunca rejeita
     assert POLITICA_V1.chaves == CLASSES  # a do M5 nao mudou
 
 

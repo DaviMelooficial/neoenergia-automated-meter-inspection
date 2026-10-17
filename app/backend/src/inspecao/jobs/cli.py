@@ -12,11 +12,9 @@ import sys
 
 from sqlalchemy import select
 
-from inspecao.config import Settings, get_settings
 from inspecao.db import SessionLocal
 from inspecao.enums import TipoJob
 from inspecao.inference import politica as politica_mod
-from inspecao.inference.detector import nome_do_detector_configurado
 from inspecao.jobs import fila
 from inspecao.models import Lote
 
@@ -43,17 +41,19 @@ def reprocessar(nomes: list[str] | None) -> int:
     return _enfileirar_por_lote(nomes, TipoJob.REPROCESSAR_LOTE, {})
 
 
-def politica_padrao(settings: Settings) -> str:
-    """A politica do detector configurado (a mesma que o worker usaria), nao uma fixa:
-    recalcular com a v1 enquanto o worker roda o modelo desfaria a v2 em silencio."""
-    return politica_mod.politica_para(nome_do_detector_configurado(settings)).versao
+def payload_recalcular(versao: str | None) -> dict:
+    """Sem versao explicita o payload vai sem `politica`: o worker aplica a dele, a do
+    detector que ele carregou e cujo contrato validou. O CLI nao adivinha pela config, que
+    pode estar apontando um modelo sem politica registrada."""
+    if versao is None:
+        return {}
+    politica_mod.obter(versao)  # falha aqui, nao no worker, se a versao nao existe
+    return {"politica": versao}
 
 
 def recalcular(nomes: list[str] | None, versao: str | None) -> int:
-    versao = versao or politica_padrao(get_settings())
-    politica_mod.obter(versao)  # falha aqui, nao no worker, se a versao nao existe
-    log.info("recalcular_decisao com %s", versao)
-    return _enfileirar_por_lote(nomes, TipoJob.RECALCULAR_DECISAO, {"politica": versao})
+    log.info("recalcular_decisao com %s", versao or "a politica do worker")
+    return _enfileirar_por_lote(nomes, TipoJob.RECALCULAR_DECISAO, payload_recalcular(versao))
 
 
 def resumo() -> int:

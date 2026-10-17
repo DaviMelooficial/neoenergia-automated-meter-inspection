@@ -83,7 +83,9 @@ class Settings(BaseSettings):
     # padrao), "onnx" (modelo do M7 em MODELO_QUALIDADE_PATH, com o qualidade.json ao
     # lado) ou "nulo" (tudo para humano). A politica segue o detector (politica_para).
     detector_qualidade: str = "heuristica"
-    modelo_qualidade_path: Path = Path("./ml/artifacts/qualidade.onnx")
+    # Um arquivo por versao (<versao>.onnx + <versao>.json): exportar a proxima versao nao
+    # mexe no arquivo que o worker esta usando.
+    modelo_qualidade_path: Path = Path("./ml/artifacts/qualidade@v1.onnx")
     modelo_qualidade_ativo: bool = False
 
     PLACEHOLDERS_INSEGUROS: ClassVar[frozenset[str]] = frozenset(

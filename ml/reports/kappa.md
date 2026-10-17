@@ -66,9 +66,19 @@ n/d = kappa indefinido (os dois usaram uma única categoria em todas as fotos).
    rótulo que a fere.
 6. **`POST /rotulagem/proxima`**, e não o `GET` do doc 05, seção 4: segue o doc 03
    (seção 4.2) e a fila humana, e a rota não é cacheável por proxy.
-7. **Kappa das rodadas cegas só para admin ou para quem não votou nelas.** Com n pequeno,
-   o kappa por par antes e depois do próprio voto revela o voto do outro (diferencial).
-   O `lab02` já fechou e fica aberto a supervisor.
+7. **Cegueira também nos agregados: o kappa das rodadas cegas é só para admin, e admin
+   não rotula nelas.** Qualquer consulta de consolidação, kappa ou export que inclua `a`,
+   `b` ou `desempate` (sozinha ou com `lab02`) é só de admin; supervisor vê só o `lab02`,
+   que já fechou. Admin recebe 403 no `/rotulagem/proxima` e no `POST /rotulagem/{id}`
+   dessas rodadas. Decidir pelo voto passado não bastava: com n pequeno, o kappa por par
+   antes e depois do próprio voto revela o voto do outro, e o terceiro do desempate, que
+   nunca votou em a/b, leria os votos antes de receber a foto divergente. A ordem do
+   `/proxima` é própria de cada rotulador (md5 de "foto:usuário"), para que um não saiba
+   qual foto o outro vai receber.
+8. **A migração `c3e1a7d9f204` foi editada no lugar** antes de sair do branch (coluna
+   `controle` e índice `uq_rotulos_foto_usuario_dupla_cega`). Banco que já aplicou uma
+   versão anterior dela precisa de `alembic downgrade 1840bea5fdb9` e `upgrade head`
+   (os rótulos da tabela se perdem; reimportar com `make rotulos-importar`).
 
 ## Risco residual
 

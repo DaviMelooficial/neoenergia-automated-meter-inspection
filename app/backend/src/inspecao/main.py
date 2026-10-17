@@ -14,6 +14,7 @@ from inspecao.auth.service import garantir_admin
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal, engine
 from inspecao.routers import (
+    auditoria,
     auth,
     fila_humana,
     metricas,
@@ -128,5 +129,14 @@ def health() -> dict:
     }
 
 
-for roteador in (auth, operacao, fila_humana, quarentena, metricas, rotulagem, usuarios):
+for roteador in (
+    auth,
+    operacao,
+    fila_humana,
+    auditoria,
+    quarentena,
+    metricas,
+    rotulagem,
+    usuarios,
+):
     app.include_router(roteador.router)

@@ -1,17 +1,21 @@
 """Metricas operacionais calculadas sobre o proprio banco. Sem Prometheus.
 
 `/metricas/qualidade` preenche a lacuna de baseline do doc 02: o AS-IS nao
-media nada disso. `/metricas/drift` devolve a serie por lote; os sinais que
-dependem de modelo ficam nulos ate o M5.
+media nada disso. `/metricas/drift` devolve a serie por lote com os 5 sinais do
+plano 04, secao 7.1, contra a baseline. `/metricas/auto-aprovacao` explica por que
+a auto-aprovacao esta desligada e conta a evidencia acumulada; `/metricas/auditoria`
+e a concordancia continua da auditoria amostral. Definicoes em `inspecao.monitoramento`.
 """
 
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, extract, func, select
 from sqlalchemy.orm import Session, aliased
 
+from inspecao import auditoria
 from inspecao.auth.deps import Supervisor
+from inspecao.config import get_settings
 from inspecao.db import get_db
 from inspecao.enums import DecisaoHumana, StatusLeitura
 from inspecao.jobs import fila
@@ -24,6 +28,10 @@ from inspecao.models import (
     ResultadoInferencia,
     RevisaoHumana,
 )
+from inspecao.monitoramento import auto_aprovacao, sinais
+from inspecao.monitoramento import drift as drift_mod
+from inspecao.monitoramento import qualidade as qualidade_mod
+from inspecao.schemas import AutoAprovacaoOut, ConcordanciaAuditoriaOut, DriftOut, QualidadeOut
 
 router = APIRouter(prefix="/metricas", tags=["metricas"])
 DB = Annotated[Session, Depends(get_db)]
@@ -69,8 +77,22 @@ def _tempo_medio_decisao(db: Session) -> float | None:
     return float(valor) if valor is not None else None
 
 
-@router.get("/qualidade")
-def qualidade(db: DB, _: Supervisor) -> dict[str, Any]:
+Politica = Annotated[
+    str | None,
+    Query(description="versao da politica (registro POLITICAS); padrao: a ativa"),
+]
+
+
+def _politica(versao: str | None):
+    try:
+        return sinais.obter_politica(versao)
+    except LookupError as erro:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(erro)) from erro
+
+
+@router.get("/qualidade", response_model=QualidadeOut)
+def qualidade(db: DB, _: Supervisor, politica: Politica = None) -> QualidadeOut:
+    p = _politica(politica)
     total = db.scalar(select(func.count()).select_from(Leitura)) or 0
     com_foto = (
         db.scalar(
@@ -102,34 +124,43 @@ def qualidade(db: DB, _: Supervisor) -> dict[str, Any]:
             select(RevisaoHumana.usuario_id, func.count()).group_by(RevisaoHumana.usuario_id)
         ).all()
     ]
+    baseline, por_lote = qualidade_mod.por_lote(db)
 
-    return {
-        "periodo": {"de": periodo[0], "ate": periodo[1]},
-        "total_leituras": total,
-        "com_foto": com_foto,
-        "sem_foto": total - com_foto,
-        "auto_decididas": {
-            "quantidade": auto,
-            "percentual": round(100 * auto / com_foto, 2) if com_foto else 0.0,
-        },
-        "fila_humana": {"pendentes": pendentes, "decididas": decididas},
-        "por_status": por_status,
-        "quarentena_por_tipo": _quarentena_por_tipo(db),
-        "defeitos_qualidade": motivos,
-        "revisoes_por_decisao": revisoes,
-        "produtividade_por_auditor": por_auditor,
-        "tempo_medio_decisao_segundos": _tempo_medio_decisao(db),
-        "jobs": fila.resumo(db),
-    }
+    return QualidadeOut.model_validate(
+        {
+            "periodo": {"de": periodo[0], "ate": periodo[1]},
+            "total_leituras": total,
+            "com_foto": com_foto,
+            "sem_foto": total - com_foto,
+            "auto_decididas": {
+                "quantidade": auto,
+                "percentual": round(100 * auto / com_foto, 2) if com_foto else 0.0,
+            },
+            "fila_humana": {"pendentes": pendentes, "decididas": decididas},
+            "por_status": por_status,
+            "quarentena_por_tipo": _quarentena_por_tipo(db),
+            "defeitos_qualidade": motivos,
+            "revisoes_por_decisao": revisoes,
+            "produtividade_por_auditor": por_auditor,
+            "tempo_medio_decisao_segundos": _tempo_medio_decisao(db),
+            "jobs": fila.resumo(db),
+            "baseline": baseline,
+            "por_lote": por_lote,
+            "por_detector": qualidade_mod.por_detector(db),
+            "concordancia_maquina_humano": qualidade_mod.concordancia_maquina_humano(db, p),
+        }
+    )
 
 
-@router.get("/drift")
-def drift(db: DB, _: Supervisor) -> dict[str, Any]:
-    """Serie por lote. Sinais de modelo (confianca media, discordancia) so a partir do M5."""
-    lotes = db.scalars(select(Lote).order_by(Lote.data_extracao, Lote.nome)).all()
+@router.get("/drift", response_model=DriftOut)
+def drift(db: DB, _: Supervisor, politica: Politica = None) -> DriftOut:
+    """Serie por lote com os 5 sinais contra a baseline (criterio em `monitoramento.drift`),
+    mais as contagens operacionais de cada lote."""
+    calculo = drift_mod.calcular(db, _politica(politica), get_settings().drift_lotes_baseline)
+    lotes = {lote.id: lote for lote in db.scalars(select(Lote)).all()}
     serie = []
-    for lote in lotes:
-        por_status = _por_status(db, lote.id)
+    for item in calculo.pop("serie"):
+        lote = lotes[item["lote_id"]]
         com_foto = (
             db.scalar(
                 select(func.count())
@@ -138,13 +169,6 @@ def drift(db: DB, _: Supervisor) -> dict[str, Any]:
             )
             or 0
         )
-        rejeitadas = por_status.get(StatusLeitura.REJEITADA_QUALIDADE.value, 0)
-        confianca = db.scalar(
-            select(func.avg(HistoricoStatus.confianca))
-            .join(Leitura, Leitura.id == HistoricoStatus.leitura_id)
-            .where(Leitura.lote_id == lote.id, HistoricoStatus.confianca.is_not(None))
-        )
-        # discordancia: modelo mandou para humano e humano reprovou / aprovou
         humano = db.execute(
             select(
                 func.sum(
@@ -161,19 +185,29 @@ def drift(db: DB, _: Supervisor) -> dict[str, Any]:
             .where(Foto.lote_id == lote.id)
         ).all()
         serie.append(
-            {
-                "lote": lote.nome,
-                "data_extracao": lote.data_extracao,
+            item
+            | {
                 "total": lote.total_linhas,
                 "com_foto": com_foto,
-                "por_status": por_status,
+                "por_status": _por_status(db, lote.id),
                 "quarentena_por_tipo": _quarentena_por_tipo(db, lote.id),
-                "taxa_auto_rejeicao": round(rejeitadas / com_foto, 4) if com_foto else None,
-                "confianca_media": float(confianca) if confianca is not None else None,
                 "taxa_reprovacao_humana": (
                     round(int(humano[0] or 0) / humano[1], 4) if humano[1] else None
                 ),
-                "modelos": modelos,
+                "modelos": sorted(modelos),
             }
         )
-    return {"lotes": serie}
+    return DriftOut.model_validate(calculo | {"lotes": serie})
+
+
+@router.get("/auto-aprovacao", response_model=AutoAprovacaoOut)
+def estado_auto_aprovacao(db: DB, _: Supervisor, politica: Politica = None) -> AutoAprovacaoOut:
+    """Estado dos limiares da politica e o contador de evidencia para ligar a
+    auto-aprovacao (600 rotuladas na zona de aprovacao, zero erro)."""
+    return AutoAprovacaoOut.model_validate(auto_aprovacao.estado(db, _politica(politica)))
+
+
+@router.get("/auditoria", response_model=ConcordanciaAuditoriaOut)
+def concordancia_auditoria(db: DB, _: Supervisor) -> ConcordanciaAuditoriaOut:
+    """Concordancia primeiro x segundo revisor da auditoria amostral (so agregados)."""
+    return ConcordanciaAuditoriaOut.model_validate(auditoria.concordancia(db))

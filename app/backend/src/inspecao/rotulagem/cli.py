@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.comando == "kappa":
             return kappa(rodadas, args.relatorio)
         return exportar(args.saida, rodadas)
-    except servico.ColisaoDeRotulador as erro:
+    except (servico.ColisaoDeRotulador, servico.RodadaSemEsquemaCompleto) as erro:
         log.error("%s", erro)
         return 1
 

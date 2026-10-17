@@ -33,7 +33,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from inspecao.db import Base
-from inspecao.enums import Cena, RodadaRotulagem, StatusLeitura
+from inspecao.enums import Cena, DecisaoHumana, MotivoReprovacao, RodadaRotulagem, StatusLeitura
 
 
 class Lote(Base):
@@ -426,6 +426,33 @@ class Rotulo(Base):
             postgresql_where="rodada IN ('a', 'b', 'desempate')",
         ),
         Index("ix_rotulos_rodada_foto", "rodada", "foto_id"),
+        # Fora de `producao` o esquema v2 e completo. Em `producao` (decisao de auditor,
+        # M8) cena e os defeitos nao declarados pela decisao ficam nulos.
+        CheckConstraint(
+            "rodada = 'producao' OR (cena IS NOT NULL AND reflexo IS NOT NULL AND "
+            "fora_de_foco IS NOT NULL AND tampa_suja IS NOT NULL AND enquadramento IS NOT NULL "
+            "AND display_apagado IS NOT NULL AND legivel IS NOT NULL)",
+            name="ck_rotulos_completo",
+        ),
+        # Rotulo de producao aponta para a decisao que o gerou: a da fila ou a da
+        # auditoria amostral, exatamente uma. As outras rodadas nao apontam.
+        CheckConstraint(
+            "CASE WHEN rodada = 'producao' THEN (revisao_id IS NULL) <> (auditoria_id IS NULL) "
+            "ELSE revisao_id IS NULL AND auditoria_id IS NULL END",
+            name="ck_rotulos_origem_producao",
+        ),
+        Index(
+            "uq_rotulos_revisao",
+            "revisao_id",
+            unique=True,
+            postgresql_where="revisao_id IS NOT NULL",
+        ),
+        Index(
+            "uq_rotulos_auditoria",
+            "auditoria_id",
+            unique=True,
+            postgresql_where="auditoria_id IS NOT NULL",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -435,13 +462,14 @@ class Rotulo(Base):
     )
     rotulador_externo: Mapped[str | None] = mapped_column(String(60), nullable=True)
     rodada: Mapped[str] = mapped_column(String(20))
-    cena: Mapped[str] = mapped_column(String(20))
-    reflexo: Mapped[bool] = mapped_column(Boolean)
-    fora_de_foco: Mapped[bool] = mapped_column(Boolean)
-    tampa_suja: Mapped[bool] = mapped_column(Boolean)
-    enquadramento: Mapped[bool] = mapped_column(Boolean)
-    display_apagado: Mapped[bool] = mapped_column(Boolean)
-    legivel: Mapped[bool] = mapped_column(Boolean)
+    # Nulos so na rodada `producao` (ck_rotulos_completo).
+    cena: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reflexo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fora_de_foco: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    tampa_suja: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    enquadramento: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    display_apagado: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    legivel: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     segundos_na_foto: Mapped[float | None] = mapped_column(Float, nullable=True)
     # So no lab02: foto de controle (vista pelos 3 integrantes), lida do controle.dat do
     # app, que fica fora do git. Nulo = nao informado.
@@ -449,5 +477,93 @@ class Rotulo(Base):
     # Quando o rotulador decidiu (no lab02, o `gravado_em` do CSV do app).
     gravado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Origem do rotulo `producao` (M8): a decisao da fila ou a da auditoria amostral.
+    revisao_id: Mapped[int | None] = mapped_column(
+        ForeignKey("revisoes_humanas.id", ondelete="CASCADE", name="fk_rotulos_revisao"),
+        nullable=True,
+    )
+    auditoria_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auditorias_amostrais.id", ondelete="CASCADE", name="fk_rotulos_auditoria"),
+        nullable=True,
+    )
 
     foto: Mapped["Foto"] = relationship()
+
+
+# ---------------------------------------------------------------------------
+# Auditoria amostral (marco M8)
+# ---------------------------------------------------------------------------
+
+
+class AuditoriaAmostral(Base):
+    """Item ja decidido na fila humana, sorteado para um segundo revisor.
+
+    O segundo revisor nao ve a primeira decisao (a resposta do `/auditoria/proxima`
+    nao a traz) e nunca e o primeiro: a regra vale no POST e no banco
+    (`ck_auditorias_segundo_revisor`, `ck_auditorias_reserva_de_outro`). Uma auditoria
+    por leitura. A decisao do segundo revisor nao muda o status da leitura: serve
+    para medir a concordancia inter-anotador continua.
+    """
+
+    __tablename__ = "auditorias_amostrais"
+    __table_args__ = (
+        CheckConstraint(
+            "revisor_id IS NULL OR revisor_id <> revisor_original_id",
+            name="ck_auditorias_segundo_revisor",
+        ),
+        CheckConstraint(
+            "reservado_por IS NULL OR reservado_por <> revisor_original_id",
+            name="ck_auditorias_reserva_de_outro",
+        ),
+        CheckConstraint(
+            "(revisor_id IS NULL) = (decisao IS NULL) "
+            "AND (decisao IS NULL) = (decidida_em IS NULL)",
+            name="ck_auditorias_decisao_completa",
+        ),
+        CheckConstraint(
+            f"decisao IS NULL OR decisao IN ({_lista_sql(DecisaoHumana)})",
+            name="ck_auditorias_decisao",
+        ),
+        CheckConstraint(
+            f"motivo IS NULL OR motivo IN ({_lista_sql(MotivoReprovacao)})",
+            name="ck_auditorias_motivo",
+        ),
+        CheckConstraint(
+            "decisao IS DISTINCT FROM 'reprovada' OR motivo IS NOT NULL",
+            name="ck_auditorias_reprovada_com_motivo",
+        ),
+        CheckConstraint(
+            "decisao IS DISTINCT FROM 'aprovada' OR motivo IS NULL",
+            name="ck_auditorias_aprovada_sem_motivo",
+        ),
+        UniqueConstraint("leitura_id", name="uq_auditorias_leitura"),
+        UniqueConstraint("revisao_id", name="uq_auditorias_revisao"),
+        Index(
+            "ix_auditorias_pendentes",
+            "sorteada_em",
+            "id",
+            postgresql_where="decisao IS NULL",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    leitura_id: Mapped[int] = mapped_column(ForeignKey("leituras.id", ondelete="CASCADE"))
+    revisao_id: Mapped[int] = mapped_column(ForeignKey("revisoes_humanas.id", ondelete="CASCADE"))
+    revisor_original_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="RESTRICT"))
+    sorteada_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    reservado_por: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    reservado_ate: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revisor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True
+    )
+    decisao: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    motivo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decidida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    leitura: Mapped["Leitura"] = relationship()
+    revisao: Mapped["RevisaoHumana"] = relationship()

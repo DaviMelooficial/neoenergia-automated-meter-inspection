@@ -5,13 +5,16 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from inspecao import auditoria
 from inspecao.auth.deps import Auditor
 from inspecao.db import get_db
 from inspecao.enums import DecisaoHumana, StatusLeitura
 from inspecao.estados import transicionar
 from inspecao.models import Leitura, Lote, RevisaoHumana
+from inspecao.rotulagem import producao
 from inspecao.routers.operacao import carregar_leitura, leitura_completa, leitura_resumo
 from inspecao.schemas import DecisaoIn, LeituraOut, LeituraResumoOut, Pagina, RevisaoOut
 
@@ -192,6 +195,16 @@ def decidir(leitura_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Revi
     )
     leitura.reservado_por = None
     leitura.reservado_ate = None
-    db.commit()
+    # Active learning e auditoria amostral (M8), na transacao da decisao: se o rotulo
+    # de producao ou a auditoria nao entram, a decisao tambem nao.
+    try:
+        producao.registrar(
+            db, leitura.id, usuario.id, dados.decisao, dados.motivo, revisao_id=revisao.id
+        )
+        auditoria.sortear(db, revisao)
+        db.commit()
+    except IntegrityError as erro:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "decisao nao gravada") from erro
     db.refresh(revisao)
     return RevisaoOut.model_validate(revisao)

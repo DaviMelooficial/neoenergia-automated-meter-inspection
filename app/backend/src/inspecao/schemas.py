@@ -1,6 +1,6 @@
 """Modelos Pydantic da API. Os tipos do frontend sao gerados a partir do OpenAPI."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
@@ -259,3 +259,252 @@ class ConsolidacaoOut(BaseModel):
     fotos_com_empate: int
     por_classe: list[KappaClasseOut]
     pares: list[KappaParOut]
+
+
+# ---------------------------------------------------------------- metricas (M8)
+
+BucketDecisao = Literal[
+    "auto_rejeitada",
+    "auto_aprovada",
+    "fila_humana",
+    "aprovada_humano",
+    "reprovada_humano",
+    "em_processamento",
+]
+
+
+class DecisoesOut(BaseModel):
+    """Contagem por bucket de decisao e taxa sobre as leituras com foto."""
+
+    com_foto: int
+    contagens: dict[BucketDecisao, int]
+    taxas: dict[BucketDecisao, float | None]
+
+
+class BaselineQualidadeOut(DecisoesOut):
+    lotes: list[str]
+
+
+class DecisoesLoteOut(DecisoesOut):
+    lote: str
+    data_extracao: date | None
+
+
+class DecisoesDetectorOut(DecisoesOut):
+    detector: str
+    politica: str
+
+
+class MatrizConcordanciaOut(BaseModel):
+    """maquina_humano: `rejeita` = p_ruim >= limiar_rejeita; `ilegivel` = humano."""
+
+    rejeita_ilegivel: int
+    rejeita_legivel: int
+    passa_ilegivel: int
+    passa_legivel: int
+
+
+class ConcordanciaMaquinaOut(BaseModel):
+    fonte: Literal["producao", "lab02"]
+    politica: str
+    n: int
+    matriz: MatrizConcordanciaOut
+    concordancia: float | None
+    kappa: float | None
+
+
+class PeriodoOut(BaseModel):
+    de: date | None
+    ate: date | None
+
+
+class AutoDecididasOut(BaseModel):
+    quantidade: int
+    percentual: float
+
+
+class FilaResumoOut(BaseModel):
+    pendentes: int
+    decididas: int
+
+
+class ProdutividadeOut(BaseModel):
+    usuario_id: int
+    decisoes: int
+
+
+class QualidadeOut(BaseModel):
+    periodo: PeriodoOut
+    total_leituras: int
+    com_foto: int
+    sem_foto: int
+    auto_decididas: AutoDecididasOut
+    fila_humana: FilaResumoOut
+    por_status: dict[str, int]
+    quarentena_por_tipo: dict[str, int]
+    defeitos_qualidade: dict[str, int]
+    revisoes_por_decisao: dict[str, int]
+    produtividade_por_auditor: list[ProdutividadeOut]
+    tempo_medio_decisao_segundos: float | None
+    jobs: dict[str, dict[str, int]]
+    baseline: BaselineQualidadeOut
+    por_lote: list[DecisoesLoteOut]
+    por_detector: list[DecisoesDetectorOut]
+    concordancia_maquina_humano: list[ConcordanciaMaquinaOut]
+
+
+class SinalOut(BaseModel):
+    """`desvio` = valor - baseline. `n` = denominador do valor no lote."""
+
+    valor: float | None
+    baseline: float | None
+    desvio: float | None
+    alerta: bool
+    n: int
+
+
+class SinaisLoteOut(BaseModel):
+    classes: dict[str, SinalOut]
+    taxa_auto_rejeicao: SinalOut
+    confianca_media: SinalOut
+    discordancia: SinalOut
+    zona_cinzenta: SinalOut
+
+
+class LoteDriftOut(BaseModel):
+    lote_id: int
+    lote: str
+    data_extracao: date | None
+    na_baseline: bool
+    total: int
+    com_foto: int
+    por_status: dict[str, int]
+    quarentena_por_tipo: dict[str, int]
+    modelos: list[str]
+    taxa_reprovacao_humana: float | None
+    n_fotos_com_score: int
+    amostra_insuficiente: bool
+    p_ruim_medio: float | None
+    sinais: SinaisLoteOut
+    alertas: list[str]
+
+
+class ValoresBaselineOut(BaseModel):
+    classes: dict[str, float | None]
+    taxa_auto_rejeicao: float | None
+    zona_cinzenta: float | None
+    p_ruim_medio: float | None
+    confianca_media: float | None
+    discordancia: float | None
+
+
+class BaselineDriftOut(BaseModel):
+    lotes: list[str]
+    n_fotos_com_score: int
+    n_pares_discordancia: int
+    valores: ValoresBaselineOut | None
+
+
+class CriterioDriftOut(BaseModel):
+    min_fotos: int
+    min_pares_discordancia: int
+    classe_ativa: float
+    inicio_zona_cinzenta: float
+    desvio_classe: float
+    desvio_rejeicao: float
+    lotes_seguidos_rejeicao: int
+    queda_confianca: float
+    lotes_seguidos_confianca: int
+    subida_discordancia: float
+    subida_zona_cinzenta: float
+
+
+class DriftOut(BaseModel):
+    politica: str
+    detector: str | None
+    limiar_rejeita: float | None
+    criterio: CriterioDriftOut
+    baseline: BaselineDriftOut
+    lotes: list[LoteDriftOut]
+
+
+class AutoAprovacaoOut(BaseModel):
+    politica: str
+    detector: str | None
+    limiar_rejeita: float | None
+    limiar_aprova: float | None
+    ativa: bool
+    motivo: str
+    limiar_contagem: float
+    origem_limiar_contagem: Literal["politica", "candidato"]
+    alvo_erro: float
+    confianca: float
+    necessarias: int
+    fotos_na_zona: int
+    rotuladas_na_zona: int
+    erros: int
+    acumuladas_sem_erro: int
+    limite_superior_erro: float | None
+    meta_atingida: bool
+
+
+# ---------------------------------------------------------------- auditoria (M8)
+
+
+class ItemAuditoriaOut(BaseModel):
+    """O que o segundo revisor recebe. Lista fechada (extra="forbid"): nada de status,
+    historico, revisao anterior nem id da leitura. O teste de vazamento confere."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auditoria_id: int
+    lote: str
+    linha_csv: int
+    medidores: list[str]
+    posicao_lida: int | None
+    nota_codigo: str | None
+    nota: NotaOut | None
+    foto_principal: FotoOut | None
+    fotos: list[FotoOut]
+    inferencias: list[InferenciaOut]
+    quarentena: list[QuarentenaOut]
+    reservado_ate: datetime | None
+    restantes: int
+
+
+class AuditoriaDecisaoOut(BaseModel):
+    """So a decisao do proprio segundo revisor."""
+
+    auditoria_id: int
+    decisao: DecisaoHumana
+    motivo: MotivoReprovacao | None
+    observacao: str | None
+    decidida_em: datetime
+
+
+class MedidasConcordanciaOut(BaseModel):
+    n: int
+    concordancia_decisao: float | None
+    kappa_decisao: float | None
+    concordancia_motivo: float | None
+    kappa_motivo: float | None
+
+
+class ConcordanciaLoteOut(MedidasConcordanciaOut):
+    lote: str
+
+
+class ConcordanciaDiaOut(MedidasConcordanciaOut):
+    dia: date
+
+
+class ConcordanciaAuditoriaOut(BaseModel):
+    taxa_configurada: float
+    decisoes_na_fila: int
+    sorteadas: int
+    taxa_observada: float | None
+    pendentes: int
+    decididas: int
+    total: MedidasConcordanciaOut
+    por_lote: list[ConcordanciaLoteOut]
+    serie: list[ConcordanciaDiaOut]

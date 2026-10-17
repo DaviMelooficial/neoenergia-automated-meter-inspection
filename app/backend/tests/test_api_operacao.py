@@ -226,10 +226,12 @@ def test_metricas_qualidade_e_drift(client, contas, na_fila, db_session):
     assert len(serie) == 1
     l0 = serie[0]
     assert l0["lote"] == ls.LOTE and l0["com_foto"] == 5
-    assert l0["taxa_auto_rejeicao"] == 0.0
     assert l0["taxa_reprovacao_humana"] == 0.5
     assert l0["modelos"] == ["nulo@v0"]
-    assert l0["confianca_media"] is None  # detector nulo nao produz score
+    # detector nulo nao produz score: nenhum sinal de drift para a politica ativa (v1)
+    assert l0["n_fotos_com_score"] == 0
+    assert l0["sinais"]["taxa_auto_rejeicao"]["valor"] is None
+    assert l0["sinais"]["confianca_media"]["valor"] is None
 
 
 # ------------------------------------------------------------------ usuarios

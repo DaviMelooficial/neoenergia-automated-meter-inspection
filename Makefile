@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo tipos-front \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo auditoria-sortear tipos-front \
         rotulos-importar rotulos-kappa rotulos-exportar \
         api-dev worker-dev front-dev test lint up down logs reset health lab02
 
@@ -92,6 +92,9 @@ rotulos-exportar:  ## grava ml/artifacts/rotulos.csv consolidado por maioria (RO
 
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo
+
+auditoria-sortear:  ## sorteia para segundo revisor (5-10%) as decisoes da fila gravadas antes do M8; idempotente
+	cd app/backend && uv run python -m inspecao.jobs.cli auditoria-sortear
 
 front-dev:  ## sobe o vite dev server
 	cd app/frontend && npm run dev

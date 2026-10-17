@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from inspecao import auditoria
 from inspecao.auth.deps import Admin, Auditor
 from inspecao.db import get_db
 from inspecao.enums import TipoJob
@@ -110,7 +111,14 @@ def listar_lotes(db: DB, _: Auditor) -> list[LoteOut]:
 
 
 @router.get("/leituras/{leitura_id}", response_model=LeituraOut)
-def obter_leitura(leitura_id: int, db: DB, _: Auditor) -> LeituraOut:
+def obter_leitura(leitura_id: int, db: DB, usuario: Auditor) -> LeituraOut:
+    """Leitura completa. Em auditoria amostral pendente, so o revisor original a ve:
+    status, historico e revisao entregariam a primeira decisao ao segundo revisor."""
+    pendente = auditoria.pendente_da_leitura(db, leitura_id)
+    if pendente is not None and pendente.revisor_original_id != usuario.id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "leitura em auditoria amostral: decisao oculta"
+        )
     return leitura_completa(db, carregar_leitura(db, leitura_id))
 
 

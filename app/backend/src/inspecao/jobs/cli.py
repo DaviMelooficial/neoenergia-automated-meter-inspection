@@ -4,6 +4,7 @@ python -m inspecao.jobs.cli reprocessar --todos
 python -m inspecao.jobs.cli reprocessar --lote PSP_EXTRATLEITIMPL_200526_0352
 python -m inspecao.jobs.cli recalcular --todos --politica politica@v1
 python -m inspecao.jobs.cli resumo
+python -m inspecao.jobs.cli auditoria-sortear
 """
 
 import argparse
@@ -53,6 +54,17 @@ def resumo() -> int:
     return 0
 
 
+def auditoria_sortear() -> int:
+    """Sorteio da auditoria amostral para as decisoes gravadas antes do M8 (idempotente)."""
+    from inspecao import auditoria
+
+    with SessionLocal() as sessao:
+        n = auditoria.sortear_decididas(sessao)
+        sessao.commit()
+    print(f"{n} leituras decididas sorteadas para segundo revisor")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description="Fila de jobs")
@@ -66,7 +78,13 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--todos", action="store_true")
     rc.add_argument("--politica", default=politica_mod.POLITICA_ATUAL.versao)
     sub.add_parser("resumo", help="contagem de jobs por tipo e status")
+    sub.add_parser(
+        "auditoria-sortear", help="sorteia para auditoria amostral as decisoes sem sorteio"
+    )
     args = ap.parse_args(argv)
+
+    if args.comando == "auditoria-sortear":
+        return auditoria_sortear()
 
     if args.comando in ("reprocessar", "recalcular"):
         if not args.lote and not args.todos:

@@ -50,7 +50,7 @@ def _rotulo_saida(r: Rotulo) -> RotuloOut:
     )
 
 
-def _colisao(erro: servico.ColisaoDeRotulador, codigo: int) -> HTTPException:
+def _colisao(erro: ValueError, codigo: int) -> HTTPException:
     return HTTPException(codigo, str(erro))
 
 
@@ -96,7 +96,7 @@ def consolidacao(db: DB, usuario: Supervisor, rodada: Rodadas = None) -> Consoli
         )
     try:
         r = servico.resumir(db, rodadas)
-    except servico.ColisaoDeRotulador as erro:
+    except (servico.ColisaoDeRotulador, servico.RodadaSemEsquemaCompleto) as erro:
         raise _colisao(erro, status.HTTP_422_UNPROCESSABLE_CONTENT) from erro
     return ConsolidacaoOut(
         rodadas=rodadas,
@@ -124,7 +124,7 @@ def exportar(db: DB, _: Admin, rodada: Rodadas = None) -> Response:
     `make rotulos-exportar`, que grava em `ml/artifacts/rotulos.csv`."""
     try:
         texto, _n = servico.exportar_csv(db, rodada or [RodadaRotulagem.LAB02])
-    except servico.ColisaoDeRotulador as erro:
+    except (servico.ColisaoDeRotulador, servico.RodadaSemEsquemaCompleto) as erro:
         raise _colisao(erro, status.HTTP_422_UNPROCESSABLE_CONTENT) from erro
     return Response(
         texto,

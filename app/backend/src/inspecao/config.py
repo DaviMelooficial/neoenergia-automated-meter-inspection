@@ -84,6 +84,18 @@ class Settings(BaseSettings):
     # outro. Vazio so em dev (cai num valor fixo); fora de dev a API nao sobe.
     rotulagem_salt: str = ""
 
+    # Auditoria amostral (M8): fracao dos itens decididos na fila humana que vai para
+    # um segundo revisor. O plano pede de 5% a 10%; fora disso a API nao sobe.
+    auditoria_taxa: float = 0.07
+
+    # Drift (M8): lotes que formam a baseline dos 5 sinais. Padrao: os 3 lotes de maio
+    # (treino e validacao do split temporal, plano 04 secao 3.2); julho e o teste.
+    drift_lotes_baseline: list[str] = [
+        "PSP_EXTRATLEITIMPL_200526_0352",
+        "PSP_EXTRATLEITIMPL_210526_0335",
+        "PSP_EXTRATLEITIMPL_220526_0408",
+    ]
+
     # Workers
     worker_concurrency: int = 4
     worker_poll_segundos: int = 2
@@ -109,6 +121,8 @@ class Settings(BaseSettings):
     def _proibir_placeholders_fora_de_dev(self) -> "Settings":
         if self.jwt_alg not in {"HS256", "HS384", "HS512"}:
             raise ValueError("JWT_ALG precisa ser HS256, HS384 ou HS512")
+        if not 0.05 <= self.auditoria_taxa <= 0.10:
+            raise ValueError("AUDITORIA_TAXA precisa estar entre 0.05 e 0.10 (5% a 10%)")
         if self.ambiente != "dev":
             inseguros = [
                 nome

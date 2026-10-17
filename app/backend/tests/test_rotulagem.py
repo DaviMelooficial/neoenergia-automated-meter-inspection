@@ -143,6 +143,16 @@ def _inserir(db_session, **campos):
     base = {"rodada": "a", "cena": "digital", "legivel": True}
     base |= {d: False for d in DEFEITOS}
     with db_session.begin_nested():
+        if campos.get("rodada") == "producao" and "revisao_id" not in campos:
+            # Desde o M8 o rotulo de producao aponta para a decisao que o gerou.
+            revisao = RevisaoHumana(
+                leitura_id=db_session.get(Foto, campos["foto_id"]).leitura_id,
+                usuario_id=campos["usuario_id"],
+                decisao="aprovada",
+            )
+            db_session.add(revisao)
+            db_session.flush()
+            campos["revisao_id"] = revisao.id
         db_session.add(Rotulo(**(base | campos)))
         db_session.flush()
 

@@ -58,6 +58,11 @@ class ColisaoDeRotulador(ValueError):
     """O mesmo rotulador votaria duas vezes na mesma foto: inflaria a maioria e o kappa."""
 
 
+class RodadaSemEsquemaCompleto(ValueError):
+    """`producao` (decisao de auditor, M8) tem campos nulos: nao entra na maioria nem
+    no kappa do esquema v2. A concordancia de producao sai de /metricas/auditoria."""
+
+
 def rotulador_de(rotulo: Rotulo) -> str:
     return rotulo.rotulador_externo or f"usuario:{rotulo.usuario_id}"
 
@@ -71,6 +76,10 @@ def voto_de(rotulo: Rotulo) -> dict[str, str | int]:
 
 def votos(db: Session, rodadas: list[RodadaRotulagem]) -> PorFoto:
     """foto_id -> rotulador -> voto, juntando as rodadas pedidas."""
+    if RodadaRotulagem.PRODUCAO in rodadas:
+        raise RodadaSemEsquemaCompleto(
+            "rodada producao tem campos nulos (decisao de auditor) e nao entra na consolidacao"
+        )
     por_foto: dict[int, dict[str, dict[str, str | int]]] = defaultdict(dict)
     consulta = select(Rotulo).where(Rotulo.rodada.in_([r.value for r in rodadas]))
     for r in db.scalars(consulta.order_by(Rotulo.id)):

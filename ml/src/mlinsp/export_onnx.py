@@ -86,6 +86,21 @@ def publicar(temporario: Path, destino: Path) -> None:
     temporario.replace(destino)
 
 
+def gravar_contrato(contrato: dict, caminhos: list[Path]) -> list[Path]:
+    """Grava o json do contrato em cada caminho, menos onde ja ha um contrato com o mesmo
+    `onnx_sha256`: reexportar o mesmo arquivo nao troca o commit e a data que o json
+    versionado cita pelos da reexportacao. Devolve os caminhos gravados."""
+    gravados = []
+    for caminho in caminhos:
+        if caminho.is_file():
+            atual = json.loads(caminho.read_text(encoding="utf-8"))
+            if atual.get("onnx_sha256") == contrato["onnx_sha256"]:
+                continue
+        qualidade.salvar_json(caminho, contrato)
+        gravados.append(caminho)
+    return gravados
+
+
 def versao_ja_usada(reports: Path, versao: str, rodada: str) -> str | None:
     """Rodada que ja exportou `versao`, se nao for esta. Cada versao do detector pertence
     a uma rodada so: o backend amarra versao, rodada e limiar a uma politica registrada."""
@@ -197,10 +212,12 @@ def main(argv: list[str] | None = None) -> int:
             "criterio_entrada": av["criterio_entrada"],
         },
     }
-    qualidade.salvar_json(args.artefatos / f"{args.versao}.json", contrato)
-    qualidade.salvar_json(dir_rep / "qualidade.json", contrato)
+    jsons = [args.artefatos / f"{args.versao}.json", dir_rep / "qualidade.json"]
+    gravados = gravar_contrato(contrato, jsons)
     print(f"{destino.name} ({contrato['onnx_bytes'] / 1e6:.1f} MB, sha256 "
           f"{contrato['onnx_sha256'][:12]}), paridade {par} em {N_PARIDADE} fotos")
+    for caminho in jsons:
+        print(f"  {caminho}: {'gravado' if caminho in gravados else 'mesmo sha256, mantido'}")
     return 0
 
 

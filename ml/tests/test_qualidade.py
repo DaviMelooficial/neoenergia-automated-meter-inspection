@@ -11,7 +11,7 @@ import torch
 from mlinsp import modelo, qualidade
 from mlinsp.calibrate import limiar_zero_fp
 from mlinsp.evaluate import cobertura_maxima_zero_fp, metricas_legivel, rejeicao, wilson
-from mlinsp.export_onnx import exportar, paridade, publicar, versao_ja_usada
+from mlinsp.export_onnx import exportar, gravar_contrato, paridade, publicar, versao_ja_usada
 
 RAIZ = Path(__file__).resolve().parents[2]
 
@@ -137,3 +137,23 @@ def test_reexportar_a_mesma_versao_so_com_arquivo_identico(tmp_path):
     with pytest.raises(SystemExit, match="outro sha256"):
         publicar(tmp, destino)
     assert destino.read_bytes() == b"modelo" and not tmp.exists()  # o em uso ficou intacto
+
+
+def test_primeira_exportacao_publica_o_arquivo(tmp_path):
+    destino = tmp_path / "qualidade@v1.onnx"
+    tmp = tmp_path / "novo.tmp"
+    tmp.write_bytes(b"modelo")
+    publicar(tmp, destino)
+    assert destino.read_bytes() == b"modelo" and not tmp.exists()
+
+
+def test_contrato_nao_e_regravado_quando_o_sha_nao_muda(tmp_path):
+    artefato, copia = tmp_path / "qualidade@v1.json", tmp_path / "r1" / "qualidade.json"
+    primeiro = {"versao": "qualidade@v1", "onnx_sha256": "aaa", "commit": "c1"}
+    assert gravar_contrato(primeiro, [artefato, copia]) == [artefato, copia]  # primeira vez
+    reexportado = primeiro | {"commit": "c2"}
+    assert gravar_contrato(reexportado, [artefato, copia]) == []
+    assert '"c1"' in artefato.read_text() and '"c1"' in copia.read_text()
+    outro = primeiro | {"onnx_sha256": "bbb", "commit": "c3"}
+    assert gravar_contrato(outro, [artefato, copia]) == [artefato, copia]
+    assert '"bbb"' in artefato.read_text() and '"c3"' in copia.read_text()

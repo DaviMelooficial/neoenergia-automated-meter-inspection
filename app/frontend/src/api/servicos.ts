@@ -92,36 +92,28 @@ export const quarentena = {
 };
 
 // ------------------------------------------------------------------ metricas
-export interface MetricasQualidade {
-  periodo: { de: string | null; ate: string | null };
-  total_leituras: number;
-  com_foto: number;
-  sem_foto: number;
-  auto_decididas: { quantidade: number; percentual: number };
-  fila_humana: { pendentes: number; decididas: number };
-  por_status: Record<string, number>;
-  quarentena_por_tipo: Record<string, number>;
-  defeitos_qualidade: Record<string, number>;
-  revisoes_por_decisao: Record<string, number>;
-  produtividade_por_auditor: { usuario_id: number; decisoes: number }[];
-  tempo_medio_decisao_segundos: number | null;
-  jobs: Record<string, Record<string, number>>;
-}
-export interface LoteDrift {
-  lote: string;
-  data_extracao: string | null;
-  total: number;
-  com_foto: number;
-  por_status: Record<string, number>;
-  quarentena_por_tipo: Record<string, number>;
-  taxa_auto_rejeicao: number | null;
-  confianca_media: number | null;
-  taxa_reprovacao_humana: number | null;
-  modelos: string[];
-}
+export type MetricasQualidade = S["QualidadeOut"];
+export type MetricasDrift = S["DriftOut"];
+export type LoteDrift = S["LoteDriftOut"];
+export type SinalDrift = S["SinalOut"];
+export type AutoAprovacao = S["AutoAprovacaoOut"];
+export type ConcordanciaAuditoria = S["ConcordanciaAuditoriaOut"];
+export type ItemAuditoria = S["ItemAuditoriaOut"];
+export type AuditoriaDecisao = S["AuditoriaDecisaoOut"];
+
 export const metricas = {
   qualidade: () => api.get<MetricasQualidade>("/metricas/qualidade").then((r) => r.data),
-  drift: () => api.get<{ lotes: LoteDrift[] }>("/metricas/drift").then((r) => r.data.lotes),
+  drift: () => api.get<MetricasDrift>("/metricas/drift").then((r) => r.data),
+  autoAprovacao: () => api.get<AutoAprovacao>("/metricas/auto-aprovacao").then((r) => r.data),
+  auditoria: () => api.get<ConcordanciaAuditoria>("/metricas/auditoria").then((r) => r.data),
+};
+
+// ------------------------------------------------------------------ auditoria amostral
+export const auditoria = {
+  proxima: () => api.post<ItemAuditoria>("/auditoria/proxima").then((r) => r.data),
+  liberar: (id: number) => api.post(`/auditoria/${id}/liberar`),
+  decidir: (id: number, dados: DecisaoIn) =>
+    api.post<AuditoriaDecisao>(`/auditoria/${id}/decisao`, dados).then((r) => r.data),
 };
 
 // ------------------------------------------------------------------ rotulagem

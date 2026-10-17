@@ -1,0 +1,42 @@
+/*
+ * Tokens dos graficos. Claro e escuro sao escolhidos (passos proprios para cada
+ * superficie), nao uma inversao automatica. O Mantine marca o tema em
+ * <html data-mantine-color-scheme="light|dark">.
+ */
+:root,
+[data-mantine-color-scheme="light"] {
+  --viz-superficie: #fcfcfb;
+  --viz-tinta: #0b0b0b;
+  --viz-tinta-2: #52514e;
+  --viz-tinta-fraca: #898781;
+  --viz-grade: #e1e0d9;
+  --viz-eixo: #c3c2b7;
+  --viz-serie-1: #2a78d6;
+  --viz-serie-1-fraca: #86b6ef;
+  --viz-critico: #d03b3b;
+}
+
+[data-mantine-color-scheme="dark"] {
+  --viz-superficie: #1a1a19;
+  --viz-tinta: #f0efec;
+  --viz-tinta-2: #c3c2b7;
+  --viz-tinta-fraca: #898781;
+  --viz-grade: #2c2c2a;
+  --viz-eixo: #383835;
+  --viz-serie-1: #3987e5;
+  --viz-serie-1-fraca: #184f95;
+  --viz-critico: #e66767;
+}
+
+.viz {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.viz .marca {
+  transition: opacity 120ms;
+}
+
+.viz .marca:hover {
+  opacity: 0.8;
+}

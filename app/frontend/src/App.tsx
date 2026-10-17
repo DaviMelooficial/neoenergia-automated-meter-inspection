@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RotaProtegida } from "./auth/RotaProtegida";
+import { Auditoria } from "./pages/Auditoria";
 import { Fila } from "./pages/Fila";
 import { Layout } from "./pages/Layout";
 import { Login } from "./pages/Login";
@@ -19,6 +20,7 @@ export function App() {
         <Route path="/trocar-senha" element={<TrocarSenha />} />
         <Route element={<Layout />}>
           <Route path="/fila" element={<Fila />} />
+          <Route path="/auditoria" element={<Auditoria />} />
           <Route element={<RotaProtegida minimo="supervisor" />}>
             <Route path="/quarentena" element={<Quarentena />} />
             <Route path="/metricas" element={<Metricas />} />

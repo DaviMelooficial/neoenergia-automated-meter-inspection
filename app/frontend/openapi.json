@@ -2448,6 +2448,11 @@
       "type": "string",
       "title": "Politica"
      },
+     "etapa": {
+      "type": "string",
+      "title": "Etapa",
+      "description": "qualidade (triagem) ou validacao (divergencia, ponto B)"
+     },
      "n": {
       "anyOf": [
        {
@@ -2529,6 +2534,7 @@
     "required": [
      "detector",
      "politica",
+     "etapa",
      "n",
      "erros",
      "taxa_erro",

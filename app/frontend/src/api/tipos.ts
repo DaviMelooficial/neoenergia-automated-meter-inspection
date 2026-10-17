@@ -875,6 +875,11 @@ export interface components {
             detector: string;
             /** Politica */
             politica: string;
+            /**
+             * Etapa
+             * @description qualidade (triagem) ou validacao (divergencia, ponto B)
+             */
+            etapa: string;
             /** N */
             n: number | null;
             /** Erros */

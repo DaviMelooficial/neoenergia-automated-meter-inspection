@@ -99,8 +99,11 @@ def _travar_auditorias_pendentes(sessao: Session, leitura_id: int) -> bool:
       invalidacao em `transicionar` acontece sem ninguem com o item na mao.
     Assim nenhum revisor ve a auditoria sumir depois de reservada (o 404 diria a origem).
     """
+    # Mesmo predicado da invalidacao em `estados.transicionar` (so decisao automatica: a
+    # auditoria de fila confere uma decisao humana, que nunca e reaberta).
     pendente = (
         AuditoriaAmostral.leitura_id == leitura_id,
+        AuditoriaAmostral.origem != "fila",
         AuditoriaAmostral.decisao.is_(None),
         AuditoriaAmostral.invalidada_em.is_(None),
     )

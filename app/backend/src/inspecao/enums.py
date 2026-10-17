@@ -111,6 +111,8 @@ class RodadaRotulagem(StrEnum):
     B = "b"
     DESEMPATE = "desempate"
     PRODUCAO = "producao"
+    # Inspecao humana das 200 fotos dos extremos do M5 (calibrou o limiar 0,85): so legivel.
+    INSPECAO_M5 = "inspecao_m5"
 
 
 class Cena(StrEnum):

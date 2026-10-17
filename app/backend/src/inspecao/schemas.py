@@ -567,6 +567,12 @@ class ConcordanciaDiaOut(MedidasConcordanciaOut):
 class ConcordanciaAuditoriaOut(BaseModel):
     """`detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares."""
 
+    rotulos_de_calibracao: dict[str, int] = Field(
+        description="rotulos por rodada de calibracao/treino excluida da medida"
+    )
+    exclusao_incompleta: list[str] = Field(
+        description="rodadas obrigatorias (lab02, inspecao_m5) sem nenhum rotulo importado"
+    )
     taxa_configurada: float
     taxa_auto_rejeitada: float
     min_pares: int

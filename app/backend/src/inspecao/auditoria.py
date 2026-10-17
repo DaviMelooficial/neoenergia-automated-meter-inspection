@@ -126,10 +126,6 @@ def sortear_decisao_automatica(
     origem = ORIGEM_AUTOMATICA.get(decisao.status)
     if origem is None or not _sorteia(origem, decisao.id):
         return None
-    if db.scalar(select(foto_de_calibracao(leitura_id))):
-        # Foto que calibrou o limiar (Lab 2) ou treinou o modelo: acerto por construcao, e
-        # quem a rotulou poderia recebe-la. Nao entra na auditoria automatica.
-        return None
     try:
         with db.begin_nested():
             auditoria = AuditoriaAmostral(
@@ -323,13 +319,16 @@ ETAPA = {
     StatusLeitura.AUTO_REJEITADA.value: "validacao",
     StatusLeitura.AUTO_APROVADA.value: "validacao",
 }
-# Rodadas de rotulo que calibraram (M5) ou treinaram (M7): foto com rotulo nelas nao e
-# evidencia fora da amostra e nao e sorteada para auditoria automatica.
+# Rodadas de rotulo que calibraram (Lab 2, inspecao do M5) ou treinaram (rodadas cegas, M7):
+# foto com rotulo nelas nao e evidencia fora da amostra. Ela e sorteada normalmente (excluir
+# do sorteio diria "esta na fila de auditoria, entao veio da fila") e so fica fora da
+# medida, em `_estratos`.
 RODADAS_DE_CALIBRACAO = (
     RodadaRotulagem.LAB02.value,
     RodadaRotulagem.A.value,
     RodadaRotulagem.B.value,
     RodadaRotulagem.DESEMPATE.value,
+    RodadaRotulagem.INSPECAO_M5.value,
 )
 
 
@@ -404,6 +403,32 @@ def _estratos(db: Session, origem: str) -> dict[Estrato, list[tuple[str, str | N
         vistos.add((chave, leitura_id))
         estratos[chave].append((decisao, motivo))
     return estratos
+
+
+# Sem estes rotulos importados (`make rotulos-importar`, `make rotulos-importar-inspecao`),
+# a exclusao da calibracao nao enxerga nada e a medida mistura fotos dentro da amostra.
+CALIBRACAO_OBRIGATORIA = (RodadaRotulagem.LAB02.value, RodadaRotulagem.INSPECAO_M5.value)
+
+
+def precondicao_da_exclusao(db: Session) -> tuple[dict[str, int], list[str]]:
+    """(rotulos por rodada de calibracao, rodadas obrigatorias sem nenhum rotulo)."""
+    contagem = dict(
+        db.execute(
+            select(Rotulo.rodada, func.count())
+            .where(Rotulo.rodada.in_(RODADAS_DE_CALIBRACAO))
+            .group_by(Rotulo.rodada)
+        )
+        .tuples()
+        .all()
+    )
+    faltando = [r for r in CALIBRACAO_OBRIGATORIA if not contagem.get(r)]
+    if faltando:
+        log.warning(
+            "exclusao da calibracao incompleta: nenhum rotulo em %s; o falso positivo das "
+            "auto-rejeicoes inclui fotos de calibracao ate os importadores rodarem",
+            ", ".join(faltando),
+        )
+    return {r: contagem.get(r, 0) for r in RODADAS_DE_CALIBRACAO}, faltando
 
 
 def _medida_automatica(
@@ -500,7 +525,10 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
     auto_rejeitadas, estratos_rejeitadas = _bloco_automatico(db, "auto_rejeitada", detalhe)
     total = _medidas(pares)
     s = get_settings()
+    calibracao, faltando = precondicao_da_exclusao(db)
     base: dict[str, Any] = {
+        "rotulos_de_calibracao": calibracao,
+        "exclusao_incompleta": faltando,
         "taxa_configurada": s.auditoria_taxa,
         "taxa_auto_rejeitada": s.auditoria_taxa_auto_rejeitada,
         "min_pares": MIN_PARES,

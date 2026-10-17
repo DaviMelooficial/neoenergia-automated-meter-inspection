@@ -1,6 +1,7 @@
 """Linha de comando da rotulagem.
 
 python -m inspecao.rotulagem.cli importar-lab02 [--csv ...] [--controle rotulador/controle.dat]
+python -m inspecao.rotulagem.cli importar-inspecao-m5 [--csv ml/reports/heuristicas_amostra_200.csv]
 python -m inspecao.rotulagem.cli kappa [--rodada lab02 ...] [--relatorio ml/reports/kappa.md]
 python -m inspecao.rotulagem.cli exportar [--saida ml/artifacts/rotulos.csv] [--rodada lab02 ...]
 
@@ -15,7 +16,7 @@ from pathlib import Path
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal
 from inspecao.enums import RodadaRotulagem
-from inspecao.rotulagem import importador, relatorio, servico
+from inspecao.rotulagem import importador, inspecao_m5, relatorio, servico
 from inspecao.rotulagem.consolidacao import CLASSES, LIMIAR_KAPPA
 
 log = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 CSV_LAB02 = Path("lab-02/rotulos/rotulos.csv")
 CONTROLE_LAB02 = Path("rotulador/controle.dat")  # fora do git
 SAIDA_PADRAO = Path("ml/artifacts/rotulos.csv")
+CSV_INSPECAO_M5 = Path("ml/reports/heuristicas_amostra_200.csv")
 RELATORIO_PADRAO = Path("ml/reports/kappa.md")  # versionado: so agregados
 
 
@@ -102,6 +104,24 @@ def exportar(saida: Path, rodadas: list[RodadaRotulagem]) -> int:
     return 0
 
 
+def importar_inspecao_m5(caminho: Path) -> int:
+    caminho = get_settings().caminho_absoluto(caminho)
+    with SessionLocal() as sessao:
+        try:
+            resumo = inspecao_m5.importar(sessao, caminho)
+        except inspecao_m5.CsvInvalido as erro:
+            log.error("csv invalido: %s", erro)
+            return 1
+        sessao.commit()
+    print(f"linhas lidas        {resumo.linhas}")
+    print(
+        f"rotulos inspecao_m5 {resumo.gravados} ({resumo.inspecionados} inspecionadas, "
+        f"{resumo.pendentes} pendentes)"
+    )
+    print(f"nao mapeadas        {len(resumo.nao_mapeadas)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description="Rotulagem (M6)")
@@ -109,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     imp = sub.add_parser("importar-lab02", help="importa os rotulos do Lab 2 (rodada lab02)")
     imp.add_argument("--csv", type=Path, default=CSV_LAB02)
     imp.add_argument("--controle", type=Path, default=CONTROLE_LAB02)
+    insp = sub.add_parser(
+        "importar-inspecao-m5", help="importa a inspecao das 200 fotos do M5 (rodada inspecao_m5)"
+    )
+    insp.add_argument("--csv", type=Path, default=CSV_INSPECAO_M5)
     for nome, ajuda in (("kappa", "kappa por classe"), ("exportar", "csv consolidado para o ml/")):
         p = sub.add_parser(nome, help=ajuda)
         p.add_argument(
@@ -126,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.comando == "importar-lab02":
         return importar_lab02(args.csv, args.controle)
+    if args.comando == "importar-inspecao-m5":
+        return importar_inspecao_m5(args.csv)
     rodadas = args.rodada or [RodadaRotulagem.LAB02]
     try:
         if args.comando == "kappa":

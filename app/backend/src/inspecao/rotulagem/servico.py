@@ -76,9 +76,11 @@ def voto_de(rotulo: Rotulo) -> dict[str, str | int]:
 
 def votos(db: Session, rodadas: list[RodadaRotulagem]) -> PorFoto:
     """foto_id -> rotulador -> voto, juntando as rodadas pedidas."""
-    if RodadaRotulagem.PRODUCAO in rodadas:
+    incompletas = {RodadaRotulagem.PRODUCAO, RodadaRotulagem.INSPECAO_M5} & set(rodadas)
+    if incompletas:
         raise RodadaSemEsquemaCompleto(
-            "rodada producao tem campos nulos (decisao de auditor) e nao entra na consolidacao"
+            f"rodada {', '.join(sorted(incompletas))} tem campos nulos (so legibilidade) e nao "
+            "entra na consolidacao"
         )
     por_foto: dict[int, dict[str, dict[str, str | int]]] = defaultdict(dict)
     consulta = select(Rotulo).where(Rotulo.rodada.in_([r.value for r in rodadas]))

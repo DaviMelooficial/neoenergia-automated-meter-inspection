@@ -432,9 +432,10 @@ class Rotulo(Base):
         # Fora de `producao` o esquema v2 e completo. Em `producao` (decisao de auditor,
         # M8) cena e os defeitos nao declarados pela decisao ficam nulos.
         CheckConstraint(
-            "rodada = 'producao' OR (cena IS NOT NULL AND reflexo IS NOT NULL AND "
-            "fora_de_foco IS NOT NULL AND tampa_suja IS NOT NULL AND enquadramento IS NOT NULL "
-            "AND display_apagado IS NOT NULL AND legivel IS NOT NULL)",
+            "rodada IN ('producao', 'inspecao_m5') OR (cena IS NOT NULL AND "
+            "reflexo IS NOT NULL AND fora_de_foco IS NOT NULL AND tampa_suja IS NOT NULL "
+            "AND enquadramento IS NOT NULL AND display_apagado IS NOT NULL "
+            "AND legivel IS NOT NULL)",
             name="ck_rotulos_completo",
         ),
         # Rotulo de producao aponta para a decisao que o gerou: a da fila ou a da

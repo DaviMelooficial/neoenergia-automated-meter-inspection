@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1022,16 +1022,36 @@ def test_em_lote_recusa_destino_automatico(db_session, lote_aud):
         )
 
 
-def test_foto_de_calibracao_nao_e_sorteada_nem_medida(client, db_session, reais, lote_aud, sempre):
-    """Bloqueante de dados do gate 5: foto com rotulo de calibracao/treino (lab02, a, b,
-    desempate) e acerto por construcao. Nao e sorteada; e se ja tiver auditoria decidida
-    (de antes da regra), fica fora do estrato."""
+def test_foto_de_calibracao_e_sorteada_mas_fica_fora_da_medida(
+    client, db_session, reais, lote_aud, sempre
+):
+    """Gates 5 e 6: foto com rotulo de calibracao/treino e acerto por construcao. Ela e
+    sorteada normalmente (excluir do sorteio diria "na fila de auditoria = veio da fila"),
+    mas a auditoria decidida dela fica fora do estrato."""
     from inspecao.estados import transicionar
 
     cal, foto_cal = fx.leitura(db_session, lote_aud, S.TRIAGEM_QUALIDADE, fx.scores(0.95))
+    _rotulo_lab02(db_session, foto_cal.id)
+    db_session.flush()
+    transicionar(
+        db_session,
+        cal,
+        S.REJEITADA_QUALIDADE,
+        "modelo:heuristica@v1",
+        detalhe={"politica": "politica@v1"},
+    )
+    aud = db_session.scalar(select(AuditoriaAmostral))
+    assert aud is not None and aud.leitura_id == cal.id  # sorteada como qualquer outra
+    _decidir_auditoria(db_session, aud, reais["auditor2"].id, "reprovada", "fora_de_foco")
+    db_session.commit()
+    admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
+    assert admin["auto_rejeitadas"]["n"] == 0 and admin["estratos_auto_rejeitadas"] == []
+
+
+def _rotulo_lab02(db_session, foto_id):
     db_session.add(
         Rotulo(
-            foto_id=foto_cal.id,
+            foto_id=foto_id,
             rotulador_externo="ext_x",
             rodada="lab02",
             cena="digital",
@@ -1043,30 +1063,111 @@ def test_foto_de_calibracao_nao_e_sorteada_nem_medida(client, db_session, reais,
             display_apagado=False,
         )
     )
-    db_session.flush()
-    registro = transicionar(
-        db_session,
-        cal,
-        S.REJEITADA_QUALIDADE,
-        "modelo:heuristica@v1",
-        detalhe={"politica": "politica@v1"},
+
+
+def test_inspecao_m5_importada_e_fora_da_medida(
+    client, db_session, reais, lote_aud, sempre, tmp_path
+):
+    """Bloqueante de dados do gate 6: a inspecao das 200 fotos do M5 calibrou o 0,85. O
+    importador grava toda foto do CSV na rodada inspecao_m5 (inspecionada ou pendente), e
+    a auditoria decidida dessas fotos fica fora do estrato."""
+    import csv
+
+    from inspecao.enums import RodadaRotulagem
+    from inspecao.rotulagem import inspecao_m5, servico
+
+    _, foto_i = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    _, foto_p = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))  # fora da inspecao
+    caminho = tmp_path / "amostra.csv"
+    with caminho.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["arquivo", "grupo", "legivel_inspecao", "inspetor"])
+        w.writerow([foto_i.nome_arquivo, "pior", "0", "inspetora"])
+        w.writerow([foto_p.nome_arquivo, "pior", "", ""])
+        w.writerow(["PSP_EXTRATLEITIMPL_990101_0000_x.jpg", "pior", "1", "x"])
+    r = inspecao_m5.importar(db_session, caminho)
+    assert (r.linhas, r.gravados, r.inspecionados, r.pendentes, len(r.nao_mapeadas)) == (
+        3,
+        2,
+        1,
+        1,
+        1,
     )
-    assert db_session.scalar(select(AuditoriaAmostral)) is None  # nao sorteada
-    # auditoria antiga dessa foto, decidida, criada por fora da regra: nao conta
-    db_session.add(
-        AuditoriaAmostral(
-            leitura_id=cal.id,
-            origem="auto_rejeitada",
-            historico_id=registro.id,
-            revisor_id=reais["auditor2"].id,
-            decisao="reprovada",
-            motivo="fora_de_foco",
-            decidida_em=datetime.now(UTC),
-        )
-    )
+    assert inspecao_m5.importar(db_session, caminho).gravados == 2  # idempotente
+    rotulos = {
+        x.foto_id: (x.rotulador_externo, x.legivel)
+        for x in db_session.scalars(select(Rotulo).where(Rotulo.rodada == "inspecao_m5"))
+    }
+    assert rotulos == {foto_i.id: ("inspetora", False), foto_p.id: ("pendente", None)}
+    with pytest.raises(servico.RodadaSemEsquemaCompleto):
+        servico.votos(db_session, [RodadaRotulagem.INSPECAO_M5])
+
+    auditoria.sortear_automaticas(db_session)
+    for aud in db_session.scalars(select(AuditoriaAmostral)):
+        _decidir_auditoria(db_session, aud, reais["auditor2"].id, "aprovada")  # erro
     db_session.commit()
     admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
-    assert admin["auto_rejeitadas"]["n"] == 0 and admin["estratos_auto_rejeitadas"] == []
+    b = admin["auto_rejeitadas"]
+    assert (b["n"], b["erros"]) == (1, 1)  # so a leitura fora da inspecao
+    assert admin["rotulos_de_calibracao"]["inspecao_m5"] == 2
+
+
+def test_precondicao_da_exclusao_aparece_na_metrica(client, db_session, reais, lote_aud):
+    """Sem rotulos lab02 e inspecao_m5 importados a exclusao nao enxerga nada: a metrica
+    diz quais faltam (e o backend loga WARNING)."""
+    sup = login(client, reais["supervisor"])
+    c = client.get("/metricas/auditoria", headers=sup).json()
+    assert c["exclusao_incompleta"] == ["lab02", "inspecao_m5"]
+    _, foto = fx.leitura(db_session, lote_aud, S.FILA_HUMANA, fx.scores(0.2))
+    _rotulo_lab02(db_session, foto.id)
+    db_session.add(Rotulo(foto_id=foto.id, rodada="inspecao_m5", rotulador_externo="pendente"))
+    db_session.commit()
+    c = client.get("/metricas/auditoria", headers=sup).json()
+    assert c["exclusao_incompleta"] == []
+    assert (c["rotulos_de_calibracao"]["lab02"], c["rotulos_de_calibracao"]["inspecao_m5"]) == (
+        1,
+        1,
+    )
+
+
+def test_troca_de_detector_adiada_com_auditoria_travada(sempre):
+    """Ramo de `triagem_qualidade`: a auditoria pendente da leitura esta travada por outra
+    transacao (um revisor reservando agora). A troca de detector nao reabre a leitura; ela
+    fica com a decisao antiga ate um novo `reprocessar_lote`."""
+    from inspecao.db import engine
+    from inspecao.inference.detector import DetectorNulo
+    from inspecao.jobs.handlers import triagem_qualidade
+    from tests.test_recalcular_decisao import ctx_com
+
+    s, lote, lei, _revisor, aud_id = _cenario_corrida()
+    trava = Session(engine)
+    job = Session(engine, expire_on_commit=False)
+    try:
+        trava.execute(
+            select(AuditoriaAmostral.id).where(AuditoriaAmostral.id == aud_id).with_for_update()
+        )
+        antes = s.scalar(
+            select(func.count())
+            .select_from(HistoricoStatus)
+            .where(HistoricoStatus.leitura_id == lei.id)
+        )
+        triagem_qualidade(ctx_com(DetectorNulo(), None), job, {"leitura_id": lei.id})
+        job.commit()
+        s.expire_all()
+        assert s.get(Leitura, lei.id).status_atual == S.REJEITADA_QUALIDADE.value
+        depois = s.scalar(
+            select(func.count())
+            .select_from(HistoricoStatus)
+            .where(HistoricoStatus.leitura_id == lei.id)
+        )
+        assert depois == antes
+        assert s.get(AuditoriaAmostral, aud_id).invalidada_em is None
+    finally:
+        trava.rollback()
+        trava.close()
+        job.close()
+        _limpar_corrida(s, lote.id)
 
 
 @pytest.mark.parametrize(

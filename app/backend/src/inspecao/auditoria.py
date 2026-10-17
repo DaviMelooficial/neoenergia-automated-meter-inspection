@@ -47,7 +47,7 @@ from sqlalchemy.orm import Session
 
 from inspecao.config import get_settings
 from inspecao.contas_teste import email_de_teste, usuario_real
-from inspecao.enums import StatusLeitura
+from inspecao.enums import MotivoReprovacao, StatusLeitura
 from inspecao.models import (
     AuditoriaAmostral,
     HistoricoStatus,
@@ -131,8 +131,13 @@ def sortear_decisao_automatica(
             )
             db.add(auditoria)
             db.flush()
-    except IntegrityError:
-        log.info("decisao %s (historico) ja tem auditoria", decisao.id)
+    except IntegrityError as erro:
+        # So a colisao esperada (a mesma decisao auditada por outra transacao) e tolerada;
+        # qualquer outra violacao e defeito e propaga.
+        restricao = getattr(getattr(erro.orig, "diag", None), "constraint_name", None)
+        if restricao != "uq_auditorias_historico":
+            raise
+        log.warning("decisao %s (historico) ja tem auditoria", decisao.id)
         return None
     return auditoria
 
@@ -218,6 +223,10 @@ def sortear_automaticas(db: Session, commit_por_item: bool = False) -> dict[str,
     return contagem
 
 
+def por_codigo(codigo):
+    return AuditoriaAmostral.codigo == codigo
+
+
 def livre_para(usuario_id: int):
     """Pendente, valida, nao e decisao do usuario, sem reserva ativa de outro."""
     return (
@@ -299,24 +308,70 @@ def _suprimido(medidas: dict[str, Any]) -> dict[str, Any]:
     return dict.fromkeys(medidas) | {"suprimido": True}
 
 
-def _bloco_automatico(db: Session, origem: str, erro: str, detalhe: bool) -> dict[str, Any]:
-    """Erro da maquina medido pelo segundo revisor, com o limite superior de 95%
-    (Clopper-Pearson) e quantas auditorias sustentariam o alvo com os erros de hoje.
-    `alvo_atingido` so quando o limite superior cai abaixo do alvo, nunca pela taxa."""
+MOTIVOS_DE_QUALIDADE = {m.value for m in MotivoReprovacao} - {MotivoReprovacao.OUTRO.value}
+
+
+def e_erro_da_maquina(origem: str, decisao: str, motivo: str | None) -> bool:
+    """Veredito do segundo revisor que contradiz a maquina.
+
+    Auto-rejeitada: so "reprovada por uma das 5 classes de qualidade" confirma; aprovada, ou
+    reprovada por `outro`, e erro (o revisor nao viu a foto como ilegivel).
+    Auto-aprovada: qualquer reprovada e erro (conservador: `outro` pode ser divergencia
+    de leitura, mas aprovar sozinho uma leitura que o humano reprova e o risco caro)."""
+    if origem == "auto_rejeitada":
+        return not (decisao == "reprovada" and motivo in MOTIVOS_DE_QUALIDADE)
+    return decisao == "reprovada"
+
+
+def _estratos(db: Session, origem: str) -> dict[tuple[str, str], list[tuple[str, str | None]]]:
+    """(detector, politica) -> vereditos, uma auditoria decidida por leitura por estrato.
+
+    O estrato vem da linha do historico da decisao (`ator` = modelo:<detector>,
+    `detalhe.politica`). A mesma leitura pode ter varias decisoes auditadas (reaberta e
+    decidida de novo pela maquina, com auditoria a 100%): dentro de um estrato so a
+    auditoria decidida MAIS ANTIGA conta, para a unidade ser a foto e nao a decisao.
+    """
     linhas = db.execute(
-        select(AuditoriaAmostral.decisao, func.count())
+        select(
+            HistoricoStatus.ator,
+            HistoricoStatus.detalhe["politica"].astext,
+            AuditoriaAmostral.leitura_id,
+            AuditoriaAmostral.decisao,
+            AuditoriaAmostral.motivo,
+        )
+        .join(HistoricoStatus, HistoricoStatus.id == AuditoriaAmostral.historico_id)
         .where(
             AuditoriaAmostral.origem == origem,
             AuditoriaAmostral.decisao.is_not(None),
             usuario_real(AuditoriaAmostral.revisor_id),
         )
-        .group_by(AuditoriaAmostral.decisao)
+        .order_by(AuditoriaAmostral.decidida_em, AuditoriaAmostral.id)
     ).all()
-    n = sum(k for _, k in linhas)
-    erros = sum(k for d, k in linhas if d == erro)
+    vistos: set[tuple[str, str, int]] = set()
+    estratos: dict[tuple[str, str], list[tuple[str, str | None]]] = defaultdict(list)
+    for ator, politica, leitura_id, decisao, motivo in linhas:
+        chave = ((ator or "").removeprefix("modelo:") or "sem_registro", politica or "sem_registro")
+        if (*chave, leitura_id) in vistos:
+            continue
+        vistos.add((*chave, leitura_id))
+        estratos[chave].append((decisao, motivo))
+    return estratos
+
+
+def _medida_automatica(
+    origem: str, estrato: tuple[str, str], vereditos: list, detalhe: bool
+) -> dict[str, Any]:
+    """Erro da maquina num estrato, com o limite superior de 95% (Clopper-Pearson) e
+    quantas leituras auditadas sustentariam o alvo com os erros de hoje (o total, nao o que
+    falta). `alvo_atingido` quando o limite superior e menor ou igual ao alvo, nunca pela
+    taxa observada."""
+    n = len(vereditos)
+    erros = sum(e_erro_da_maquina(origem, d, m) for d, m in vereditos)
     alvo = ALVO_ERRO[origem]
     teto = limite_superior(erros, n)
     bloco = {
+        "detector": estrato[0],
+        "politica": estrato[1],
         "n": n,
         "erros": erros,
         "taxa_erro": erros / n if n else None,
@@ -327,7 +382,21 @@ def _bloco_automatico(db: Session, origem: str, erro: str, detalhe: bool) -> dic
     }
     if detalhe or n >= MIN_PARES:
         return bloco | {"suprimido": False}
-    return _suprimido(bloco) | {"alvo_erro": alvo}
+    return _suprimido(bloco) | {"alvo_erro": alvo, "detector": estrato[0], "politica": estrato[1]}
+
+
+def _bloco_automatico(db: Session, origem: str, detalhe: bool) -> tuple[dict, list[dict]]:
+    """(estrato da politica ativa, todos os estratos). A tela e o supervisor usam o da
+    politica ativa; admin ve os demais. Erro e unidade em `e_erro_da_maquina` e
+    `_estratos`."""
+    from inspecao.monitoramento.sinais import politica_ativa
+
+    ativa = politica_ativa()
+    chave_ativa = (ativa.modelo or "sem_registro", ativa.versao)
+    estratos = _estratos(db, origem)
+    principal = _medida_automatica(origem, chave_ativa, estratos.get(chave_ativa, []), detalhe)
+    todos = [_medida_automatica(origem, k, v, detalhe) for k, v in sorted(estratos.items())]
+    return principal, (todos if detalhe else [])
 
 
 def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
@@ -362,8 +431,8 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
     pares = [(a, b, c, d) for a, b, c, d, _lote, _quando in linhas]
     # Auto-aprovada reprovada pelo revisor = falso negativo da maquina; auto-rejeitada
     # aprovada pelo revisor = falso positivo (1 - precisao da auto-rejeicao).
-    auto_aprovadas = _bloco_automatico(db, "auto_aprovada", "reprovada", detalhe)
-    auto_rejeitadas = _bloco_automatico(db, "auto_rejeitada", "aprovada", detalhe)
+    auto_aprovadas, estratos_aprovadas = _bloco_automatico(db, "auto_aprovada", detalhe)
+    auto_rejeitadas, estratos_rejeitadas = _bloco_automatico(db, "auto_rejeitada", detalhe)
     total = _medidas(pares)
     s = get_settings()
     base: dict[str, Any] = {
@@ -383,6 +452,8 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
             "total": total | {"suprimido": False} if len(pares) >= MIN_PARES else _suprimido(total),
             "auto_aprovadas": auto_aprovadas,
             "auto_rejeitadas": auto_rejeitadas,
+            "estratos_auto_aprovadas": [],
+            "estratos_auto_rejeitadas": [],
             "por_lote": [],
             "serie": [],
         }
@@ -416,6 +487,8 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
         "total": total | {"suprimido": False},
         "auto_aprovadas": auto_aprovadas,
         "auto_rejeitadas": auto_rejeitadas,
+        "estratos_auto_aprovadas": estratos_aprovadas,
+        "estratos_auto_rejeitadas": estratos_rejeitadas,
         "por_lote": [{"lote": lote, **_medidas(p)} for lote, p in sorted(por_lote.items())],
         "serie": serie,
     }

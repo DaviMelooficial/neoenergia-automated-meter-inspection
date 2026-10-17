@@ -19,7 +19,9 @@ Create Date: 2026-10-17 10:00:00.000000
    a pendente da decisao antiga ganha `invalidada_em` e sai das medidas, a decidida fica.
    Decisao gravada nao muda: o gatilho `trg_auditorias_decisao_imutavel` recusa UPDATE
    de revisor, decisao, motivo, observacao, data, leitura, revisao, historico, revisor
-   original e origem depois de decidida. DELETE fica
+   original, origem e codigo depois de decidida. `codigo` (uuid aleatorio) e o
+   identificador exposto ao revisor: o `id` sequencial, sorteado em rajada na triagem,
+   diria a origem. DELETE fica
    permitido: a auditoria so some junto com a leitura (cascata de reingestao com
    `--reprocessar`), como a revisao humana que ela confere.
 3. Backfill: cada revisao humana ja gravada vira um rotulo `producao`, com o mesmo
@@ -76,6 +78,7 @@ BEGIN
         OR NEW.leitura_id IS DISTINCT FROM OLD.leitura_id
         OR NEW.revisao_id IS DISTINCT FROM OLD.revisao_id
         OR NEW.historico_id IS DISTINCT FROM OLD.historico_id
+        OR NEW.codigo IS DISTINCT FROM OLD.codigo
         OR NEW.revisor_original_id IS DISTINCT FROM OLD.revisor_original_id
         OR NEW.origem IS DISTINCT FROM OLD.origem
     ) THEN
@@ -97,6 +100,7 @@ def upgrade() -> None:
 
     op.create_table('auditorias_amostrais',
     sa.Column('id', sa.BigInteger(), nullable=False),
+    sa.Column('codigo', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('leitura_id', sa.BigInteger(), nullable=False),
     sa.Column('origem', sa.String(length=20), server_default='fila', nullable=False),
     sa.Column('revisao_id', sa.BigInteger(), nullable=True),
@@ -129,6 +133,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('revisao_id', name='uq_auditorias_revisao'),
     sa.UniqueConstraint('historico_id', name='uq_auditorias_historico'),
+    sa.UniqueConstraint('codigo', name='uq_auditorias_codigo'),
     )
     op.create_index('ix_auditorias_leitura', 'auditorias_amostrais', ['leitura_id'], unique=False)
     op.create_index('ix_auditorias_pendentes', 'auditorias_amostrais', ['sorteada_em', 'id'], unique=False, postgresql_where='decisao IS NULL AND invalidada_em IS NULL')

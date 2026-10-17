@@ -2,9 +2,10 @@
 
 As decisoes medidas sao de contas reais (`m8_fixture.contas_reais`); as de
 `usuarios_fixture` (@teste.com.br) contam como E2E e nao sao sorteadas. So o papel
-`auditor` audita; toda recusa em `/auditoria/{id}/*` e a mesma resposta.
+`auditor` audita; toda recusa em `/auditoria/{codigo}/*` e a mesma resposta.
 """
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -30,7 +31,7 @@ from tests import m8_fixture as fx
 from tests.usuarios_fixture import login
 
 CAMPOS_ITEM = {
-    "auditoria_id",
+    "auditoria",
     "lote",
     "linha_csv",
     "medidores",
@@ -194,7 +195,7 @@ def test_auto_rejeitada_reaberta_e_decidida_na_fila(client, db_session, reais, l
     # a invalidada nao e entregue nem conta como pendente
     item = client.post("/auditoria/proxima", headers=login(client, reais["auditor2"])).json()
     nova = db_session.scalar(select(AuditoriaAmostral).where(AuditoriaAmostral.origem == "fila"))
-    assert item["auditoria_id"] == nova.id and item["ha_mais"] is False
+    assert item["auditoria"] == str(nova.codigo) and item["ha_mais"] is False
     admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
     assert (admin["pendentes"], admin["invalidadas"]) == (1, 1)
 
@@ -207,7 +208,7 @@ def test_auditoria_decidida_sobrevive_a_reabertura(client, db_session, reais, lo
     aud = db_session.scalar(select(AuditoriaAmostral))
     cab = login(client, reais["auditor2"])
     assert client.post("/auditoria/proxima", headers=cab).status_code == 200
-    r = client.post(f"/auditoria/{aud.id}/decisao", json={"decisao": "aprovada"}, headers=cab)
+    r = client.post(f"/auditoria/{aud.codigo}/decisao", json={"decisao": "aprovada"}, headers=cab)
     assert r.status_code == 201
     _reabrir_e_mandar_para_fila(db_session, lei)
     db_session.expire_all()
@@ -292,9 +293,11 @@ def test_so_o_papel_auditor_audita(client, reais, decidida):
         cab = login(client, reais[papel])
         respostas = [
             client.post("/auditoria/proxima", headers=cab),
-            client.post(f"/auditoria/{aud.id}/decisao", json={"decisao": "aprovada"}, headers=cab),
-            client.post(f"/auditoria/{aud.id}/liberar", headers=cab),
-            client.post("/auditoria/999999/liberar", headers=cab),
+            client.post(
+                f"/auditoria/{aud.codigo}/decisao", json={"decisao": "aprovada"}, headers=cab
+            ),
+            client.post(f"/auditoria/{aud.codigo}/liberar", headers=cab),
+            client.post(f"/auditoria/{uuid.uuid4()}/liberar", headers=cab),
         ]
         assert {(r.status_code, r.content) for r in respostas} == {(403, respostas[0].content)}
 
@@ -315,16 +318,19 @@ def test_recusa_unica_sem_oraculo(client, db_session, reais, decidida):
         return client.post(f"/auditoria/{i}/liberar", headers=cab)
 
     respostas = [
-        decisao(outro, 999999),  # nao existe
-        liberar(outro, 999999),
-        decisao(original, aud.id),  # a decisao e sua
-        liberar(original, aud.id),
-        liberar(outro, aud.id),  # pendente, sem reserva dele
+        decisao(outro, uuid.uuid4()),  # nao existe
+        liberar(outro, uuid.uuid4()),
+        decisao(original, aud.codigo),  # a decisao e sua
+        liberar(original, aud.codigo),
+        liberar(outro, aud.codigo),  # pendente, sem reserva dele
     ]
     assert client.post("/auditoria/proxima", headers=outro).status_code == 200
-    respostas += [decisao(terceiro, aud.id), liberar(terceiro, aud.id)]  # reservada por outro
-    assert decisao(outro, aud.id).status_code == 201
-    respostas += [decisao(terceiro, aud.id), liberar(terceiro, aud.id)]  # ja decidida
+    respostas += [
+        decisao(terceiro, aud.codigo),
+        liberar(terceiro, aud.codigo),
+    ]  # reservada por outro
+    assert decisao(outro, aud.codigo).status_code == 201
+    respostas += [decisao(terceiro, aud.codigo), liberar(terceiro, aud.codigo)]  # ja decidida
     respostas.append(client.post("/auditoria/proxima", headers=original))  # nada para ele
     assert {(r.status_code, r.content) for r in respostas} == {
         (404, b'{"detail":"' + AUDITORIA_INDISPONIVEL.encode() + b'"}')
@@ -355,7 +361,7 @@ def test_item_cego_lista_fechada_inclusive_quarentena(client, reais, decidida):
     assert r.status_code == 200, r.text
     item = r.json()
     assert set(item) == CAMPOS_ITEM
-    assert item["auditoria_id"] == aud.id and item["foto_principal"]["id"] == foto.id
+    assert item["auditoria"] == str(aud.codigo) and item["foto_principal"]["id"] == foto.id
     assert item["quarentena"] == [
         {"tipo": "medidor_multiplo", "severidade": "informativo", "detalhe": {"quantidade": 2}}
     ]
@@ -378,12 +384,12 @@ def test_item_igual_para_as_tres_origens(client, db_session, reais, lote_aud, de
         assert r.status_code == 200
         itens.append(r.json())
         client.post(
-            f"/auditoria/{itens[-1]['auditoria_id']}/decisao",
+            f"/auditoria/{itens[-1]['auditoria']}/decisao",
             json={"decisao": "aprovada"},
             headers=cab,
         )
     neutros = [
-        {k: v for k, v in i.items() if k not in ("auditoria_id", "linha_csv", "medidores")}
+        {k: v for k, v in i.items() if k not in ("auditoria", "linha_csv", "medidores")}
         | {"posicao_lida": None, "foto_principal": None, "fotos": None, "reservado_ate": None}
         | {"ha_mais": None}
         for i in itens
@@ -458,12 +464,12 @@ def test_decisao_do_segundo_revisor(client, db_session, reais, decidida):
     lei, _, aud = decidida
     cab = login(client, reais["auditor2"])
     r = client.post(
-        f"/auditoria/{aud.id}/decisao",
+        f"/auditoria/{aud.codigo}/decisao",
         json={"decisao": "reprovada", "motivo": "fora_de_foco"},
         headers=cab,
     )
     assert r.status_code == 201, r.text
-    assert set(r.json()) == {"auditoria_id", "decisao", "motivo", "observacao", "decidida_em"}
+    assert set(r.json()) == {"auditoria", "decisao", "motivo", "observacao", "decidida_em"}
     db_session.expire_all()
     aud = db_session.get(AuditoriaAmostral, aud.id)
     assert (aud.revisor_id, aud.decisao, aud.motivo) == (
@@ -479,7 +485,7 @@ def test_decisao_do_segundo_revisor(client, db_session, reais, decidida):
 def test_decisao_gravada_e_imutavel_no_banco(client, db_session, reais, lote_aud, decidida):
     _, _, aud = decidida
     r = client.post(
-        f"/auditoria/{aud.id}/decisao",
+        f"/auditoria/{aud.codigo}/decisao",
         json={"decisao": "aprovada"},
         headers=login(client, reais["auditor2"]),
     )
@@ -513,7 +519,7 @@ def test_rotulo_que_falha_desfaz_a_decisao_da_auditoria(client, db_session, reai
     db_session.add(Rotulo(foto_id=foto.id, usuario_id=uid, rodada="producao", revisao_id=antiga.id))
     db_session.commit()
     r = client.post(
-        f"/auditoria/{aud.id}/decisao",
+        f"/auditoria/{aud.codigo}/decisao",
         json={"decisao": "aprovada"},
         headers=login(client, reais["auditor2"]),
     )
@@ -530,7 +536,7 @@ def test_reserva_exclusiva(client, reais, decidida):
     aud3 = login(client, reais["auditor3"])
     assert client.post("/auditoria/proxima", headers=aud2).status_code == 200
     assert client.post("/auditoria/proxima", headers=aud3).status_code == 404
-    assert client.post(f"/auditoria/{aud.id}/liberar", headers=aud2).status_code == 204
+    assert client.post(f"/auditoria/{aud.codigo}/liberar", headers=aud2).status_code == 204
     assert client.post("/auditoria/proxima", headers=aud3).status_code == 200
 
 
@@ -540,14 +546,14 @@ def test_reserva_vencida_libera(client, db_session, reais, decidida):
     aud.reservado_ate = datetime.now(UTC) - timedelta(minutes=1)
     db_session.commit()
     cab = login(client, reais["auditor3"])
-    r = client.post(f"/auditoria/{aud.id}/decisao", json={"decisao": "aprovada"}, headers=cab)
+    r = client.post(f"/auditoria/{aud.codigo}/decisao", json={"decisao": "aprovada"}, headers=cab)
     assert r.status_code == 201
 
 
 def test_decisao_invalida(client, reais, decidida):
     _, _, aud = decidida
     cab = login(client, reais["auditor2"])
-    url = f"/auditoria/{aud.id}/decisao"
+    url = f"/auditoria/{aud.codigo}/decisao"
     assert client.post(url, json={"decisao": "reprovada"}, headers=cab).status_code == 422
     corpo = {"decisao": "aprovada", "motivo": "glare"}
     assert client.post(url, json=corpo, headers=cab).status_code == 422
@@ -614,12 +620,12 @@ def test_decisoes_da_maquina_tambem_sao_auditadas(
     assert (aud.origem, aud.revisao_id, aud.revisor_original_id) == (origem, None, None)
     cab = login(client, reais["auditor"])
     item = client.post("/auditoria/proxima", headers=cab).json()
-    assert item["auditoria_id"] == aud.id
+    assert item["auditoria"] == str(aud.codigo)
     assert client.get(f"/leituras/{lei.id}", headers=cab).json()["status_atual"] == "decidida"
     corpo = {"decisao": decisao_revisor}
     if decisao_revisor == "reprovada":
         corpo["motivo"] = "tampa_suja"
-    r = client.post(f"/auditoria/{aud.id}/decisao", json=corpo, headers=cab)
+    r = client.post(f"/auditoria/{aud.codigo}/decisao", json=corpo, headers=cab)
     assert r.status_code == 201, r.text
     admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
     b = admin[bloco]
@@ -776,22 +782,21 @@ def test_ordem_de_entrega_nao_segue_o_sorteio(client, db_session, reais, lote_au
     entregues = []
     for _ in ids:
         item = client.post("/auditoria/proxima", headers=cab).json()
-        entregues.append(item["auditoria_id"])
+        entregues.append(item["auditoria"])
         # reserva propria volta primeiro: o mesmo item ate decidir
-        assert (
-            client.post("/auditoria/proxima", headers=cab).json()["auditoria_id"] == entregues[-1]
-        )
+        assert client.post("/auditoria/proxima", headers=cab).json()["auditoria"] == entregues[-1]
         client.post(
             f"/auditoria/{entregues[-1]}/decisao", json={"decisao": "aprovada"}, headers=cab
         )
-    assert entregues == esperado
+    por_codigo = {str(a.codigo): a.id for a in db_session.scalars(select(AuditoriaAmostral))}
+    assert [por_codigo[c] for c in entregues] == esperado
 
 
 def test_falso_positivo_com_intervalo_e_sem_alvo_antes_da_hora(
     client, db_session, reais, lote_aud, sempre
 ):
     """Bloqueante de dados do gate 3: 10 auto-rejeicoes confirmadas e 0 erro nao sao
-    "falso positivo 0%": o limite superior de 95% e 25,9%, faltam 299 para sustentar
+    "falso positivo 0%": o limite superior de 95% e 25,9%, sao precisas 299 no total para sustentar
     precisao >= 0,99, e o alvo nao esta atingido."""
     for _ in range(10):
         fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
@@ -811,3 +816,164 @@ def test_falso_positivo_com_intervalo_e_sem_alvo_antes_da_hora(
     assert b["limite_superior_erro"] == pytest.approx(0.2589, abs=1e-4)
     assert (b["alvo_erro"], b["necessarias"], b["alvo_atingido"]) == (0.01, 299, False)
     assert sup["taxa_auto_rejeitada"] == 1.0 and sup["taxa_configurada"] == 0.07
+    assert (b["detector"], b["politica"]) == ("heuristica@v1", "politica@v1")
+
+
+# ------------------------------------------------------------------ gate 4
+
+
+def test_identificador_opaco_nao_ordena_pelo_sorteio(client, db_session, reais, lote_aud, sempre):
+    """Bloqueante do gate 4: o id sequencial, sorteado em rajada, diria a origem. O item e
+    as rotas usam um uuid aleatorio (v4); em 20 auditorias ele nao segue a ordem do id."""
+    for _ in range(20):
+        fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    db_session.commit()
+    auds = db_session.scalars(select(AuditoriaAmostral).order_by(AuditoriaAmostral.id)).all()
+    codigos = [str(a.codigo) for a in auds]
+    assert all(uuid.UUID(c).version == 4 for c in codigos)
+    assert codigos != sorted(codigos) and codigos != sorted(codigos, reverse=True)
+    item = client.post("/auditoria/proxima", headers=login(client, reais["auditor2"])).json()
+    assert item["auditoria"] in codigos
+    assert all(str(a.id) not in (item["auditoria"],) for a in auds)
+    assert not any(isinstance(v, int) and v in {a.id for a in auds} for v in item.values())
+
+
+def _decidir_auditoria(db_session, aud, revisor_id, decisao, motivo=None, quando=None):
+    aud.revisor_id, aud.decisao, aud.motivo = revisor_id, decisao, motivo
+    aud.decidida_em = quando or datetime.now(UTC)
+
+
+def test_falso_positivo_uma_leitura_por_estrato(db_session, client, reais, lote_aud, sempre):
+    """Bloqueante de dados do gate 4: a unidade e a leitura dentro de (detector, politica).
+    Mesma leitura auto-rejeitada e auditada duas vezes pela v1: conta uma vez, a auditoria
+    decidida mais antiga. Uma decisao da mesma leitura por outro detector/politica vai para
+    o estrato dele e nao entra no da politica ativa."""
+    from inspecao.estados import transicionar
+
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    primeira = db_session.scalar(select(AuditoriaAmostral))
+    _decidir_auditoria(db_session, primeira, reais["auditor2"].id, "aprovada")  # erro
+    detalhe = {"politica": "politica@v1"}
+    for ator, det in (
+        ("modelo:heuristica@v1", detalhe),
+        ("modelo:qualidade@v1", {"politica": "politica@v2"}),
+    ):
+        transicionar(db_session, lei, S.TRIAGEM_QUALIDADE, ator=ator)
+        transicionar(db_session, lei, S.REJEITADA_QUALIDADE, ator=ator, detalhe=det)
+        nova = db_session.scalar(
+            select(AuditoriaAmostral)
+            .where(AuditoriaAmostral.decisao.is_(None))
+            .order_by(AuditoriaAmostral.id.desc())
+        )
+        _decidir_auditoria(
+            db_session,
+            nova,
+            reais["auditor3"].id,
+            "reprovada",
+            "fora_de_foco",
+            datetime.now(UTC) + timedelta(minutes=1),
+        )
+    db_session.commit()
+    admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
+    ativa = admin["auto_rejeitadas"]
+    assert (ativa["detector"], ativa["politica"], ativa["n"], ativa["erros"]) == (
+        "heuristica@v1",
+        "politica@v1",
+        1,
+        1,
+    )
+    estratos = {(e["detector"], e["politica"]): e["n"] for e in admin["estratos_auto_rejeitadas"]}
+    assert estratos == {("heuristica@v1", "politica@v1"): 1, ("qualidade@v1", "politica@v2"): 1}
+
+
+@pytest.mark.parametrize(
+    ("origem", "decisao", "motivo", "erro"),
+    [
+        ("auto_rejeitada", "aprovada", None, True),
+        ("auto_rejeitada", "reprovada", "outro", True),
+        ("auto_rejeitada", "reprovada", "glare", False),
+        ("auto_aprovada", "reprovada", "outro", True),
+        ("auto_aprovada", "aprovada", None, False),
+    ],
+)
+def test_definicao_de_erro_da_maquina(origem, decisao, motivo, erro):
+    assert auditoria.e_erro_da_maquina(origem, decisao, motivo) is erro
+
+
+def test_reabertura_pelo_recalcular_real(client, db_session, reais, lote_aud, sempre):
+    """Via `recalcular_decisao`: v0 manda a auto-rejeitada para a fila (pendente invalida),
+    v1 rejeita de novo (auditoria nova da decisao nova), v0 reabre outra vez e o auditor
+    decide na fila com 201 e auditoria propria."""
+    from inspecao.inference.detector import DetectorNulo
+    from inspecao.jobs.handlers import recalcular_decisao
+    from tests.test_recalcular_decisao import ctx_com
+
+    ctx = ctx_com(DetectorNulo(), None)
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    db_session.commit()
+
+    def auds():
+        db_session.expire_all()
+        return db_session.scalars(
+            select(AuditoriaAmostral)
+            .where(AuditoriaAmostral.leitura_id == lei.id)
+            .order_by(AuditoriaAmostral.id)
+        ).all()
+
+    recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": "politica@v0"})
+    db_session.commit()
+    assert db_session.get(Leitura, lei.id).status_atual == S.FILA_HUMANA.value
+    (a1,) = auds()
+    assert a1.invalidada_em is not None
+    recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": "politica@v1"})
+    db_session.commit()
+    assert db_session.get(Leitura, lei.id).status_atual == S.REJEITADA_QUALIDADE.value
+    a1, a2 = auds()
+    assert a2.origem == "auto_rejeitada" and a2.invalidada_em is None and a2.historico_id
+    recalcular_decisao(ctx, db_session, {"lote_id": lote_aud.id, "politica": "politica@v0"})
+    db_session.commit()
+    r = client.post(
+        f"/fila-humana/{lei.id}/decisao",
+        json={"decisao": "aprovada"},
+        headers=login(client, reais["auditor"]),
+    )
+    assert r.status_code == 201, r.text
+    origens = [(a.origem, a.invalidada_em is not None) for a in auds()]
+    assert origens == [("auto_rejeitada", True), ("auto_rejeitada", True), ("fila", False)]
+
+
+def test_recalcular_nao_reabre_com_auditoria_reservada(client, db_session, reais, lote_aud, sempre):
+    """O segundo revisor com a auditoria na mao nao ve o item sumir: o recalculo pula a
+    leitura enquanto a reserva vale (risco residual do 404 depois de reserva valida)."""
+    from inspecao.inference.detector import DetectorNulo
+    from inspecao.jobs.handlers import recalcular_decisao
+    from tests.test_recalcular_decisao import ctx_com
+
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    db_session.commit()
+    cab = login(client, reais["auditor2"])
+    item = client.post("/auditoria/proxima", headers=cab).json()
+    recalcular_decisao(
+        ctx_com(DetectorNulo(), None),
+        db_session,
+        {"lote_id": lote_aud.id, "politica": "politica@v0"},
+    )
+    db_session.commit()
+    assert db_session.get(Leitura, lei.id).status_atual == S.REJEITADA_QUALIDADE.value
+    r = client.post(
+        f"/auditoria/{item['auditoria']}/decisao", json={"decisao": "aprovada"}, headers=cab
+    )
+    assert r.status_code == 201
+
+
+def test_violacao_inesperada_no_sorteio_propaga(db_session, lote_aud):
+    """So a colisao em `uq_auditorias_historico` e tolerada; outra violacao (aqui, FK de um
+    historico que nao existe) propaga."""
+    fantasma = HistoricoStatus(id=10**12, leitura_id=1, status=S.REJEITADA_QUALIDADE.value)
+    lei, _ = fx.leitura(db_session, lote_aud, S.FILA_HUMANA, fx.scores(0.2))
+    with pytest.raises(IntegrityError):
+        auditoria.sortear_decisao_automatica(db_session, lei.id, fantasma)

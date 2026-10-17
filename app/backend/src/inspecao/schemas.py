@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
@@ -492,7 +493,7 @@ class ItemAuditoriaOut(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    auditoria_id: int
+    auditoria: UUID
     lote: str
     linha_csv: int
     medidores: list[str]
@@ -511,7 +512,7 @@ class ItemAuditoriaOut(BaseModel):
 class AuditoriaDecisaoOut(BaseModel):
     """So a decisao do proprio segundo revisor."""
 
-    auditoria_id: int
+    auditoria: UUID
     decisao: DecisaoHumana
     motivo: MotivoReprovacao | None
     observacao: str | None
@@ -533,8 +534,12 @@ class TotalConcordanciaOut(MedidasConcordanciaOut):
 
 
 class DecisaoAutomaticaAuditoriaOut(BaseModel):
-    """Auditorias de decisao da maquina. Erro: auto-aprovada reprovada pelo revisor, ou
-    auto-rejeitada aprovada pelo revisor (falso positivo)."""
+    """Erro da maquina num estrato (detector, politica), uma leitura auditada por estrato.
+    Erro de auto-rejeitada: qualquer veredito que nao seja "reprovada por defeito de
+    qualidade" (falso positivo); de auto-aprovada: qualquer reprovada."""
+
+    detector: str
+    politica: str
 
     n: int | None
     erros: int | None
@@ -572,7 +577,13 @@ class ConcordanciaAuditoriaOut(BaseModel):
     invalidadas: int | None
     decididas: int | None
     total: TotalConcordanciaOut
-    auto_aprovadas: DecisaoAutomaticaAuditoriaOut
-    auto_rejeitadas: DecisaoAutomaticaAuditoriaOut
+    auto_aprovadas: DecisaoAutomaticaAuditoriaOut = Field(description="estrato da politica ativa")
+    auto_rejeitadas: DecisaoAutomaticaAuditoriaOut = Field(description="estrato da politica ativa")
+    estratos_auto_aprovadas: list[DecisaoAutomaticaAuditoriaOut] = Field(
+        description="todos os estratos (so admin)"
+    )
+    estratos_auto_rejeitadas: list[DecisaoAutomaticaAuditoriaOut] = Field(
+        description="todos os estratos (so admin)"
+    )
     por_lote: list[ConcordanciaLoteOut]
     serie: list[ConcordanciaDiaOut]

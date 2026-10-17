@@ -1,12 +1,15 @@
 """Auditoria amostral (marco M8): segundo revisor cego. Regras em `inspecao.auditoria`.
 
-So o papel `auditor` audita (403 constante para supervisor e admin, que leem as
-metricas). Toda outra recusa em `/auditoria/{id}/*` e a mesma resposta, 404
+As rotas usam o `codigo` (uuid aleatorio) da auditoria, nunca o `id` sequencial, que
+diria a ordem do sorteio e com ela a origem. So o papel `auditor` audita (403 constante
+para supervisor e admin, que leem as metricas). Toda outra recusa em
+`/auditoria/{codigo}/*` e a mesma resposta, 404
 `AUDITORIA_INDISPONIVEL`: "nao existe", "a decisao e sua", "ja decidida", "reservada por
 outro" e falha de gravacao nao se distinguem, para o primeiro revisor nao descobrir que
 foi sorteado. A validacao do corpo (422) vem antes e nao depende da auditoria.
 """
 
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -46,7 +49,7 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
     da maquina nem id da leitura."""
     completa = leitura_completa(db, carregar_leitura(db, auditoria.leitura_id))
     return ItemAuditoriaOut(
-        auditoria_id=auditoria.id,
+        auditoria=auditoria.codigo,
         lote=completa.lote,
         linha_csv=completa.linha_csv,
         medidores=completa.medidores,
@@ -65,12 +68,12 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
     )
 
 
-def _travar_disponivel(db: Session, auditoria_id: int, usuario_id: int) -> AuditoriaAmostral:
+def _travar_disponivel(db: Session, codigo: uuid.UUID, usuario_id: int) -> AuditoriaAmostral:
     """A auditoria travada se este usuario pode decidi-la ou libera-la agora; senao a
     resposta unica. Mesma condicao do `/proxima` (`servico.livre_para`)."""
     auditoria = db.scalar(
         select(AuditoriaAmostral)
-        .where(AuditoriaAmostral.id == auditoria_id, servico.livre_para(usuario_id))
+        .where(servico.por_codigo(codigo), servico.livre_para(usuario_id))
         .with_for_update()
     )
     if auditoria is None:
@@ -91,11 +94,11 @@ def proxima(db: DB, usuario: Auditor) -> ItemAuditoriaOut:
     return item
 
 
-@router.post("/{auditoria_id}/liberar", status_code=status.HTTP_204_NO_CONTENT)
-def liberar(auditoria_id: int, db: DB, usuario: Auditor) -> None:
+@router.post("/{codigo}/liberar", status_code=status.HTTP_204_NO_CONTENT)
+def liberar(codigo: uuid.UUID, db: DB, usuario: Auditor) -> None:
     """Devolve a reserva propria. Qualquer outro caso: a resposta unica."""
     _so_auditor(usuario)
-    auditoria = _travar_disponivel(db, auditoria_id, usuario.id)
+    auditoria = _travar_disponivel(db, codigo, usuario.id)
     if auditoria.reservado_por != usuario.id:
         raise _indisponivel(db)
     auditoria.reservado_por = None
@@ -104,11 +107,11 @@ def liberar(auditoria_id: int, db: DB, usuario: Auditor) -> None:
 
 
 @router.post(
-    "/{auditoria_id}/decisao",
+    "/{codigo}/decisao",
     response_model=AuditoriaDecisaoOut,
     status_code=status.HTTP_201_CREATED,
 )
-def decidir(auditoria_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> AuditoriaDecisaoOut:
+def decidir(codigo: uuid.UUID, dados: DecisaoIn, db: DB, usuario: Auditor) -> AuditoriaDecisaoOut:
     """Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.
 
     A regra vale aqui, e nao so no `/proxima`: a auditoria tem de estar pendente, nao ser
@@ -122,7 +125,7 @@ def decidir(auditoria_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Au
     if dados.decisao is DecisaoHumana.APROVADA and dados.motivo is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "aprovacao nao leva motivo")
 
-    auditoria = _travar_disponivel(db, auditoria_id, usuario.id)
+    auditoria = _travar_disponivel(db, codigo, usuario.id)
     auditoria.revisor_id = usuario.id
     auditoria.decisao = dados.decisao.value
     auditoria.motivo = dados.motivo.value if dados.motivo else None
@@ -144,7 +147,7 @@ def decidir(auditoria_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Au
     except IntegrityError as erro:
         raise _indisponivel(db) from erro
     return AuditoriaDecisaoOut(
-        auditoria_id=auditoria.id,
+        auditoria=auditoria.codigo,
         decisao=DecisaoHumana(auditoria.decisao),
         motivo=MotivoReprovacao(auditoria.motivo) if auditoria.motivo else None,
         observacao=auditoria.observacao,

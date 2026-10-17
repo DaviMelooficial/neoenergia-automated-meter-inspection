@@ -23,8 +23,13 @@ ROTAS = [
     ("GET", "/metricas/auto-aprovacao", Papel.SUPERVISOR, None),
     ("GET", "/metricas/auditoria", Papel.SUPERVISOR, None),
     ("POST", "/auditoria/proxima", Papel.AUDITOR, None),
-    ("POST", "/auditoria/1/decisao", Papel.AUDITOR, {"decisao": "aprovada"}),
-    ("POST", "/auditoria/1/liberar", Papel.AUDITOR, None),
+    (
+        "POST",
+        "/auditoria/00000000-0000-4000-8000-000000000000/decisao",
+        Papel.AUDITOR,
+        {"decisao": "aprovada"},
+    ),
+    ("POST", "/auditoria/00000000-0000-4000-8000-000000000000/liberar", Papel.AUDITOR, None),
     ("POST", "/rotulagem/proxima", Papel.SUPERVISOR, None),
     (
         "POST",
@@ -51,8 +56,8 @@ ADMIN_BARRADO = {("POST", "/rotulagem/proxima"), ("POST", "/rotulagem/1")}
 # Auditoria amostral (M8): so o papel auditor audita; supervisor e admin leem as metricas.
 SO_AUDITOR = {
     ("POST", "/auditoria/proxima"),
-    ("POST", "/auditoria/1/decisao"),
-    ("POST", "/auditoria/1/liberar"),
+    ("POST", "/auditoria/00000000-0000-4000-8000-000000000000/decisao"),
+    ("POST", "/auditoria/00000000-0000-4000-8000-000000000000/liberar"),
 }
 
 

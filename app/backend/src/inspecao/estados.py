@@ -62,6 +62,18 @@ ESTADOS_REDECIDIVEIS: frozenset[StatusLeitura] = frozenset(
 )
 
 
+# Decisoes da maquina que a auditoria amostral confere (M8): `transicionar` sorteia a
+# auditoria delas na mesma transacao. `transicionar_em_lote` (ingestao) recusa esses
+# destinos, para nenhuma decisao automatica escapar do sorteio.
+DECISOES_AUTOMATICAS_AUDITADAS: frozenset[str] = frozenset(
+    {
+        StatusLeitura.REJEITADA_QUALIDADE.value,
+        StatusLeitura.AUTO_REJEITADA.value,
+        StatusLeitura.AUTO_APROVADA.value,
+    }
+)
+
+
 class TransicaoInvalida(ValueError):
     """Tentativa de mover uma leitura por uma aresta que nao existe."""
 
@@ -114,6 +126,12 @@ def transicionar(
     )
     sessao.add(registro)
     sessao.flush()
+    if destino.value in DECISOES_AUTOMATICAS_AUDITADAS:
+        # Auditoria amostral (M8): toda decisao automatica que pode ser conferida passa pelo
+        # sorteio aqui, onde ela e gravada, venha da triagem, do recalculo ou da validacao.
+        from inspecao import auditoria
+
+        auditoria.sortear_decisao_automatica(sessao, leitura.id, registro)
     return registro
 
 
@@ -137,6 +155,10 @@ def transicionar_em_lote(
     origem = StatusLeitura(de)
     destino = StatusLeitura(para)
     validar_transicao(origem, destino)
+    if destino.value in DECISOES_AUTOMATICAS_AUDITADAS:
+        raise TransicaoInvalida(
+            f"{destino.value} e decisao automatica auditada: use transicionar, que sorteia"
+        )
     if not leitura_ids:
         return 0
 

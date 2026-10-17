@@ -11,6 +11,7 @@ evita a circularidade sem perder informacao:
     foto orfa (866 casos)    -> leitura_id nulo,       principal = False
 """
 
+import uuid
 from datetime import datetime
 from enum import StrEnum
 
@@ -27,7 +28,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -553,6 +556,7 @@ class AuditoriaAmostral(Base):
         ),
         UniqueConstraint("revisao_id", name="uq_auditorias_revisao"),
         UniqueConstraint("historico_id", name="uq_auditorias_historico"),
+        UniqueConstraint("codigo", name="uq_auditorias_codigo"),
         Index("ix_auditorias_leitura", "leitura_id"),
         Index(
             "ix_auditorias_pendentes",
@@ -563,6 +567,12 @@ class AuditoriaAmostral(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Identificador exposto ao revisor (item e rotas /auditoria/{codigo}): uuid aleatorio.
+    # O `id` e sequencial e as automaticas sao sorteadas em rajada na triagem: um id baixo
+    # num lote entregaria a origem.
+    codigo: Mapped[uuid.UUID] = mapped_column(
+        Uuid, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
     leitura_id: Mapped[int] = mapped_column(ForeignKey("leituras.id", ondelete="CASCADE"))
     # fila: decisao de auditor (revisao e revisor original preenchidos); auto_aprovada e
     # auto_rejeitada: decisao da maquina, sem revisao nem revisor original

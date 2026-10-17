@@ -339,6 +339,24 @@ describe("Metricas", () => {
     expect(alerta.querySelector("path")).toHaveAttribute("fill", "var(--viz-critico)");
   });
 
+  it("drift da politica@v2: grafico da unica chave dela (ilegivel), sem as 5 classes", async () => {
+    const soIlegivel = (l: LoteDrift): LoteDrift => ({
+      ...l,
+      sinais: { ...l.sinais, classes: { ilegivel: sinal(0.05, 0.04) } },
+    });
+    m.drift.mockResolvedValue({
+      ...drift,
+      politica: "politica@v2",
+      detector: "qualidade@v1",
+      limiar_rejeita: 0.976,
+      lotes: drift.lotes.map(soIlegivel),
+    });
+    renderizar();
+    await screen.findByTestId("tabela-drift");
+    expect(screen.getByRole("img", { name: "Classe ativa: Ilegível" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Classe ativa: Fora de foco" })).toBeNull();
+  });
+
   it("auditoria amostral: concordancia e kappa continuos", async () => {
     renderizar();
     const painel = await screen.findByTestId("painel-auditoria");

@@ -10,7 +10,8 @@ Cena e defeitos nao sao declarados pela inspecao e ficam nulos.
 
 Idempotente: cada foto tem no maximo um rotulo `inspecao_m5`; rodar de novo depois de
 preencher o CSV troca o rotulo pendente pelo veredito. A foto e achada pelo nome do
-arquivo; nome que nao existe no banco e contado como nao mapeado e fica de fora.
+arquivo; nome que nao existe no banco e contado como nao mapeado e fica de fora. A
+inspecao das 355 do M7 (`inspecao_m7`) usa o mesmo formato e este `importar`, com `rodada`.
 """
 
 import csv
@@ -54,8 +55,8 @@ def _legivel(valor: str) -> bool | None:
     raise CsvInvalido(f"legivel_inspecao invalido: {valor!r} (use 1/0, sim/nao)")
 
 
-def importar(sessao: Session, caminho: Path) -> Resumo:
-    """Grava (substituindo) um rotulo `inspecao_m5` por foto do CSV. Sem commit."""
+def importar(sessao: Session, caminho: Path, rodada: str = RODADA) -> Resumo:
+    """Grava (substituindo) um rotulo da `rodada` por foto do CSV. Sem commit."""
     with caminho.open(encoding="utf-8", newline="") as f:
         leitor = csv.DictReader(f)
         faltam = COLUNAS - set(leitor.fieldnames or [])
@@ -76,9 +77,9 @@ def importar(sessao: Session, caminho: Path) -> Resumo:
             continue
         legivel = _legivel(linha["legivel_inspecao"])
         inspetor = (linha["inspetor"] or "").strip() or PENDENTE
-        sessao.execute(delete(Rotulo).where(Rotulo.foto_id == foto_id, Rotulo.rodada == RODADA))
+        sessao.execute(delete(Rotulo).where(Rotulo.foto_id == foto_id, Rotulo.rodada == rodada))
         sessao.add(
-            Rotulo(foto_id=foto_id, rodada=RODADA, rotulador_externo=inspetor, legivel=legivel)
+            Rotulo(foto_id=foto_id, rodada=rodada, rotulador_externo=inspetor, legivel=legivel)
         )
         resumo.gravados += 1
         if legivel is None:

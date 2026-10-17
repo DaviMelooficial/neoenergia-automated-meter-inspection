@@ -49,11 +49,16 @@ TESTE = "decidida_conta_teste"
 BUCKET_DO_STATUS[TESTE] = TESTE
 # Detectores sem treino nem calibracao sobre o Lab 2 alem do limiar do M5. Para os
 # treinados (M7), a concordancia contra o Lab 2 so vale nos lotes de TESTE do proprio
-# detector, declarados aqui junto com ele (o contrato do modelo, `qualidade.json` do M7,
-# e quem os define). Detector treinado sem lotes de teste declarados: sem concordancia
-# contra o Lab 2, em vez de um recorte adivinhado.
+# detector, declarados aqui junto com ele. Detector treinado sem lotes de teste
+# declarados: sem concordancia contra o Lab 2, em vez de um recorte adivinhado.
 DETECTORES_SEM_TREINO = {"heuristica@v1", "nulo@v0"}
-LOTES_DE_TESTE: dict[str, tuple[str, ...]] = {}
+# `qualidade@v1` (M7, rodada 20261016-213656): o split temporal de `mlinsp.particao`
+# (SPLIT_POR_LOTE) treina em 20/05 e 21/05, valida em 22/05 e testa em 03/07. As 84 fotos
+# do Lab 2 nesse lote sao o conjunto de teste do M7 (83 com legivel sem empate, as mesmas
+# que `veredito_lab02` usa); a remocao por vazamento do M7 nao tirou nenhuma delas.
+LOTES_DE_TESTE: dict[str, tuple[str, ...]] = {
+    "qualidade@v1": ("PSP_EXTRATLEITIMPL_030726_0121",),
+}
 
 
 def _status():
@@ -181,7 +186,7 @@ def concordancia_maquina_humano(db: Session, politica: Politica) -> list[dict[st
         escopo_lab02 = (
             "so os lotes de teste do detector"
             if teste
-            else "split do detector nao declarado: pendente da integracao com o M7"
+            else "split do detector nao declarado: sem concordancia contra o Lab 2"
         )
     return [
         _concordancia(

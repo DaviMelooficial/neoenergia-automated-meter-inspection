@@ -41,7 +41,8 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import case, exists, func, or_, select, text
+from sqlalchemy.dialects.postgresql import aggregate_order_by, insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -49,6 +50,7 @@ from inspecao.config import get_settings
 from inspecao.contas_teste import email_de_teste, usuario_real
 from inspecao.enums import MotivoReprovacao, RodadaRotulagem, StatusLeitura
 from inspecao.models import (
+    AtivacaoPolitica,
     AuditoriaAmostral,
     Foto,
     HistoricoStatus,
@@ -142,6 +144,30 @@ def sortear_decisao_automatica(
         log.warning("decisao %s (historico) ja tem auditoria", decisao.id)
         return None
     return auditoria
+
+
+def registrar_ativacao(db: Session, decisao: HistoricoStatus) -> None:
+    """Grava a ativacao da politica de `decisao` (decisao automatica), se for a primeira.
+
+    `lotes_anteriores` = os lotes que existem agora, inclusive o da propria decisao: a
+    medida de falso positivo da politica so conta lotes ingeridos depois dela
+    (`_estratos`). O lote em que ela decide pela primeira vez fica de fora, o lado
+    conservador: nao da para separar um lote novo de um antigo reprocessado. Concorrente
+    com outro worker: `ON CONFLICT DO NOTHING`, vale a primeira. Sem commit."""
+    politica = (decisao.detalhe or {}).get("politica")
+    if not politica:
+        return
+    if db.get(AtivacaoPolitica, politica) is not None:
+        return
+    lotes = select(
+        func.coalesce(func.array_agg(aggregate_order_by(Lote.nome, Lote.nome)), text("'{}'"))
+    ).scalar_subquery()
+    db.execute(
+        insert(AtivacaoPolitica)
+        .values(politica=politica, historico_id=decisao.id, lotes_anteriores=lotes)
+        .on_conflict_do_nothing(index_elements=[AtivacaoPolitica.politica])
+    )
+    log.info("politica %s ativada na decisao %s (historico)", politica, decisao.id)
 
 
 def _travar(db: Session, leitura_id: int) -> bool:
@@ -329,6 +355,7 @@ RODADAS_DE_CALIBRACAO = (
     RodadaRotulagem.B.value,
     RodadaRotulagem.DESEMPATE.value,
     RodadaRotulagem.INSPECAO_M5.value,
+    RodadaRotulagem.INSPECAO_M7.value,
 )
 
 
@@ -367,6 +394,16 @@ def _chave(ator: str | None, politica: str | None, status: str) -> Estrato:
     return detector, politica or "sem_registro", ETAPA.get(status, status)
 
 
+def lote_posterior_a_ativacao(coluna_politica, coluna_lote_nome):
+    """O lote foi ingerido depois da ativacao da politica: ela existe e o nome do lote nao
+    esta em `lotes_anteriores`. Politica sem ativacao (decisao sem politica no historico,
+    `sem_registro`) nunca e posterior."""
+    return exists().where(
+        AtivacaoPolitica.politica == coluna_politica,
+        ~AtivacaoPolitica.lotes_anteriores.any(coluna_lote_nome),
+    )
+
+
 def _estratos(db: Session, origem: str) -> dict[Estrato, list[tuple[str, str | None]]]:
     """(detector, politica, etapa) -> vereditos, uma auditoria decidida por leitura.
 
@@ -374,22 +411,29 @@ def _estratos(db: Session, origem: str) -> dict[Estrato, list[tuple[str, str | N
     `detalhe.politica`, `status` -> etapa). A mesma leitura pode ter varias decisoes
     auditadas (reaberta e decidida de novo pela maquina, com auditoria a 100%): dentro de
     um estrato so a auditoria decidida MAIS ANTIGA conta, para a unidade ser a foto e nao a
-    decisao. Foto de calibracao ou treino (`RODADAS_DE_CALIBRACAO`) fica fora.
+    decisao. So contam lotes ingeridos depois da ativacao da politica
+    (`lote_posterior_a_ativacao`): os anteriores contem a calibracao e o treino dela.
+    Foto de calibracao ou treino com rotulo (`RODADAS_DE_CALIBRACAO`) fica fora tambem,
+    como protecao adicional.
     """
+    politica = HistoricoStatus.detalhe["politica"].astext
     linhas = db.execute(
         select(
             HistoricoStatus.ator,
-            HistoricoStatus.detalhe["politica"].astext,
+            politica,
             HistoricoStatus.status,
             AuditoriaAmostral.leitura_id,
             AuditoriaAmostral.decisao,
             AuditoriaAmostral.motivo,
         )
         .join(HistoricoStatus, HistoricoStatus.id == AuditoriaAmostral.historico_id)
+        .join(Leitura, Leitura.id == AuditoriaAmostral.leitura_id)
+        .join(Lote, Lote.id == Leitura.lote_id)
         .where(
             AuditoriaAmostral.origem == origem,
             AuditoriaAmostral.decisao.is_not(None),
             usuario_real(AuditoriaAmostral.revisor_id),
+            lote_posterior_a_ativacao(politica, Lote.nome),
             ~foto_de_calibracao(AuditoriaAmostral.leitura_id),
         )
         .order_by(AuditoriaAmostral.decidida_em, AuditoriaAmostral.id)
@@ -408,6 +452,16 @@ def _estratos(db: Session, origem: str) -> dict[Estrato, list[tuple[str, str | N
 # Sem estes rotulos importados (`make rotulos-importar`, `make rotulos-importar-inspecao`),
 # a exclusao da calibracao nao enxerga nada e a medida mistura fotos dentro da amostra.
 CALIBRACAO_OBRIGATORIA = (RodadaRotulagem.LAB02.value, RodadaRotulagem.INSPECAO_M5.value)
+# A calibracao propria de um detector treinado: com ele configurado, a rodada tambem e
+# obrigatoria (`make rotulos-importar-inspecao-m7` antes de ligar DETECTOR_QUALIDADE=onnx).
+CALIBRACAO_OBRIGATORIA_DO_DETECTOR = {"qualidade@v1": (RodadaRotulagem.INSPECAO_M7.value,)}
+
+
+def calibracao_obrigatoria() -> tuple[str, ...]:
+    from inspecao.monitoramento.sinais import politica_ativa
+
+    modelo = politica_ativa().modelo or ""
+    return CALIBRACAO_OBRIGATORIA + CALIBRACAO_OBRIGATORIA_DO_DETECTOR.get(modelo, ())
 
 
 def precondicao_da_exclusao(db: Session) -> tuple[dict[str, int], list[str]]:
@@ -421,7 +475,7 @@ def precondicao_da_exclusao(db: Session) -> tuple[dict[str, int], list[str]]:
         .tuples()
         .all()
     )
-    faltando = [r for r in CALIBRACAO_OBRIGATORIA if not contagem.get(r)]
+    faltando = [r for r in calibracao_obrigatoria() if not contagem.get(r)]
     if faltando:
         log.warning(
             "exclusao da calibracao incompleta: nenhum rotulo em %s; o falso positivo das "
@@ -459,7 +513,8 @@ def _medida_automatica(
 
 def _estrato_vigente(db: Session, origem: str) -> Estrato:
     """O estrato da ULTIMA decisao automatica desta origem gravada no historico: e quem
-    esta decidindo de fato. Sem nenhuma, cai na politica ativa (`POLITICA_ATUAL`)."""
+    esta decidindo de fato. Sem nenhuma, cai na politica do detector configurado
+    (`sinais.politica_ativa`, a mesma do worker)."""
     from inspecao.monitoramento.sinais import politica_ativa
 
     status = [s for s, o in ORIGEM_AUTOMATICA.items() if o == origem]

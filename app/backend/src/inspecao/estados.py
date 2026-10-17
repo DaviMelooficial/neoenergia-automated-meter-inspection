@@ -135,8 +135,11 @@ def transicionar(
     if destino.value in DECISOES_AUTOMATICAS_AUDITADAS:
         # Auditoria amostral (M8): toda decisao automatica que pode ser conferida passa pelo
         # sorteio aqui, onde ela e gravada, venha da triagem, do recalculo ou da validacao.
+        # A primeira decisao automatica de cada politica grava a ativacao dela: o falso
+        # positivo da politica so mede lotes ingeridos depois disso.
         from inspecao import auditoria
 
+        auditoria.registrar_ativacao(sessao, registro)
         auditoria.sortear_decisao_automatica(sessao, leitura.id, registro)
     return registro
 

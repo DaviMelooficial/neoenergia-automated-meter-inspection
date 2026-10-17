@@ -1168,6 +1168,11 @@ def test_troca_de_detector_adiada_com_auditoria_travada(sempre):
     finally:
         trava.rollback()
         trava.close()
+        # O SET vale para a conexao, que volta ao pool: sem o RESET, o proximo teste que a
+        # pegar herda o lock_timeout de 5 s.
+        job.rollback()
+        job.execute(text("RESET lock_timeout"))
+        job.commit()
         job.close()
         _limpar_corrida(s, lote.id)
 
@@ -1291,3 +1296,115 @@ def test_reserva_antes_do_recalcular_pula_a_leitura(sempre):
     finally:
         job.close()
         _limpar_corrida(s, lote.id)
+
+
+# ------------------------------------------------------------------ integracao com o M7
+
+
+def _auto_rejeitada_auditada(db_session, lote, politica, revisor_id, decisao="aprovada"):
+    """Auto-rejeitada pela `politica` via `transicionar` (que grava a ativacao e sorteia),
+    com a auditoria decidida pelo `revisor_id`."""
+    from inspecao.estados import transicionar
+
+    lei, _ = fx.leitura(db_session, lote, S.TRIAGEM_QUALIDADE, fx.scores(0.95))
+    registro = transicionar(
+        db_session,
+        lei,
+        S.REJEITADA_QUALIDADE,
+        ator="modelo:qualidade@v1",
+        detalhe={"politica": politica},
+    )
+    aud = db_session.scalar(
+        select(AuditoriaAmostral).where(AuditoriaAmostral.historico_id == registro.id)
+    )
+    _decidir_auditoria(db_session, aud, revisor_id, decisao)
+    return lei, registro
+
+
+def _estrato(db_session, politica):
+    return auditoria._estratos(db_session, "auto_rejeitada").get(
+        ("qualidade@v1", politica, "qualidade"), []
+    )
+
+
+def test_primeira_decisao_automatica_grava_a_ativacao_com_os_lotes_existentes(
+    db_session, reais, lote_aud, sempre
+):
+    """A ativacao e gravada pela primeira decisao automatica da politica, com os lotes que
+    existem nesse instante (inclusive o da propria decisao); a segunda nao a muda."""
+    from inspecao.models import AtivacaoPolitica
+
+    p = "politica@teste-ativacao"
+    _, primeira = _auto_rejeitada_auditada(db_session, lote_aud, p, reais["auditor2"].id)
+    ativacao = db_session.get(AtivacaoPolitica, p)
+    assert ativacao.historico_id == primeira.id
+    assert lote_aud.nome in ativacao.lotes_anteriores
+    novo = fx.lote(db_session, "0126_0005", date(2026, 1, 4))
+    _auto_rejeitada_auditada(db_session, novo, p, reais["auditor2"].id)
+    db_session.expire_all()
+    ativacao = db_session.get(AtivacaoPolitica, p)
+    assert ativacao.historico_id == primeira.id and novo.nome not in ativacao.lotes_anteriores
+
+
+def test_estrato_da_politica_so_conta_lotes_ingeridos_depois_da_ativacao(
+    db_session, reais, lote_aud, sempre
+):
+    """Regra do merge M7 x M8: a politica ativada com `lote_aud` ja no banco nunca mede
+    `lote_aud` (contem a calibracao dela), nem se ele for reingerido com o mesmo nome; um
+    lote ingerido depois da ativacao entra."""
+    from sqlalchemy import delete
+
+    from inspecao.models import Lote
+
+    p = "politica@teste-posterior"
+    _auto_rejeitada_auditada(db_session, lote_aud, p, reais["auditor2"].id)
+    db_session.flush()
+    assert _estrato(db_session, p) == []  # lote anterior a ativacao: fora
+    depois = fx.lote(db_session, "0126_0006", date(2026, 1, 5))
+    _auto_rejeitada_auditada(db_session, depois, p, reais["auditor2"].id)
+    db_session.flush()
+    assert _estrato(db_session, p) == [("aprovada", None)]
+    # reingestao (--reprocessar): o lote anterior volta com outro id e o mesmo nome
+    nome = lote_aud.nome
+    db_session.execute(delete(Lote).where(Lote.id == lote_aud.id))
+    db_session.expunge_all()
+    reingerido = Lote(nome=nome, csv_nome="x.csv", checksum_csv="1" * 64)
+    db_session.add(reingerido)
+    db_session.flush()
+    _auto_rejeitada_auditada(db_session, reingerido, p, reais["auditor3"].id)
+    db_session.flush()
+    assert _estrato(db_session, p) == [("aprovada", None)]
+
+
+def test_politica_sem_ativacao_nao_mede(db_session, reais, lote_aud, sempre):
+    """Decisao gravada no historico sem passar pela ativacao (ou sem politica registrada):
+    fica fora do estrato, em vez de medir lotes que podem ser de calibracao."""
+    lei, _ = fx.leitura(
+        db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95), politica="politica@nunca"
+    )
+    auditoria.sortear_automaticas(db_session)
+    aud = db_session.scalar(select(AuditoriaAmostral).where(AuditoriaAmostral.leitura_id == lei.id))
+    _decidir_auditoria(db_session, aud, reais["auditor2"].id, "aprovada")
+    db_session.flush()
+    estratos = auditoria._estratos(db_session, "auto_rejeitada")
+    assert ("heuristica@v1", "politica@nunca", "qualidade") not in estratos
+
+
+def test_inspecao_m7_e_calibracao_e_obrigatoria_com_o_detector_onnx(
+    db_session, lote_aud, monkeypatch
+):
+    """A inspecao das 355 entra como rodada de calibracao (fora da medida) e passa a ser
+    obrigatoria na precondicao quando o detector configurado e o qualidade@v1."""
+    from inspecao.inference.politica import POLITICA_V1, POLITICA_V2
+    from inspecao.monitoramento import sinais
+
+    assert "inspecao_m7" in auditoria.RODADAS_DE_CALIBRACAO
+    monkeypatch.setattr(sinais, "politica_ativa", lambda: POLITICA_V1)
+    assert "inspecao_m7" not in auditoria.precondicao_da_exclusao(db_session)[1]
+    monkeypatch.setattr(sinais, "politica_ativa", lambda: POLITICA_V2)
+    assert "inspecao_m7" in auditoria.precondicao_da_exclusao(db_session)[1]
+    _, foto = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    db_session.add(Rotulo(foto_id=foto.id, rodada="inspecao_m7", rotulador_externo="pendente"))
+    db_session.flush()
+    contagem, faltando = auditoria.precondicao_da_exclusao(db_session)
+    assert contagem["inspecao_m7"] == 1 and "inspecao_m7" not in faltando

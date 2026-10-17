@@ -1,12 +1,13 @@
 """Aceite do M8 nas metricas: /metricas/qualidade, /metricas/drift e
 /metricas/auto-aprovacao com valores conhecidos, montados direto no banco."""
 
+import json
 import math
 from datetime import date
 
 import pytest
 
-from inspecao.config import get_settings
+from inspecao.config import RAIZ_REPO, get_settings
 from inspecao.enums import StatusLeitura as S
 from inspecao.monitoramento import auto_aprovacao, drift
 from tests import m8_fixture as fx
@@ -406,7 +407,78 @@ def test_lab02_de_detector_treinado_depende_do_split_dele(
         return next(c for c in q["concordancia_maquina_humano"] if c["fonte"] == "lab02")
 
     sem_split = lab02()
-    assert sem_split["n"] == 0 and "pendente da integracao com o M7" in sem_split["escopo"]
+    assert sem_split["n"] == 0 and "split do detector nao declarado" in sem_split["escopo"]
     monkeypatch.setitem(qualidade_mod.LOTES_DE_TESTE, p.modelo, (cenario["b"].nome,))
     com_split = lab02()
     assert com_split["n"] == 1 and com_split["escopo"] == "so os lotes de teste do detector"
+
+
+# ------------------------------------------------------------------ integracao com o M7
+
+CONTRATO_M7 = RAIZ_REPO / "ml" / "reports" / "20261016-213656" / "qualidade.json"
+
+
+def test_politica_ativa_segue_o_detector_configurado(monkeypatch, tmp_path):
+    """Metricas e auditoria usam a politica do detector configurado, pela mesma
+    resolucao do worker (`politica_para`), e nao `POLITICA_ATUAL`. No onnx o nome sai do
+    contrato `<versao>.json`, sem carregar o modelo."""
+    from inspecao.inference.politica import POLITICA_V0, POLITICA_V1, POLITICA_V2
+    from inspecao.monitoramento import sinais
+
+    s = get_settings()
+    monkeypatch.setattr(s, "modelo_qualidade_ativo", False)
+    for escolha, esperada in (("nulo", POLITICA_V0), ("heuristica", POLITICA_V1)):
+        monkeypatch.setattr(s, "detector_qualidade", escolha)
+        assert sinais.politica_ativa() is esperada
+        assert sinais.obter_politica(None) is esperada
+    monkeypatch.setattr(s, "detector_qualidade", "onnx")
+    monkeypatch.setattr(s, "modelo_qualidade_path", tmp_path / "qualidade@v1.onnx")
+    with pytest.raises(RuntimeError, match="contrato do modelo de qualidade ausente"):
+        sinais.politica_ativa()
+    (tmp_path / "qualidade@v1.json").write_text(CONTRATO_M7.read_text("utf-8"), "utf-8")
+    assert sinais.politica_ativa() is POLITICA_V2
+    contrato = json.loads(CONTRATO_M7.read_text("utf-8")) | {"rodada": "outra"}
+    (tmp_path / "qualidade@v1.json").write_text(json.dumps(contrato), "utf-8")
+    with pytest.raises(RuntimeError, match="rodada"):
+        sinais.politica_ativa()
+
+
+def test_qualidade_v1_tem_o_lote_de_teste_do_split_do_m7():
+    from inspecao.monitoramento import qualidade as qualidade_mod
+
+    assert qualidade_mod.LOTES_DE_TESTE["qualidade@v1"] == ("PSP_EXTRATLEITIMPL_030726_0121",)
+
+
+def test_drift_da_v2_usa_as_chaves_dela_e_o_lote_de_teste_como_baseline(
+    client, db_session, contas, monkeypatch
+):
+    """politica@v2: a distribuicao de classes e so a de `ilegivel` (as 5 classes do modelo
+    sao informativas) e a baseline sao os lotes de teste do detector, nao os de maio."""
+    from inspecao.monitoramento import qualidade as qualidade_mod
+
+    maio = fx.lote(db_session, "0526_0002", date(2026, 5, 20))
+    julho = fx.lote(db_session, "0726_0002", date(2026, 7, 3))
+    monkeypatch.setattr(get_settings(), "drift_lotes_baseline", [maio.nome])
+    monkeypatch.setitem(qualidade_mod.LOTES_DE_TESTE, "qualidade@v1", (julho.nome,))
+    for lt, ps in ((maio, [0.99, 0.1, 0.1, 0.1]), (julho, [0.99, 0.99, 0.6, 0.1])):
+        for p in ps:
+            saida = fx.scores(0.9) | {"ilegivel": p}
+            fx.leitura(
+                db_session, lt, S.FILA_HUMANA, saida, modelo="qualidade@v1", politica="politica@v2"
+            )
+    db_session.commit()
+    d = client.get(
+        "/metricas/drift",
+        params={"politica": "politica@v2"},
+        headers=login(client, contas["supervisor"]),
+    ).json()
+    assert d["detector"] == "qualidade@v1" and d["baseline"]["lotes"] == [julho.nome]
+    v = d["baseline"]["valores"]
+    assert v["classes"] == {"ilegivel": pytest.approx(0.75)}
+    assert v["taxa_auto_rejeicao"] == pytest.approx(0.5)  # 0,99 >= 0,976
+    lote_maio = next(item for item in d["lotes"] if item["lote"] == maio.nome)
+    assert set(lote_maio["sinais"]["classes"]) == {"ilegivel"}
+    assert lote_maio["sinais"]["classes"]["ilegivel"]["valor"] == pytest.approx(0.25)
+    # a heuristica continua com os 5 sinais de defeito e a baseline de DRIFT_LOTES_BASELINE
+    h = client.get("/metricas/drift", headers=login(client, contas["supervisor"])).json()
+    assert h["baseline"]["lotes"] == [maio.nome]

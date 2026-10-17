@@ -76,7 +76,11 @@ def voto_de(rotulo: Rotulo) -> dict[str, str | int]:
 
 def votos(db: Session, rodadas: list[RodadaRotulagem]) -> PorFoto:
     """foto_id -> rotulador -> voto, juntando as rodadas pedidas."""
-    incompletas = {RodadaRotulagem.PRODUCAO, RodadaRotulagem.INSPECAO_M5} & set(rodadas)
+    incompletas = {
+        RodadaRotulagem.PRODUCAO,
+        RodadaRotulagem.INSPECAO_M5,
+        RodadaRotulagem.INSPECAO_M7,
+    } & set(rodadas)
     if incompletas:
         raise RodadaSemEsquemaCompleto(
             f"rodada {', '.join(sorted(incompletas))} tem campos nulos (so legibilidade) e nao "

@@ -23,8 +23,34 @@ SAIDA_DA_TRIAGEM = {
 _seq = {"n": 0}
 
 
+# Politicas que os testes usam nas decisoes montadas direto no historico (sem passar por
+# `estados.transicionar`, que grava a ativacao na primeira decisao automatica).
+POLITICAS_ATIVADAS = ("politica@v0", "politica@v1", "politica@v2")
+
+
+def ativar_politicas(db: Session, politicas: tuple[str, ...] = POLITICAS_ATIVADAS) -> None:
+    """Ativa as politicas com os lotes que existem agora (`ON CONFLICT DO NOTHING`, como a
+    ativacao de verdade): todo lote criado depois entra na medida de falso positivo."""
+    from sqlalchemy import func, select, text
+    from sqlalchemy.dialects.postgresql import insert
+
+    from inspecao.models import AtivacaoPolitica
+
+    lotes = select(func.coalesce(func.array_agg(Lote.nome), text("'{}'"))).scalar_subquery()
+    for p in politicas:
+        db.execute(
+            insert(AtivacaoPolitica)
+            .values(politica=p, lotes_anteriores=lotes)
+            .on_conflict_do_nothing(index_elements=[AtivacaoPolitica.politica])
+        )
+
+
 def lote(db: Session, sufixo: str, quando: date) -> Lote:
-    """Lote `PSP_EXTRATLEITIMPL_99<sufixo>`: o 99 garante que nunca e um lote real."""
+    """Lote `PSP_EXTRATLEITIMPL_99<sufixo>`: o 99 garante que nunca e um lote real.
+
+    As politicas de `POLITICAS_ATIVADAS` ficam ativadas ANTES do lote (se ainda nao
+    estavam): as auditorias dele contam no estrato de falso positivo."""
+    ativar_politicas(db)
     lt = Lote(
         nome=f"PSP_EXTRATLEITIMPL_99{sufixo}",
         data_extracao=quando,

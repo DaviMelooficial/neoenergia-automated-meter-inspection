@@ -9,8 +9,9 @@ lotes e nao a media das fracoes de cada lote.
 
 Criterio de alerta (desvio = valor do lote - valor da baseline):
 
-- distribuicao das 5 classes: fracao de fotos com score da classe >= 0,5. Alerta com
-  |desvio| > 10 p.p. em qualquer classe.
+- distribuicao das classes: fracao de fotos com score da classe >= 0,5, para cada chave
+  que a politica le (`Politica.chaves`: as 5 classes de defeito na v1, so `ilegivel` na
+  v2). Alerta com |desvio| > 10 p.p. em qualquer classe.
 - taxa de auto-rejeicao: fracao com p_ruim >= limiar_rejeita. Alerta com |desvio| >
   10 p.p. em 3 lotes seguidos (este e os 2 anteriores).
 - confianca media: media de max(p_ruim, 1 - p_ruim). Alerta com desvio < -0,05 em 2
@@ -49,9 +50,11 @@ score nao dispara alerta (fica marcado `amostra_insuficiente`) e quebra a sequen
 de lotes seguidos; (3) "confianca media" foi definida como a media de
 max(p_ruim, 1 - p_ruim), e "queda sustentada" como cair mais de 0,05 em 2 lotes seguidos;
 (4) a baseline contem os proprios lotes de maio, entao o desvio deles e contra um
-agregado que os inclui. Quando o detector for o do M7, a baseline tem de ser trocada
-junto: o modelo foi treinado em maio, e a confianca dele la e inflada pelo treino. Os
-limiares de alerta estao nas constantes abaixo.
+agregado que os inclui. A baseline troca junto com o detector (`lotes_baseline`): o
+modelo do M7 foi treinado e calibrado em maio, e a confianca dele la e inflada pelo
+treino; para detector treinado a baseline sao os lotes de teste dele
+(`qualidade.LOTES_DE_TESTE`, o 03/07 para a `qualidade@v1`). Os limiares de alerta estao
+nas constantes abaixo.
 """
 
 import math
@@ -62,7 +65,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from inspecao.inference.politica import CLASSES, Politica
+from inspecao.inference.politica import Politica
 from inspecao.models import Lote
 from inspecao.monitoramento import sinais
 
@@ -110,7 +113,7 @@ class Acumulado:
 
     def somar(self, outro: "Acumulado") -> None:
         self.n += outro.n
-        for c in CLASSES:
+        for c in outro.n_classe:
             self.classes[c] += outro.classes[c]
             self.n_classe[c] += outro.n_classe[c]
         self.rejeitadas += outro.rejeitadas
@@ -128,7 +131,7 @@ class Acumulado:
         return {
             "classes": {
                 c: (self.classes[c] / self.n_classe[c] if self.n_classe[c] else None)
-                for c in CLASSES
+                for c in politica.chaves
             },
             "taxa_auto_rejeicao": frac(self.rejeitadas) if tem_limiar else None,
             "zona_cinzenta": frac(self.zona) if tem_limiar else None,
@@ -150,7 +153,7 @@ def _acumular(
         a.n += 1
         a.soma_p += p
         a.soma_confianca += max(p, 1 - p)
-        for c, ativa in sinais.classes_ativas(r.saida).items():
+        for c, ativa in sinais.classes_ativas(politica, r.saida).items():
             a.n_classe[c] += 1
             a.classes[c] += int(ativa)
         ilegivel = sinais.maquina_ilegivel(politica, p)
@@ -187,14 +190,26 @@ def _z(k: int, n: int, p_base: float | None, n_base: int, phi: float) -> float |
 
 
 # fracao -> (contagem, denominador) num Acumulado; a carta p vale para estas
-def _fracoes_contaveis() -> dict[str, Any]:
+def _fracoes_contaveis(politica: Politica) -> dict[str, Any]:
     contaveis: dict[str, Any] = {
         "taxa_auto_rejeicao": lambda a: (a.rejeitadas, a.n),
         "zona_cinzenta": lambda a: (a.zona, a.n),
     }
-    for c in CLASSES:
+    for c in politica.chaves:
         contaveis[f"classe:{c}"] = lambda a, c=c: (a.classes[c], a.n_classe[c])
     return contaveis
+
+
+def lotes_baseline(politica: Politica, padrao: list[str]) -> list[str]:
+    """Baseline do drift para o detector da politica. Heuristica e nulo (sem treino):
+    `padrao` (`DRIFT_LOTES_BASELINE`, os 3 lotes de maio). Detector treinado: os lotes de
+    teste dele, os unicos fora do treino e da calibracao; sem lotes de teste declarados,
+    nenhuma baseline (em vez de uma contaminada pelo treino)."""
+    from inspecao.monitoramento import qualidade
+
+    if politica.modelo is None or politica.modelo in qualidade.DETECTORES_SEM_TREINO:
+        return padrao
+    return list(qualidade.LOTES_DE_TESTE.get(politica.modelo, ()))
 
 
 def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict[str, Any]:
@@ -210,7 +225,7 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
     tem_limiar = politica.limiar_rejeita is not None
     contaveis = {
         nome: f
-        for nome, f in _fracoes_contaveis().items()
+        for nome, f in _fracoes_contaveis(politica).items()
         if tem_limiar or nome.startswith("classe:")
     }
     phi_estimado = {
@@ -226,10 +241,10 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
     for lote in lotes:
         a = acumulados.get(lote.id, Acumulado())
         f = a.fracoes(politica)
-        g = fb or {k: None for k in f} | {"classes": dict.fromkeys(CLASSES)}
+        g = fb or {k: None for k in f} | {"classes": dict.fromkeys(politica.chaves)}
         bloco = {
             "classes": {
-                c: _sinal(f["classes"][c], g["classes"][c], a.n_classe[c]) for c in CLASSES
+                c: _sinal(f["classes"][c], g["classes"][c], a.n_classe[c]) for c in politica.chaves
             },
             "taxa_auto_rejeicao": _sinal(f["taxa_auto_rejeicao"], g["taxa_auto_rejeicao"], a.n),
             "confianca_media": _sinal(f["confianca_media"], g["confianca_media"], a.n),

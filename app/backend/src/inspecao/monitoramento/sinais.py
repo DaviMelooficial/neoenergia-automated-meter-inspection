@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from inspecao.contas_teste import usuario_real
 from inspecao.enums import RodadaRotulagem
 from inspecao.inference import politica as politica_mod
-from inspecao.inference.politica import CLASSES, Politica
+from inspecao.inference.politica import Politica
 from inspecao.models import Foto, ResultadoInferencia, Rotulo
 from inspecao.rotulagem import servico
 from inspecao.rotulagem.consolidacao import consolidar, kappa_cohen
@@ -42,8 +42,12 @@ LIMIAR_EXPLORATORIO = 0.05
 
 
 def politica_ativa() -> Politica:
-    """A politica que o worker aplica hoje (`POLITICA_ATUAL`)."""
-    return politica_mod.POLITICA_ATUAL
+    """A politica que o worker aplica hoje: a do detector configurado (`politica_para`,
+    a mesma resolucao do worker), e nao `POLITICA_ATUAL`."""
+    from inspecao.config import get_settings
+    from inspecao.inference.detector import nome_do_detector
+
+    return politica_mod.politica_para(nome_do_detector(get_settings()))
 
 
 def obter_politica(versao: str | None) -> Politica:
@@ -66,8 +70,10 @@ def na_zona_cinzenta(politica: Politica, p: float | None) -> bool | None:
     return INICIO_ZONA_CINZENTA <= p < politica.limiar_rejeita
 
 
-def classes_ativas(saida: Mapping[str, Any]) -> dict[str, bool]:
-    return {c: float(saida[c]) >= LIMIAR_CLASSE_ATIVA for c in CLASSES if c in saida}
+def classes_ativas(politica: Politica, saida: Mapping[str, Any]) -> dict[str, bool]:
+    """Classe ativa por chave que a politica le (`Politica.chaves`): as 5 classes de defeito
+    na v1, so `ilegivel` na v2 (as classes do modelo sao informativas e ficam fora)."""
+    return {c: float(saida[c]) >= LIMIAR_CLASSE_ATIVA for c in politica.chaves if c in saida}
 
 
 @dataclass(frozen=True, slots=True)

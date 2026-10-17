@@ -731,7 +731,7 @@ export interface components {
             };
             /**
              * Exclusao Incompleta
-             * @description rodadas obrigatorias (lab02, inspecao_m5) sem nenhum rotulo importado
+             * @description rodadas obrigatorias (lab02, inspecao_m5 e, com o detector qualidade@v1, inspecao_m7) sem nenhum rotulo importado
              */
             exclusao_incompleta: string[];
             /** Taxa Configurada */
@@ -1513,7 +1513,7 @@ export interface components {
          *     tela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8).
          * @enum {string}
          */
-        RodadaRotulagem: "lab02" | "a" | "b" | "desempate" | "producao" | "inspecao_m5";
+        RodadaRotulagem: "lab02" | "a" | "b" | "desempate" | "producao" | "inspecao_m5" | "inspecao_m7";
         /**
          * RotuloIn
          * @description Esquema v2. As regras de consistencia sao recusadas (422), nao corrigidas.

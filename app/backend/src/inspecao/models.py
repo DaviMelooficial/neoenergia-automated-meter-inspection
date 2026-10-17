@@ -32,7 +32,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from inspecao.db import Base
@@ -432,7 +432,7 @@ class Rotulo(Base):
         # Fora de `producao` o esquema v2 e completo. Em `producao` (decisao de auditor,
         # M8) cena e os defeitos nao declarados pela decisao ficam nulos.
         CheckConstraint(
-            "rodada IN ('producao', 'inspecao_m5') OR (cena IS NOT NULL AND "
+            "rodada IN ('producao', 'inspecao_m5', 'inspecao_m7') OR (cena IS NOT NULL AND "
             "reflexo IS NOT NULL AND fora_de_foco IS NOT NULL AND tampa_suja IS NOT NULL "
             "AND enquadramento IS NOT NULL AND display_apagado IS NOT NULL "
             "AND legivel IS NOT NULL)",
@@ -466,7 +466,7 @@ class Rotulo(Base):
     )
     rotulador_externo: Mapped[str | None] = mapped_column(String(60), nullable=True)
     rodada: Mapped[str] = mapped_column(String(20))
-    # Nulos so nas rodadas `producao` e `inspecao_m5` (ck_rotulos_completo).
+    # Nulos so nas rodadas `producao`, `inspecao_m5` e `inspecao_m7` (ck_rotulos_completo).
     cena: Mapped[str | None] = mapped_column(String(20), nullable=True)
     reflexo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fora_de_foco: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -608,3 +608,25 @@ class AuditoriaAmostral(Base):
 
     leitura: Mapped["Leitura"] = relationship()
     revisao: Mapped["RevisaoHumana | None"] = relationship()
+
+
+class AtivacaoPolitica(Base):
+    """Quando cada politica comecou a decidir, e os lotes que ja existiam nesse instante.
+
+    Gravada por `estados.transicionar` na PRIMEIRA decisao automatica da politica, na mesma
+    transacao que a grava (`ON CONFLICT DO NOTHING` entre workers). O falso positivo da
+    auto-rejeicao de uma politica (`auditoria._estratos`) so conta lotes ingeridos DEPOIS da
+    ativacao: lote cujo nome esta em `lotes_anteriores` nunca entra no estrato dela, nem se
+    for reingerido. Os lotes anteriores contem a calibracao e o treino da politica, que nem
+    sempre deixam rotulo em `rotulos` (as 2.500 fotos do estagio 1 do M7, por exemplo).
+    """
+
+    __tablename__ = "ativacoes_politica"
+
+    politica: Mapped[str] = mapped_column(String(40), primary_key=True)
+    ativada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # A decisao que ativou (nula se ela sumir numa reingestao com --reprocessar).
+    historico_id: Mapped[int | None] = mapped_column(
+        ForeignKey("historico_status.id", ondelete="SET NULL"), nullable=True
+    )
+    lotes_anteriores: Mapped[list[str]] = mapped_column(ARRAY(String(120)))

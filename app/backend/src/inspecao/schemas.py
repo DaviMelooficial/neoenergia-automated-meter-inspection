@@ -571,7 +571,8 @@ class ConcordanciaAuditoriaOut(BaseModel):
         description="rotulos por rodada de calibracao/treino excluida da medida"
     )
     exclusao_incompleta: list[str] = Field(
-        description="rodadas obrigatorias (lab02, inspecao_m5) sem nenhum rotulo importado"
+        description="rodadas obrigatorias (lab02, inspecao_m5 e, com o detector qualidade@v1, "
+        "inspecao_m7) sem nenhum rotulo importado"
     )
     taxa_configurada: float
     taxa_auto_rejeitada: float

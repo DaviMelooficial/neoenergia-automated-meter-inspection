@@ -113,6 +113,9 @@ class RodadaRotulagem(StrEnum):
     PRODUCAO = "producao"
     # Inspecao humana das 200 fotos dos extremos do M5 (calibrou o limiar 0,85): so legivel.
     INSPECAO_M5 = "inspecao_m5"
+    # Inspecao humana das 355 fotos que so a `politica@v2` (M7) rejeita: e o que decide
+    # ativar o modelo, entao e calibracao dele. So legivel.
+    INSPECAO_M7 = "inspecao_m7"
 
 
 class Cena(StrEnum):

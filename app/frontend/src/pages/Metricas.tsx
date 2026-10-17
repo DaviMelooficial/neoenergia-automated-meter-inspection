@@ -39,6 +39,8 @@ const CLASSES: [string, string][] = [
   ["tampa_suja", "Tampa suja"],
   ["enquadramento_incorreto", "Enquadramento"],
   ["display_apagado", "Display apagado"],
+  // politica@v2 (modelo do M7): a unica chave que ela le
+  ["ilegivel", "Ilegível"],
 ];
 
 export const loteCurto = (nome: string) => nome.replace("PSP_EXTRATLEITIMPL_", "").split("_")[0];

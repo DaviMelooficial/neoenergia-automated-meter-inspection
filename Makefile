@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo auditoria-sortear tipos-front \
-        rotulos-importar rotulos-importar-inspecao rotulos-kappa rotulos-exportar \
+        rotulos-importar rotulos-importar-inspecao rotulos-importar-inspecao-m7 rotulos-kappa rotulos-exportar \
         api-dev worker-dev front-dev test lint up down logs reset health lab02 \
-        m7-treinar m7-calibrar m7-avaliar m7-exportar m7-paridade
+        m7-treinar m7-calibrar m7-avaliar m7-exportar m7-paridade m7-amostra-inspecao
 
 help:  ## lista os alvos disponiveis
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -88,6 +88,9 @@ rotulos-importar:  ## importa os 500 rotulos do Lab 2 na rodada lab02 (+ rotulad
 rotulos-importar-inspecao:  ## importa a inspecao das 200 fotos do M5 (rodada inspecao_m5, calibracao fora da medida); idempotente
 	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-inspecao-m5
 
+rotulos-importar-inspecao-m7:  ## importa a inspecao das 355 que so a politica@v2 rejeita (rodada inspecao_m7, calibracao); idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-inspecao-m7
+
 rotulos-kappa:  ## kappa por classe e por par, grava ml/reports/kappa.md (RODADAS="a b"; padrao lab02)
 	cd app/backend && uv run python -m inspecao.rotulagem.cli kappa $(foreach r,$(RODADAS),--rodada $(r))
 
@@ -156,6 +159,10 @@ m7-paridade:  ## DetectorOnnx do backend contra o torch na base inteira, sem ban
 	  uv run python -m inspecao.inference.paridade_onnx \
 	  --referencia ../../ml/artifacts/m7/$(RODADA)/p_ilegivel_base.csv \
 	  --base "../../Base cliente" --saida ../../ml/reports/$(RODADA)/paridade_backend.json
+
+m7-amostra-inspecao:  ## grava ml/reports/<RODADA>/inspecao_355.csv: fotos que so o modelo rejeita (RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-amostra-inspecao RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.amostra_inspecao_m7 --rodada $(RODADA)
 
 # ---------------------------------------------------------------------------
 # Stack completa

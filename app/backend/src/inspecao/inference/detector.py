@@ -78,6 +78,36 @@ def carregar_detector(settings: Settings) -> Detector:
     raise RuntimeError(f"DETECTOR_QUALIDADE={escolha!r}; use um de {list(DETECTORES)}")
 
 
+def nome_do_detector(settings: Settings) -> str:
+    """Nome do detector que `carregar_detector` daria, sem carregar o modelo.
+
+    Para a API (metricas, auditoria), que precisa da politica em uso sem abrir o onnxruntime.
+    No onnx, le a `versao` do `<versao>.json` ao lado do `.onnx` e confere o contrato contra
+    a politica registrada (o sha256 do `.onnx` so o worker confere, ao carregar)."""
+    escolha = _escolha(settings)
+    if escolha == "nulo":
+        return DetectorNulo.nome
+    if escolha == "heuristica":
+        return DetectorHeuristico.nome
+    if escolha == "onnx":
+        import json
+
+        from inspecao.inference.politica import validar_contrato_onnx
+
+        caminho_json = settings.caminho_absoluto(settings.modelo_qualidade_path).with_suffix(
+            ".json"
+        )
+        if not caminho_json.is_file():
+            raise RuntimeError(
+                f"contrato do modelo de qualidade ausente: {caminho_json} "
+                "(gere com `make m7-exportar`; MODELO_QUALIDADE_PATH aponta a versao em uso)"
+            )
+        contrato = json.loads(caminho_json.read_text(encoding="utf-8"))
+        validar_contrato_onnx(contrato)
+        return contrato["versao"]
+    raise RuntimeError(f"DETECTOR_QUALIDADE={escolha!r}; use um de {list(DETECTORES)}")
+
+
 def decodificar(dados: bytes) -> np.ndarray:
     """Bytes JPEG -> array BGR. Importa cv2 aqui para nao pagar o import na API."""
     import cv2

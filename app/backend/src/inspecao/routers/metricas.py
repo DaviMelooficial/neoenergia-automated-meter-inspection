@@ -163,7 +163,9 @@ def qualidade(db: DB, _: Supervisor, politica: Politica = None) -> QualidadeOut:
 def drift(db: DB, _: Supervisor, politica: Politica = None) -> DriftOut:
     """Serie por lote com os 5 sinais contra a baseline (criterio em `monitoramento.drift`),
     mais as contagens operacionais de cada lote."""
-    calculo = drift_mod.calcular(db, _politica(politica), get_settings().drift_lotes_baseline)
+    p = _politica(politica)
+    baseline = drift_mod.lotes_baseline(p, get_settings().drift_lotes_baseline)
+    calculo = drift_mod.calcular(db, p, baseline)
     lotes = {lote.id: lote for lote in db.scalars(select(Lote)).all()}
     serie = []
     for item in calculo.pop("serie"):

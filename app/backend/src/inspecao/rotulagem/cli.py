@@ -2,6 +2,7 @@
 
 python -m inspecao.rotulagem.cli importar-lab02 [--csv ...] [--controle rotulador/controle.dat]
 python -m inspecao.rotulagem.cli importar-inspecao-m5 [--csv ml/reports/heuristicas_amostra_200.csv]
+python -m inspecao.rotulagem.cli importar-inspecao-m7 [--csv ml/reports/<rodada>/inspecao_355.csv]
 python -m inspecao.rotulagem.cli kappa [--rodada lab02 ...] [--relatorio ml/reports/kappa.md]
 python -m inspecao.rotulagem.cli exportar [--saida ml/artifacts/rotulos.csv] [--rodada lab02 ...]
 
@@ -16,7 +17,7 @@ from pathlib import Path
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal
 from inspecao.enums import RodadaRotulagem
-from inspecao.rotulagem import importador, inspecao_m5, relatorio, servico
+from inspecao.rotulagem import importador, inspecao_m5, inspecao_m7, relatorio, servico
 from inspecao.rotulagem.consolidacao import CLASSES, LIMIAR_KAPPA
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ CSV_LAB02 = Path("lab-02/rotulos/rotulos.csv")
 CONTROLE_LAB02 = Path("rotulador/controle.dat")  # fora do git
 SAIDA_PADRAO = Path("ml/artifacts/rotulos.csv")
 CSV_INSPECAO_M5 = Path("ml/reports/heuristicas_amostra_200.csv")
+CSV_INSPECAO_M7 = Path("ml/reports/20261016-213656/inspecao_355.csv")
 RELATORIO_PADRAO = Path("ml/reports/kappa.md")  # versionado: so agregados
 
 
@@ -108,13 +110,21 @@ def exportar(saida: Path, rodadas: list[RodadaRotulagem]) -> int:
 
 
 def importar_inspecao_m5(caminho: Path) -> int:
+    return _importar_inspecao(caminho, inspecao_m5.RODADA, inspecao_m5.importar)
+
+
+def importar_inspecao_m7(caminho: Path) -> int:
+    return _importar_inspecao(caminho, inspecao_m7.RODADA, inspecao_m7.importar)
+
+
+def _importar_inspecao(caminho: Path, rodada: str, importar) -> int:
     caminho = get_settings().caminho_absoluto(caminho)
     if not caminho.is_file():
         log.error("csv nao encontrado: %s", caminho)
         return 1
     with SessionLocal() as sessao:
         try:
-            resumo = inspecao_m5.importar(sessao, caminho)
+            resumo = importar(sessao, caminho)
         except inspecao_m5.CsvInvalido as erro:
             log.error("csv invalido: %s", erro)
             return 1
@@ -127,7 +137,7 @@ def importar_inspecao_m5(caminho: Path) -> int:
         )
     print(f"linhas lidas        {resumo.linhas}")
     print(
-        f"rotulos inspecao_m5 {resumo.gravados} ({resumo.inspecionados} inspecionadas, "
+        f"rotulos {rodada} {resumo.gravados} ({resumo.inspecionados} inspecionadas, "
         f"{resumo.pendentes} pendentes)"
     )
     print(f"nao mapeadas        {len(resumo.nao_mapeadas)}")
@@ -145,6 +155,11 @@ def main(argv: list[str] | None = None) -> int:
         "importar-inspecao-m5", help="importa a inspecao das 200 fotos do M5 (rodada inspecao_m5)"
     )
     insp.add_argument("--csv", type=Path, default=CSV_INSPECAO_M5)
+    insp7 = sub.add_parser(
+        "importar-inspecao-m7",
+        help="importa a inspecao das 355 fotos que so a politica@v2 rejeita (rodada inspecao_m7)",
+    )
+    insp7.add_argument("--csv", type=Path, default=CSV_INSPECAO_M7)
     for nome, ajuda in (("kappa", "kappa por classe"), ("exportar", "csv consolidado para o ml/")):
         p = sub.add_parser(nome, help=ajuda)
         p.add_argument(
@@ -164,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         return importar_lab02(args.csv, args.controle)
     if args.comando == "importar-inspecao-m5":
         return importar_inspecao_m5(args.csv)
+    if args.comando == "importar-inspecao-m7":
+        return importar_inspecao_m7(args.csv)
     rodadas = args.rodada or [RodadaRotulagem.LAB02]
     try:
         if args.comando == "kappa":

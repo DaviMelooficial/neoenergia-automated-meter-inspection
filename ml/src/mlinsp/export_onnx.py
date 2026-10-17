@@ -1,0 +1,159 @@
+"""Exportacao do modelo de qualidade para ONNX (M7, T-M7-08), com verificacao de paridade.
+
+    uv run python -m mlinsp.export_onnx --rodada <timestamp> --base "../Base cliente"
+
+Gera `artifacts/qualidade.onnx` e `artifacts/qualidade.json` (o contrato lido pelo
+`DetectorOnnx` do backend) e copia o json para `reports/<rodada>/`.
+
+- opset 17, eixo de lote dinamico, entrada `float32[N, 3, 224, 224]` ja normalizada;
+  saidas = LOGITS de cena (4), defeitos (5) e legivel (1). Temperatura, sigmoide e
+  softmax ficam com o backend, lidas do json.
+- Paridade obrigatoria: 100 fotos do teste no torch (CPU) e no onnxruntime; diferenca
+  maxima absoluta abaixo de 1e-4 (criterio exato em `paridade`), senao a exportacao falha
+  e nada e gravado.
+
+O .onnx NAO vai para o git: ml/artifacts/ e ignorado (binario de ~4 MB que muda a cada
+treino, derivado de pesos ImageNet de terceiros e de fotos do cliente). O json registra o
+sha256 do .onnx exportado, e a copia em reports/<rodada>/ versiona esse hash: o backend
+recusa um .onnx cujo hash nao bate com o json.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+from pathlib import Path
+
+import numpy as np
+import onnxruntime as ort
+import torch
+from scipy.special import expit, softmax
+
+from mlinsp import modelo, qualidade
+from mlinsp.dados import CENAS, DEFEITOS
+
+TOLERANCIA = 1e-4
+N_PARIDADE = 100
+
+
+class _Saidas(torch.nn.Module):
+    """Dict de logits -> tupla, na ordem declarada no json."""
+
+    def __init__(self, m: modelo.ModeloTriagem):
+        super().__init__()
+        self.m = m
+
+    def forward(self, x):
+        out = self.m(x)
+        return out["cena"], out["defeitos"], out["legivel"]
+
+
+def _commit(repo: Path) -> str | None:
+    try:
+        return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def exportar(m: modelo.ModeloTriagem, destino: Path) -> None:
+    m = m.cpu().eval()
+    exemplo = torch.zeros(1, 3, qualidade.LADO, qualidade.LADO)
+    torch.onnx.export(
+        _Saidas(m), (exemplo,), str(destino), opset_version=17, dynamo=False,
+        input_names=["entrada"], output_names=["cena", "defeitos", "legivel"],
+        dynamic_axes={n: {0: "lote"} for n in ("entrada", "cena", "defeitos", "legivel")},
+    )
+
+
+def paridade(m: modelo.ModeloTriagem, onnx: Path, imagens: torch.Tensor) -> dict:
+    """Diferenca maxima absoluta torch x onnxruntime por saida, em logit e em probabilidade.
+
+    O criterio (< 1e-4) vale para os logits das saidas que decidem ou aparecem como
+    probabilidade calibrada (legivel, cena) e para a probabilidade de todas. Os logits de
+    defeitos chegam a |12| e o ruido de float32 do onnxruntime neles passa de 1e-4 mesmo
+    contra o torch em float64 (medido na rodada 20261016-213656); na probabilidade, que e
+    o que o backend grava, a diferenca fica abaixo de 3e-5. Os numeros brutos ficam no json.
+    """
+    x = qualidade.normalizar(imagens)
+    with torch.inference_mode():
+        ref = [r.numpy() for r in _Saidas(m.cpu().eval())(x)]
+    sess = ort.InferenceSession(str(onnx), providers=["CPUExecutionProvider"])
+    out = sess.run(None, {"entrada": x.numpy()})
+    nomes = ("cena", "defeitos", "legivel")
+    prob = {"cena": lambda z: softmax(z, axis=-1), "defeitos": expit, "legivel": expit}
+    logit = {n: float(np.abs(r - o).max()) for n, r, o in zip(nomes, ref, out, strict=True)}
+    probab = {n: float(np.abs(prob[n](r) - prob[n](o)).max())
+              for n, r, o in zip(nomes, ref, out, strict=True)}
+    criterio = max(logit["legivel"], logit["cena"], *probab.values())
+    return {"max_dif_logit": logit, "max_dif_probabilidade": probab, "criterio": criterio}
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--rodada", required=True)
+    ap.add_argument("--base", type=Path, required=True)
+    ap.add_argument("--repo", type=Path, default=Path(".."))
+    ap.add_argument("--reports", type=Path, default=Path("reports"))
+    ap.add_argument("--artefatos", type=Path, default=Path("artifacts"))
+    args = ap.parse_args(argv)
+    dir_rep, dir_art = args.reports / args.rodada, args.artefatos / "m7" / args.rodada
+    cal = json.loads((dir_rep / "calibracao.json").read_text())
+    av = json.loads((dir_rep / "avaliacao.json").read_text())
+    semente = cal["semente_escolhida"]
+    m = modelo.ModeloTriagem(pretreinado=False)
+    m.load_state_dict(torch.load(dir_art / f"modelo_s{semente}.pt", map_location="cpu"))
+
+    part = qualidade.base_particionada(args.base)
+    teste = sorted(part.index[part["split"] == "teste"])
+    rng = np.random.default_rng(semente)
+    amostra = sorted(rng.choice(teste, size=N_PARIDADE, replace=False))
+    imagens = qualidade.carregar_lote(list(part.loc[amostra, "caminho"]))
+
+    temporario = args.artefatos / "qualidade.onnx.tmp"
+    exportar(m, temporario)
+    par = paridade(m, temporario, imagens)
+    if not par["criterio"] < TOLERANCIA:
+        temporario.unlink()
+        raise SystemExit(f"paridade torch x onnxruntime falhou: {par} (tolerancia {TOLERANCIA})")
+    destino = args.artefatos / "qualidade.onnx"
+    temporario.replace(destino)
+
+    contrato = {
+        "versao": qualidade.VERSAO,
+        "rodada": args.rodada,
+        "semente": semente,
+        "commit": _commit(args.repo),
+        "onnx_sha256": qualidade.sha256(destino),
+        "onnx_bytes": destino.stat().st_size,
+        "entrada": {
+            "nome": "entrada", "layout": "NCHW", "dtype": "float32", "cores": "RGB",
+            "lado": qualidade.LADO, "letterbox": "lado maior a 224 com INTER_AREA, centralizado",
+            "preenchimento_rgb": list(qualidade.PREENCHIMENTO),
+            "escala": 1 / 255, "media": list(qualidade.MEDIA), "desvio": list(qualidade.DESVIO),
+        },
+        "saidas": {"cena": CENAS, "defeitos": DEFEITOS, "legivel": ["legivel"]},
+        "defeito_para_classe": qualidade.DEFEITO_PARA_CLASSE,
+        "temperatura_legivel": cal["temperatura_legivel"],
+        "temperatura_cena": cal["temperatura_cena"],
+        "limiar_rejeita": cal["limiar"],
+        "limiar_aprova": None,
+        "decisao": "p_ilegivel = 1 - sigmoid(legivel / temperatura_legivel); defeitos so "
+                   "informativos (kappa humano baixo), fora da decisao",
+        "paridade": {"fotos": N_PARIDADE, "tolerancia": TOLERANCIA, **par},
+        "teste": {
+            "legivel_macro_f1": av["modelo_por_semente"][str(semente)]["legivel"]["macro_f1"],
+            "rejeicao": av["modelo_por_semente"][str(semente)]["rejeicao"],
+            "criterio_entrada": av["criterio_entrada"],
+        },
+    }
+    qualidade.salvar_json(args.artefatos / "qualidade.json", contrato)
+    qualidade.salvar_json(dir_rep / "qualidade.json", contrato)
+    print(f"qualidade.onnx ({contrato['onnx_bytes'] / 1e6:.1f} MB, sha256 "
+          f"{contrato['onnx_sha256'][:12]}), paridade {par} em {N_PARIDADE} fotos")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

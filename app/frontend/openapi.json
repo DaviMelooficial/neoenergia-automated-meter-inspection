@@ -717,7 +717,7 @@
      "auditoria"
     ],
     "summary": "Proxima",
-    "description": "Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma\ndecisao dele mesmo, nunca uma reservada por outro revisor. Admin nao audita.",
+    "description": "Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma\ndecisao dele mesmo, nunca uma reservada por outro revisor.",
     "operationId": "proxima_auditoria_proxima_post",
     "responses": {
      "200": {
@@ -744,6 +744,7 @@
      "auditoria"
     ],
     "summary": "Liberar",
+    "description": "Devolve a reserva propria. Qualquer outro caso: a resposta unica.",
     "operationId": "liberar_auditoria__auditoria_id__liberar_post",
     "security": [
      {
@@ -784,7 +785,7 @@
      "auditoria"
     ],
     "summary": "Decidir",
-    "description": "Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.\n\nVale aqui, e nao so no `/proxima`: o primeiro revisor recebe 403; auditoria ja\ndecidida ou reservada por outro revisor, 409. O banco repete a regra\n(`ck_auditorias_segundo_revisor`), e a linha fica travada ate o commit.",
+    "description": "Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.\n\nA regra vale aqui, e nao so no `/proxima`: a auditoria tem de estar pendente, nao ser\ndecisao do proprio usuario e nao estar reservada por outro (lock da linha ate o\ncommit). O banco repete a regra (`ck_auditorias_segundo_revisor`, gatilho de\nimutabilidade). Toda recusa e a resposta unica.",
     "operationId": "decidir_auditoria__auditoria_id__decisao_post",
     "security": [
      {
@@ -1790,56 +1791,6 @@
     ],
     "title": "AutoAprovacaoOut"
    },
-   "AutoAprovadasAuditoriaOut": {
-    "properties": {
-     "n": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "N"
-     },
-     "reprovadas_pelo_revisor": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Reprovadas Pelo Revisor"
-     },
-     "taxa_erro": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Taxa Erro"
-     },
-     "suprimido": {
-      "type": "boolean",
-      "title": "Suprimido"
-     }
-    },
-    "type": "object",
-    "required": [
-     "n",
-     "reprovadas_pelo_revisor",
-     "taxa_erro",
-     "suprimido"
-    ],
-    "title": "AutoAprovadasAuditoriaOut",
-    "description": "Auditorias de leituras auto-aprovadas pela maquina: reprovada = erro da maquina."
-   },
    "AutoDecididasOut": {
     "properties": {
      "quantidade": {
@@ -1891,7 +1842,15 @@
       },
       "type": "object",
       "title": "Sobredispersao",
-      "description": "phi da carta p por fracao (qui-quadrado/(k-1) entre os lotes da baseline)"
+      "description": "phi APLICADO na carta p (1 com menos de min_lotes_phi lotes na baseline)"
+     },
+     "sobredispersao_estimada": {
+      "additionalProperties": {
+       "type": "number"
+      },
+      "type": "object",
+      "title": "Sobredispersao Estimada",
+      "description": "phi estimado entre os lotes da baseline (qui-quadrado/(k-1)), informativo"
      }
     },
     "type": "object",
@@ -1900,7 +1859,8 @@
      "n_fotos_com_score",
      "n_pares_discordancia",
      "valores",
-     "sobredispersao"
+     "sobredispersao",
+     "sobredispersao_estimada"
     ],
     "title": "BaselineDriftOut"
    },
@@ -2054,7 +2014,10 @@
       "$ref": "#/components/schemas/TotalConcordanciaOut"
      },
      "auto_aprovadas": {
-      "$ref": "#/components/schemas/AutoAprovadasAuditoriaOut"
+      "$ref": "#/components/schemas/DecisaoAutomaticaAuditoriaOut"
+     },
+     "auto_rejeitadas": {
+      "$ref": "#/components/schemas/DecisaoAutomaticaAuditoriaOut"
      },
      "por_lote": {
       "items": {
@@ -2083,6 +2046,7 @@
      "decididas",
      "total",
      "auto_aprovadas",
+     "auto_rejeitadas",
      "por_lote",
      "serie"
     ],
@@ -2410,6 +2374,10 @@
      "z_carta_p": {
       "type": "number",
       "title": "Z Carta P"
+     },
+     "min_lotes_phi": {
+      "type": "integer",
+      "title": "Min Lotes Phi"
      }
     },
     "type": "object",
@@ -2425,9 +2393,60 @@
      "lotes_seguidos_confianca",
      "subida_discordancia",
      "subida_zona_cinzenta",
-     "z_carta_p"
+     "z_carta_p",
+     "min_lotes_phi"
     ],
     "title": "CriterioDriftOut"
+   },
+   "DecisaoAutomaticaAuditoriaOut": {
+    "properties": {
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "erros": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Erros"
+     },
+     "taxa_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Erro"
+     },
+     "suprimido": {
+      "type": "boolean",
+      "title": "Suprimido"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "erros",
+     "taxa_erro",
+     "suprimido"
+    ],
+    "title": "DecisaoAutomaticaAuditoriaOut",
+    "description": "Auditorias de decisao da maquina. Erro: auto-aprovada reprovada pelo revisor, ou\nauto-rejeitada aprovada pelo revisor (falso positivo)."
    },
    "DecisaoHumana": {
     "type": "string",
@@ -3061,13 +3080,6 @@
       "type": "array",
       "title": "Fotos"
      },
-     "inferencias": {
-      "items": {
-       "$ref": "#/components/schemas/InferenciaOut"
-      },
-      "type": "array",
-      "title": "Inferencias"
-     },
      "quarentena": {
       "items": {
        "$ref": "#/components/schemas/QuarentenaCegaOut"
@@ -3104,13 +3116,12 @@
      "nota",
      "foto_principal",
      "fotos",
-     "inferencias",
      "quarentena",
      "reservado_ate",
      "restantes"
     ],
     "title": "ItemAuditoriaOut",
-    "description": "O que o segundo revisor recebe. Lista fechada (extra=\"forbid\"): nada de status,\nhistorico, revisao anterior nem id da leitura. O teste de vazamento confere."
+    "description": "O que o segundo revisor recebe, igual para as origens fila, auto_aprovada e\nauto_rejeitada. Lista fechada (extra=\"forbid\"): nada de status, historico, revisao\nanterior, scores da maquina nem id da leitura. O teste de vazamento confere."
    },
    "JobOut": {
     "properties": {

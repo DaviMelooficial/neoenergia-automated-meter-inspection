@@ -295,7 +295,7 @@ export interface paths {
         /**
          * Proxima
          * @description Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma
-         *     decisao dele mesmo, nunca uma reservada por outro revisor. Admin nao audita.
+         *     decisao dele mesmo, nunca uma reservada por outro revisor.
          */
         post: operations["proxima_auditoria_proxima_post"];
         delete?: never;
@@ -313,7 +313,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Liberar */
+        /**
+         * Liberar
+         * @description Devolve a reserva propria. Qualquer outro caso: a resposta unica.
+         */
         post: operations["liberar_auditoria__auditoria_id__liberar_post"];
         delete?: never;
         options?: never;
@@ -334,9 +337,10 @@ export interface paths {
          * Decidir
          * @description Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.
          *
-         *     Vale aqui, e nao so no `/proxima`: o primeiro revisor recebe 403; auditoria ja
-         *     decidida ou reservada por outro revisor, 409. O banco repete a regra
-         *     (`ck_auditorias_segundo_revisor`), e a linha fica travada ate o commit.
+         *     A regra vale aqui, e nao so no `/proxima`: a auditoria tem de estar pendente, nao ser
+         *     decisao do proprio usuario e nao estar reservada por outro (lock da linha ate o
+         *     commit). O banco repete a regra (`ck_auditorias_segundo_revisor`, gatilho de
+         *     imutabilidade). Toda recusa e a resposta unica.
          */
         post: operations["decidir_auditoria__auditoria_id__decisao_post"];
         delete?: never;
@@ -658,20 +662,6 @@ export interface components {
             meta_atingida: boolean;
             diagnostico: components["schemas"]["DiagnosticoZonaOut"] | null;
         };
-        /**
-         * AutoAprovadasAuditoriaOut
-         * @description Auditorias de leituras auto-aprovadas pela maquina: reprovada = erro da maquina.
-         */
-        AutoAprovadasAuditoriaOut: {
-            /** N */
-            n: number | null;
-            /** Reprovadas Pelo Revisor */
-            reprovadas_pelo_revisor: number | null;
-            /** Taxa Erro */
-            taxa_erro: number | null;
-            /** Suprimido */
-            suprimido: boolean;
-        };
         /** AutoDecididasOut */
         AutoDecididasOut: {
             /** Quantidade */
@@ -690,9 +680,16 @@ export interface components {
             valores: components["schemas"]["ValoresBaselineOut"] | null;
             /**
              * Sobredispersao
-             * @description phi da carta p por fracao (qui-quadrado/(k-1) entre os lotes da baseline)
+             * @description phi APLICADO na carta p (1 com menos de min_lotes_phi lotes na baseline)
              */
             sobredispersao: {
+                [key: string]: number;
+            };
+            /**
+             * Sobredispersao Estimada
+             * @description phi estimado entre os lotes da baseline (qui-quadrado/(k-1)), informativo
+             */
+            sobredispersao_estimada: {
                 [key: string]: number;
             };
         };
@@ -739,7 +736,8 @@ export interface components {
             /** Decididas */
             decididas: number | null;
             total: components["schemas"]["TotalConcordanciaOut"];
-            auto_aprovadas: components["schemas"]["AutoAprovadasAuditoriaOut"];
+            auto_aprovadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"];
+            auto_rejeitadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"];
             /** Por Lote */
             por_lote: components["schemas"]["ConcordanciaLoteOut"][];
             /** Serie */
@@ -844,6 +842,23 @@ export interface components {
             subida_zona_cinzenta: number;
             /** Z Carta P */
             z_carta_p: number;
+            /** Min Lotes Phi */
+            min_lotes_phi: number;
+        };
+        /**
+         * DecisaoAutomaticaAuditoriaOut
+         * @description Auditorias de decisao da maquina. Erro: auto-aprovada reprovada pelo revisor, ou
+         *     auto-rejeitada aprovada pelo revisor (falso positivo).
+         */
+        DecisaoAutomaticaAuditoriaOut: {
+            /** N */
+            n: number | null;
+            /** Erros */
+            erros: number | null;
+            /** Taxa Erro */
+            taxa_erro: number | null;
+            /** Suprimido */
+            suprimido: boolean;
         };
         /**
          * DecisaoHumana
@@ -1031,8 +1046,9 @@ export interface components {
         };
         /**
          * ItemAuditoriaOut
-         * @description O que o segundo revisor recebe. Lista fechada (extra="forbid"): nada de status,
-         *     historico, revisao anterior nem id da leitura. O teste de vazamento confere.
+         * @description O que o segundo revisor recebe, igual para as origens fila, auto_aprovada e
+         *     auto_rejeitada. Lista fechada (extra="forbid"): nada de status, historico, revisao
+         *     anterior, scores da maquina nem id da leitura. O teste de vazamento confere.
          */
         ItemAuditoriaOut: {
             /** Auditoria Id */
@@ -1051,8 +1067,6 @@ export interface components {
             foto_principal: components["schemas"]["FotoOut"] | null;
             /** Fotos */
             fotos: components["schemas"]["FotoOut"][];
-            /** Inferencias */
-            inferencias: components["schemas"]["InferenciaOut"][];
             /** Quarentena */
             quarentena: components["schemas"]["QuarentenaCegaOut"][];
             /** Reservado Ate */

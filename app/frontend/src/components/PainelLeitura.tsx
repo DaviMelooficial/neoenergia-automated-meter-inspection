@@ -8,7 +8,10 @@ const CLASSES = ["fora_de_foco", "glare", "tampa_suja", "enquadramento_incorreto
 export function PainelLeitura({ leitura }: { leitura: LeituraOut }) {
   const ultimaInferencia = leitura.inferencias.at(-1);
   const scores = (ultimaInferencia?.saida ?? {}) as Record<string, number>;
-  const motivoFila = leitura.historico.find((h) => h.status === "fila_humana")?.detalhe as
+  // A ultima entrada na fila: re-decisoes (recalcular_decisao, troca de detector)
+  // fazem a leitura entrar mais de uma vez, e o motivo que vale e o mais recente.
+  const motivoFila = [...leitura.historico].reverse().find((h) => h.status === "fila_humana")
+    ?.detalhe as
     | Record<string, unknown>
     | null
     | undefined;

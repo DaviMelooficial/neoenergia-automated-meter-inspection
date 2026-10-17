@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo tipos-front \
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo auditoria-sortear tipos-front \
+        rotulos-importar rotulos-importar-inspecao rotulos-kappa rotulos-exportar \
         api-dev worker-dev front-dev test lint up down logs reset health lab02 \
         m7-treinar m7-calibrar m7-avaliar m7-exportar m7-paridade
 
@@ -81,8 +82,23 @@ relatorio-heuristicas:  ## exporta os scores do banco e gera ml/reports/heuristi
 	cd ml && uv run python -m mlinsp.relatorio_heuristicas --exportacao artifacts/heuristicas_exportacao.csv \
 	  --base "../Base cliente" --limiar $(LIMIAR)
 
+rotulos-importar:  ## importa os 500 rotulos do Lab 2 na rodada lab02 (+ rotulador/controle.dat, fora do git); idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-lab02
+
+rotulos-importar-inspecao:  ## importa a inspecao das 200 fotos do M5 (rodada inspecao_m5, calibracao fora da medida); idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-inspecao-m5
+
+rotulos-kappa:  ## kappa por classe e por par, grava ml/reports/kappa.md (RODADAS="a b"; padrao lab02)
+	cd app/backend && uv run python -m inspecao.rotulagem.cli kappa $(foreach r,$(RODADAS),--rodada $(r))
+
+rotulos-exportar:  ## grava ml/artifacts/rotulos.csv consolidado por maioria (RODADAS="..." opcional)
+	cd app/backend && uv run python -m inspecao.rotulagem.cli exportar $(foreach r,$(RODADAS),--rodada $(r))
+
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo
+
+auditoria-sortear:  ## sorteia para segundo revisor (5-10%) decisoes da fila sem sorteio, auto-aprovadas e auto-rejeitadas; idempotente
+	cd app/backend && uv run python -m inspecao.jobs.cli auditoria-sortear
 
 front-dev:  ## sobe o vite dev server
 	cd app/frontend && npm run dev

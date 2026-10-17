@@ -4,6 +4,7 @@ python -m inspecao.jobs.cli reprocessar --todos
 python -m inspecao.jobs.cli reprocessar --lote PSP_EXTRATLEITIMPL_200526_0352
 python -m inspecao.jobs.cli recalcular --todos --politica politica@v1
 python -m inspecao.jobs.cli resumo
+python -m inspecao.jobs.cli auditoria-sortear
 """
 
 import argparse
@@ -70,6 +71,24 @@ def resumo() -> int:
     return 0
 
 
+def auditoria_sortear() -> int:
+    """Sorteio da auditoria amostral para as decisoes de fila sem sorteio (as gravadas
+    antes do M8) e para as decisoes da maquina (auto-aprovadas e auto-rejeitadas).
+    Idempotente; contas de teste ficam de fora."""
+    from inspecao import auditoria
+
+    with SessionLocal() as sessao:
+        # commit por item: cada leitura sorteada fica travada so ate o proprio commit
+        fila_humana = auditoria.sortear_decididas(sessao, commit_por_item=True)
+        auto = auditoria.sortear_automaticas(sessao, commit_por_item=True)
+        sessao.commit()
+    print(
+        f"sorteadas para segundo revisor: {fila_humana} da fila, "
+        f"{auto['auto_aprovada']} auto-aprovadas, {auto['auto_rejeitada']} auto-rejeitadas"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description="Fila de jobs")
@@ -88,7 +107,13 @@ def main(argv: list[str] | None = None) -> int:
         "diferentes no ar, cada lote pode receber uma politica diferente)",
     )
     sub.add_parser("resumo", help="contagem de jobs por tipo e status")
+    sub.add_parser(
+        "auditoria-sortear", help="sorteia para auditoria amostral as decisoes sem sorteio"
+    )
     args = ap.parse_args(argv)
+
+    if args.comando == "auditoria-sortear":
+        return auditoria_sortear()
 
     if args.comando in ("reprocessar", "recalcular"):
         if not args.lote and not args.todos:

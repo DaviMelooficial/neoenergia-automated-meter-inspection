@@ -100,6 +100,8 @@ def test_status_atual_so_e_escrito_por_estados_py():
     # Leituras (nao escritas) que a regex ampla pega. Allowlist explicita, por linha.
     permitidas = {
         ("routers/operacao.py", "status_atual=leitura.status_atual,"),  # kwarg de schema Pydantic
+        # M8: copia da RESPOSTA (LeituraOut.model_copy) com a decisao oculta; nao toca o banco
+        ("routers/operacao.py", 'oculto = {"status_atual": STATUS_OCULTO}'),
     }
     violacoes: list[str] = []
     for arquivo in RAIZ_SRC.rglob("*.py"):

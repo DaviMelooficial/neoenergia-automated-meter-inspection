@@ -133,7 +133,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Obter Leitura */
+        /**
+         * Obter Leitura
+         * @description Leitura completa; decisao final alheia oculta (ver `ocultar_decisao`).
+         */
         get: operations["obter_leitura_leituras__leitura_id__get"];
         put?: never;
         post?: never;
@@ -252,6 +255,9 @@ export interface paths {
         /**
          * Liberar
          * @description Devolve a reserva do proprio usuario ("pular"). Reserva alheia nao e tocada.
+         *
+         *     Com lock de linha: se a reserva venceu e outro auditor acabou de pegar o
+         *     item, a checagem de dono acontece ja com a linha travada e nada e apagado.
          */
         post: operations["liberar_fila_humana__leitura_id__liberar_post"];
         delete?: never;
@@ -271,6 +277,72 @@ export interface paths {
         put?: never;
         /** Decidir */
         post: operations["decidir_fila_humana__leitura_id__decisao_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auditoria/proxima": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Proxima
+         * @description Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma
+         *     decisao dele mesmo, nunca uma reservada por outro revisor.
+         */
+        post: operations["proxima_auditoria_proxima_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auditoria/{codigo}/liberar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Liberar
+         * @description Devolve a reserva propria. Qualquer outro caso: a resposta unica.
+         */
+        post: operations["liberar_auditoria__codigo__liberar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auditoria/{codigo}/decisao": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decidir
+         * @description Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.
+         *
+         *     A regra vale aqui, e nao so no `/proxima`: a auditoria tem de estar pendente, nao ser
+         *     decisao do proprio usuario e nao estar reservada por outro (lock da linha ate o
+         *     commit). O banco repete a regra (`ck_auditorias_segundo_revisor`, gatilho de
+         *     imutabilidade). Toda recusa e a resposta unica.
+         */
+        post: operations["decidir_auditoria__codigo__decisao_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -354,11 +426,144 @@ export interface paths {
         };
         /**
          * Drift
-         * @description Serie por lote. Sinais de modelo (confianca media, discordancia) so a partir do M5.
+         * @description Serie por lote com os 5 sinais contra a baseline (criterio em `monitoramento.drift`),
+         *     mais as contagens operacionais de cada lote.
          */
         get: operations["drift_metricas_drift_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metricas/auto-aprovacao": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estado Auto Aprovacao
+         * @description Estado dos limiares da politica e o contador de evidencia para ligar a
+         *     auto-aprovacao (600 rotuladas na zona de aprovacao, zero erro).
+         */
+        get: operations["estado_auto_aprovacao_metricas_auto_aprovacao_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metricas/auditoria": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Concordancia Auditoria
+         * @description Concordancia primeiro x segundo revisor da auditoria amostral. Supervisor ve so os
+         *     totais com ao menos `min_pares` pares; contagens, por lote e serie so admin (que por
+         *     isso nao audita).
+         */
+        get: operations["concordancia_auditoria_metricas_auditoria_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/proxima": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Proxima
+         * @description Proxima foto que este usuario ainda pode rotular nesta rodada.
+         *
+         *     A resposta so identifica a foto: nenhum rotulo alheio, decisao da maquina,
+         *     score, posicao lida nem nota do leiturista.
+         */
+        post: operations["proxima_rotulagem_proxima_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/consolidacao": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Consolidacao
+         * @description Kappa de Cohen por classe (media dos pares ponderada por n) e por par.
+         *
+         *     Padrao: rodada `lab02`. Qualquer rodada cega na consulta: so admin. Juntar
+         *     rodadas em que o mesmo rotulador votou duas vezes na mesma foto devolve 422,
+         *     porque inflaria a concordancia.
+         */
+        get: operations["consolidacao_rotulagem_consolidacao_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Exportar
+         * @description Uma linha por foto, rotulo por maioria; empate fica vazio. Mesmo arquivo do
+         *     `make rotulos-exportar`, que grava em `ml/artifacts/rotulos.csv`.
+         */
+        get: operations["exportar_rotulagem_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rotulagem/{foto_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gravar
+         * @description Grava o rotulo do usuario atual. Cada rodada cega rotula cada foto uma vez,
+         *     de uma pessoa so; nao ha edicao. Recusa: 409 com texto constante.
+         */
+        post: operations["gravar_rotulagem__foto_id__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -405,6 +610,312 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AuditoriaDecisaoOut
+         * @description So a decisao do proprio segundo revisor.
+         */
+        AuditoriaDecisaoOut: {
+            /**
+             * Auditoria
+             * Format: uuid
+             */
+            auditoria: string;
+            decisao: components["schemas"]["DecisaoHumana"];
+            motivo: components["schemas"]["MotivoReprovacao"] | null;
+            /** Observacao */
+            observacao: string | null;
+            /**
+             * Decidida Em
+             * Format: date-time
+             */
+            decidida_em: string;
+        };
+        /** AutoAprovacaoOut */
+        AutoAprovacaoOut: {
+            /** Politica */
+            politica: string;
+            /** Detector */
+            detector: string | null;
+            /** Limiar Rejeita */
+            limiar_rejeita: number | null;
+            /** Limiar Aprova */
+            limiar_aprova: number | null;
+            /** Ativa */
+            ativa: boolean;
+            /** Contador Aplicavel */
+            contador_aplicavel: boolean;
+            /** Motivo */
+            motivo: string;
+            /** Alvo Erro */
+            alvo_erro: number;
+            /** Confianca */
+            confianca: number;
+            /** Necessarias */
+            necessarias: number;
+            /** Fotos Na Zona */
+            fotos_na_zona: number | null;
+            /** Rotuladas Na Zona */
+            rotuladas_na_zona: number;
+            /** Erros */
+            erros: number;
+            /** Acumuladas Sem Erro */
+            acumuladas_sem_erro: number;
+            /** Limite Superior Erro */
+            limite_superior_erro: number | null;
+            /** Meta Atingida */
+            meta_atingida: boolean;
+            diagnostico: components["schemas"]["DiagnosticoZonaOut"] | null;
+        };
+        /** AutoDecididasOut */
+        AutoDecididasOut: {
+            /** Quantidade */
+            quantidade: number;
+            /** Percentual */
+            percentual: number;
+        };
+        /** BaselineDriftOut */
+        BaselineDriftOut: {
+            /** Lotes */
+            lotes: string[];
+            /** N Fotos Com Score */
+            n_fotos_com_score: number;
+            /** N Pares Discordancia */
+            n_pares_discordancia: number;
+            valores: components["schemas"]["ValoresBaselineOut"] | null;
+            /**
+             * Sobredispersao
+             * @description phi APLICADO na carta p (1 com menos de min_lotes_phi lotes na baseline)
+             */
+            sobredispersao: {
+                [key: string]: number;
+            };
+            /**
+             * Sobredispersao Estimada
+             * @description phi estimado entre os lotes da baseline (qui-quadrado/(k-1)), informativo
+             */
+            sobredispersao_estimada: {
+                [key: string]: number;
+            };
+        };
+        /** BaselineQualidadeOut */
+        BaselineQualidadeOut: {
+            /** Com Foto */
+            com_foto: number;
+            /** Contagens */
+            contagens: {
+                [key: string]: number;
+            };
+            /** Taxas */
+            taxas: {
+                [key: string]: number | null;
+            };
+            /** Lotes */
+            lotes: string[];
+        };
+        /**
+         * Cena
+         * @description Exclusiva: uma cena por foto.
+         * @enum {string}
+         */
+        Cena: "digital" | "eletromecanico" | "ocorrencia" | "nao_medidor";
+        /**
+         * ConcordanciaAuditoriaOut
+         * @description `detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares.
+         */
+        ConcordanciaAuditoriaOut: {
+            /**
+             * Rotulos De Calibracao
+             * @description rotulos por rodada de calibracao/treino excluida da medida
+             */
+            rotulos_de_calibracao: {
+                [key: string]: number;
+            };
+            /**
+             * Exclusao Incompleta
+             * @description rodadas obrigatorias (lab02, inspecao_m5) sem nenhum rotulo importado
+             */
+            exclusao_incompleta: string[];
+            /** Taxa Configurada */
+            taxa_configurada: number;
+            /** Taxa Auto Rejeitada */
+            taxa_auto_rejeitada: number;
+            /** Min Pares */
+            min_pares: number;
+            /** Detalhe */
+            detalhe: boolean;
+            /** Decisoes Na Fila */
+            decisoes_na_fila: number | null;
+            /** Sorteadas */
+            sorteadas: number | null;
+            /** Taxa Observada */
+            taxa_observada: number | null;
+            /** Pendentes */
+            pendentes: number | null;
+            /** Invalidadas */
+            invalidadas: number | null;
+            /** Decididas */
+            decididas: number | null;
+            total: components["schemas"]["TotalConcordanciaOut"];
+            /** @description estrato da politica ativa */
+            auto_aprovadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"];
+            /** @description estrato da politica ativa */
+            auto_rejeitadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"];
+            /**
+             * Estratos Auto Aprovadas
+             * @description todos os estratos (so admin)
+             */
+            estratos_auto_aprovadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"][];
+            /**
+             * Estratos Auto Rejeitadas
+             * @description todos os estratos (so admin)
+             */
+            estratos_auto_rejeitadas: components["schemas"]["DecisaoAutomaticaAuditoriaOut"][];
+            /** Por Lote */
+            por_lote: components["schemas"]["ConcordanciaLoteOut"][];
+            /** Serie */
+            serie: components["schemas"]["ConcordanciaDiaOut"][];
+        };
+        /** ConcordanciaDiaOut */
+        ConcordanciaDiaOut: {
+            /** N */
+            n: number | null;
+            /** Concordancia Decisao */
+            concordancia_decisao: number | null;
+            /** Kappa Decisao */
+            kappa_decisao: number | null;
+            /** Concordancia Motivo */
+            concordancia_motivo: number | null;
+            /** Kappa Motivo */
+            kappa_motivo: number | null;
+            /**
+             * Dia
+             * Format: date
+             */
+            dia: string;
+        };
+        /** ConcordanciaLoteOut */
+        ConcordanciaLoteOut: {
+            /** N */
+            n: number | null;
+            /** Concordancia Decisao */
+            concordancia_decisao: number | null;
+            /** Kappa Decisao */
+            kappa_decisao: number | null;
+            /** Concordancia Motivo */
+            concordancia_motivo: number | null;
+            /** Kappa Motivo */
+            kappa_motivo: number | null;
+            /** Lote */
+            lote: string;
+        };
+        /** ConcordanciaMaquinaOut */
+        ConcordanciaMaquinaOut: {
+            /**
+             * Fonte
+             * @enum {string}
+             */
+            fonte: "producao" | "lab02";
+            /** Escopo */
+            escopo: string;
+            /** Politica */
+            politica: string;
+            /** N */
+            n: number;
+            matriz: components["schemas"]["MatrizConcordanciaOut"];
+            /** Concordancia */
+            concordancia: number | null;
+            /** Kappa */
+            kappa: number | null;
+        };
+        /** ConsolidacaoOut */
+        ConsolidacaoOut: {
+            /** Rodadas */
+            rodadas: components["schemas"]["RodadaRotulagem"][];
+            /** Limiar */
+            limiar: number;
+            /** Rotuladores */
+            rotuladores: string[];
+            /** Rotulos */
+            rotulos: number;
+            /** Fotos */
+            fotos: number;
+            /** Fotos Dupla Rotulagem */
+            fotos_dupla_rotulagem: number;
+            /** Fotos Com Empate */
+            fotos_com_empate: number;
+            /** Por Classe */
+            por_classe: components["schemas"]["KappaClasseOut"][];
+            /** Pares */
+            pares: components["schemas"]["KappaParOut"][];
+        };
+        /** CriterioDriftOut */
+        CriterioDriftOut: {
+            /** Min Fotos */
+            min_fotos: number;
+            /** Min Pares Discordancia */
+            min_pares_discordancia: number;
+            /** Classe Ativa */
+            classe_ativa: number;
+            /** Inicio Zona Cinzenta */
+            inicio_zona_cinzenta: number;
+            /** Desvio Classe */
+            desvio_classe: number;
+            /** Desvio Rejeicao */
+            desvio_rejeicao: number;
+            /** Lotes Seguidos Rejeicao */
+            lotes_seguidos_rejeicao: number;
+            /** Queda Confianca */
+            queda_confianca: number;
+            /** Lotes Seguidos Confianca */
+            lotes_seguidos_confianca: number;
+            /** Subida Discordancia */
+            subida_discordancia: number;
+            /** Subida Zona Cinzenta */
+            subida_zona_cinzenta: number;
+            /** Z Carta P */
+            z_carta_p: number;
+            /** Min Lotes Phi */
+            min_lotes_phi: number;
+        };
+        /**
+         * DecisaoAutomaticaAuditoriaOut
+         * @description Erro da maquina num estrato (detector, politica), uma leitura auditada por estrato.
+         *     Erro de auto-rejeitada: qualquer veredito que nao seja "reprovada por defeito de
+         *     qualidade" (falso positivo); de auto-aprovada: qualquer reprovada.
+         */
+        DecisaoAutomaticaAuditoriaOut: {
+            /** Detector */
+            detector: string;
+            /** Politica */
+            politica: string;
+            /**
+             * Etapa
+             * @description qualidade (triagem) ou validacao (divergencia, ponto B)
+             */
+            etapa: string;
+            /** N */
+            n: number | null;
+            /** Erros */
+            erros: number | null;
+            /** Taxa Erro */
+            taxa_erro: number | null;
+            /**
+             * Limite Superior Erro
+             * @description limite superior unilateral de 95% (Clopper-Pearson) do erro
+             */
+            limite_superior_erro: number | null;
+            /** Alvo Erro */
+            alvo_erro: number;
+            /**
+             * Necessarias
+             * @description auditorias que sustentariam erro <= alvo com 95%, com os erros de hoje
+             */
+            necessarias: number | null;
+            /** Alvo Atingido */
+            alvo_atingido: boolean | null;
+            /** Suprimido */
+            suprimido: boolean;
+        };
+        /**
          * DecisaoHumana
          * @enum {string}
          */
@@ -415,6 +926,87 @@ export interface components {
             motivo?: components["schemas"]["MotivoReprovacao"] | null;
             /** Observacao */
             observacao?: string | null;
+        };
+        /** DecisoesDetectorOut */
+        DecisoesDetectorOut: {
+            /** Com Foto */
+            com_foto: number;
+            /** Contagens */
+            contagens: {
+                [key: string]: number;
+            };
+            /** Taxas */
+            taxas: {
+                [key: string]: number | null;
+            };
+            /** Detector */
+            detector: string;
+            /** Politica */
+            politica: string;
+        };
+        /** DecisoesLoteOut */
+        DecisoesLoteOut: {
+            /** Com Foto */
+            com_foto: number;
+            /** Contagens */
+            contagens: {
+                [key: string]: number;
+            };
+            /** Taxas */
+            taxas: {
+                [key: string]: number | null;
+            };
+            /** Lote */
+            lote: string;
+            /** Data Extracao */
+            data_extracao: string | null;
+        };
+        /**
+         * Defeito
+         * @description Multirrotulo: zero, um ou varios por foto. Cada um vira uma coluna booleana.
+         * @enum {string}
+         */
+        Defeito: "reflexo" | "fora_de_foco" | "tampa_suja" | "enquadramento" | "display_apagado";
+        /**
+         * DiagnosticoZonaOut
+         * @description Erro que a faixa p_ruim <= limiar teria no Lab 2 (dentro da amostra). Nao e limiar.
+         */
+        DiagnosticoZonaOut: {
+            /** Limiar */
+            limiar: number;
+            /**
+             * Fonte
+             * @constant
+             */
+            fonte: "lab02";
+            /** N */
+            n: number;
+            /** Ilegiveis */
+            ilegiveis: number;
+            /** Taxa Erro */
+            taxa_erro: number | null;
+            /** Limite Inferior Erro */
+            limite_inferior_erro: number | null;
+        };
+        /** DriftOut */
+        DriftOut: {
+            /** Politica */
+            politica: string;
+            /** Detector */
+            detector: string | null;
+            /** Limiar Rejeita */
+            limiar_rejeita: number | null;
+            criterio: components["schemas"]["CriterioDriftOut"];
+            baseline: components["schemas"]["BaselineDriftOut"];
+            /** Lotes */
+            lotes: components["schemas"]["LoteDriftOut"][];
+        };
+        /** FilaResumoOut */
+        FilaResumoOut: {
+            /** Pendentes */
+            pendentes: number;
+            /** Decididas */
+            decididas: number;
         };
         /** FotoOut */
         FotoOut: {
@@ -434,6 +1026,29 @@ export interface components {
             bytes: number;
             /** Url */
             url: string;
+        };
+        /**
+         * FotoRotulagemOut
+         * @description O que o rotulador recebe. Lista fechada (extra="forbid"): nada de leitura,
+         *     nota, medidor, score, decisao da maquina nem rotulo de outra pessoa. Cegueira
+         *     e regra de servidor; o teste de vazamento confere exatamente estes campos.
+         */
+        FotoRotulagemOut: {
+            /** Foto Id */
+            foto_id: number;
+            /** Url */
+            url: string;
+            /** Largura */
+            largura: number | null;
+            /** Altura */
+            altura: number | null;
+            /**
+             * Rodada
+             * @enum {string}
+             */
+            rodada: "a" | "b" | "desempate";
+            /** Restantes */
+            restantes: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -484,6 +1099,39 @@ export interface components {
              */
             reprocessar: boolean;
         };
+        /**
+         * ItemAuditoriaOut
+         * @description O que o segundo revisor recebe, igual para as origens fila, auto_aprovada e
+         *     auto_rejeitada. Lista fechada (extra="forbid"): nada de status, historico, revisao
+         *     anterior, scores da maquina nem id da leitura. O teste de vazamento confere.
+         */
+        ItemAuditoriaOut: {
+            /**
+             * Auditoria
+             * Format: uuid
+             */
+            auditoria: string;
+            /** Lote */
+            lote: string;
+            /** Linha Csv */
+            linha_csv: number;
+            /** Medidores */
+            medidores: string[];
+            /** Posicao Lida */
+            posicao_lida: number | null;
+            /** Nota Codigo */
+            nota_codigo: string | null;
+            nota: components["schemas"]["NotaOut"] | null;
+            foto_principal: components["schemas"]["FotoOut"] | null;
+            /** Fotos */
+            fotos: components["schemas"]["FotoOut"][];
+            /** Quarentena */
+            quarentena: components["schemas"]["QuarentenaCegaOut"][];
+            /** Reservado Ate */
+            reservado_ate: string | null;
+            /** Ha Mais */
+            ha_mais: boolean;
+        };
         /** JobOut */
         JobOut: {
             /** Id */
@@ -508,6 +1156,33 @@ export interface components {
              * Format: date-time
              */
             criado_em: string;
+        };
+        /** KappaClasseOut */
+        KappaClasseOut: {
+            /** Classe */
+            classe: string;
+            /** Kappa */
+            kappa: number | null;
+            /**
+             * N
+             * @description pares-foto na media ponderada
+             */
+            n: number;
+            /** Passa */
+            passa: boolean;
+        };
+        /** KappaParOut */
+        KappaParOut: {
+            /** A */
+            a: string;
+            /** B */
+            b: string;
+            /** N */
+            n: number;
+            /** Kappa */
+            kappa: {
+                [key: string]: number | null;
+            };
         };
         /** LeituraOut */
         LeituraOut: {
@@ -584,6 +1259,42 @@ export interface components {
             /** Senha */
             senha: string;
         };
+        /** LoteDriftOut */
+        LoteDriftOut: {
+            /** Lote Id */
+            lote_id: number;
+            /** Lote */
+            lote: string;
+            /** Data Extracao */
+            data_extracao: string | null;
+            /** Na Baseline */
+            na_baseline: boolean;
+            /** Total */
+            total: number;
+            /** Com Foto */
+            com_foto: number;
+            /** Por Status */
+            por_status: {
+                [key: string]: number;
+            };
+            /** Quarentena Por Tipo */
+            quarentena_por_tipo: {
+                [key: string]: number;
+            };
+            /** Modelos */
+            modelos: string[];
+            /** Taxa Reprovacao Humana */
+            taxa_reprovacao_humana: number | null;
+            /** N Fotos Com Score */
+            n_fotos_com_score: number;
+            /** Amostra Insuficiente */
+            amostra_insuficiente: boolean;
+            /** P Ruim Medio */
+            p_ruim_medio: number | null;
+            sinais: components["schemas"]["SinaisLoteOut"];
+            /** Alertas */
+            alertas: string[];
+        };
         /** LoteOut */
         LoteOut: {
             /** Id */
@@ -607,6 +1318,20 @@ export interface components {
             por_status?: {
                 [key: string]: number;
             };
+        };
+        /**
+         * MatrizConcordanciaOut
+         * @description maquina_humano: `rejeita` = p_ruim >= limiar_rejeita; `ilegivel` = humano.
+         */
+        MatrizConcordanciaOut: {
+            /** Rejeita Ilegivel */
+            rejeita_ilegivel: number;
+            /** Rejeita Legivel */
+            rejeita_legivel: number;
+            /** Passa Ilegivel */
+            passa_ilegivel: number;
+            /** Passa Legivel */
+            passa_legivel: number;
         };
         /**
          * MotivoReprovacao
@@ -653,6 +1378,84 @@ export interface components {
          * @enum {string}
          */
         Papel: "auditor" | "supervisor" | "admin";
+        /** PeriodoOut */
+        PeriodoOut: {
+            /** De */
+            de: string | null;
+            /** Ate */
+            ate: string | null;
+        };
+        /** ProdutividadeOut */
+        ProdutividadeOut: {
+            /** Usuario Id */
+            usuario_id: number;
+            /** Decisoes */
+            decisoes: number;
+        };
+        /** QualidadeOut */
+        QualidadeOut: {
+            periodo: components["schemas"]["PeriodoOut"];
+            /** Total Leituras */
+            total_leituras: number;
+            /** Com Foto */
+            com_foto: number;
+            /** Sem Foto */
+            sem_foto: number;
+            auto_decididas: components["schemas"]["AutoDecididasOut"];
+            fila_humana: components["schemas"]["FilaResumoOut"];
+            /** Por Status */
+            por_status: {
+                [key: string]: number;
+            };
+            /** Quarentena Por Tipo */
+            quarentena_por_tipo: {
+                [key: string]: number;
+            };
+            /** Defeitos Qualidade */
+            defeitos_qualidade: {
+                [key: string]: number;
+            };
+            /** Revisoes Por Decisao */
+            revisoes_por_decisao: {
+                [key: string]: number;
+            };
+            /** Produtividade Por Auditor */
+            produtividade_por_auditor: components["schemas"]["ProdutividadeOut"][];
+            /** Tempo Medio Decisao Segundos */
+            tempo_medio_decisao_segundos: number | null;
+            /**
+             * Decididas Conta Teste
+             * @description decisoes de E2E/demo, fora das medidas
+             */
+            decididas_conta_teste: number;
+            /** Jobs */
+            jobs: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            baseline: components["schemas"]["BaselineQualidadeOut"];
+            /** Por Lote */
+            por_lote: components["schemas"]["DecisoesLoteOut"][];
+            /** Por Detector */
+            por_detector: components["schemas"]["DecisoesDetectorOut"][];
+            /** Concordancia Maquina Humano */
+            concordancia_maquina_humano: components["schemas"]["ConcordanciaMaquinaOut"][];
+        };
+        /**
+         * QuarentenaCegaOut
+         * @description Inconsistencia da leitura sem nenhum id (nem da leitura, nem da foto).
+         */
+        QuarentenaCegaOut: {
+            /** Tipo */
+            tipo: string;
+            /** Severidade */
+            severidade: string;
+            /** Detalhe */
+            detalhe: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** QuarentenaOut */
         QuarentenaOut: {
             /** Id */
@@ -705,10 +1508,86 @@ export interface components {
             criado_em: string;
         };
         /**
+         * RodadaRotulagem
+         * @description `lab02` e importada do app `rotulador/`; `a`, `b` e `desempate` sao feitas na
+         *     tela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8).
+         * @enum {string}
+         */
+        RodadaRotulagem: "lab02" | "a" | "b" | "desempate" | "producao" | "inspecao_m5";
+        /**
+         * RotuloIn
+         * @description Esquema v2. As regras de consistencia sao recusadas (422), nao corrigidas.
+         */
+        RotuloIn: {
+            /**
+             * Rodada
+             * @enum {string}
+             */
+            rodada: "a" | "b" | "desempate";
+            cena: components["schemas"]["Cena"];
+            /** Defeitos */
+            defeitos?: components["schemas"]["Defeito"][];
+            /** Legivel */
+            legivel: boolean;
+            /** Segundos Na Foto */
+            segundos_na_foto?: number | null;
+        };
+        /**
+         * RotuloOut
+         * @description Devolve so o rotulo do proprio usuario, que ele acabou de gravar.
+         */
+        RotuloOut: {
+            /** Id */
+            id: number;
+            /** Foto Id */
+            foto_id: number;
+            rodada: components["schemas"]["RodadaRotulagem"];
+            cena: components["schemas"]["Cena"];
+            /** Defeitos */
+            defeitos: components["schemas"]["Defeito"][];
+            /** Legivel */
+            legivel: boolean;
+            /**
+             * Gravado Em
+             * Format: date-time
+             */
+            gravado_em: string;
+        };
+        /**
          * Severidade
          * @enum {string}
          */
         Severidade: "bloqueante" | "informativo";
+        /** SinaisLoteOut */
+        SinaisLoteOut: {
+            /** Classes */
+            classes: {
+                [key: string]: components["schemas"]["SinalOut"];
+            };
+            taxa_auto_rejeicao: components["schemas"]["SinalOut"];
+            confianca_media: components["schemas"]["SinalOut"];
+            discordancia: components["schemas"]["SinalOut"];
+            zona_cinzenta: components["schemas"]["SinalOut"];
+        };
+        /**
+         * SinalOut
+         * @description `desvio` = valor - baseline. `n` = denominador do valor no lote. `z`: carta p com
+         *     sobredispersao (so nas fracoes: classes, auto-rejeicao e zona cinzenta).
+         */
+        SinalOut: {
+            /** Valor */
+            valor: number | null;
+            /** Baseline */
+            baseline: number | null;
+            /** Desvio */
+            desvio: number | null;
+            /** Alerta */
+            alerta: boolean;
+            /** N */
+            n: number;
+            /** Z */
+            z: number | null;
+        };
         /**
          * TipoInconsistencia
          * @description Tipos de registro em quarentena. Usados a partir do marco M2.
@@ -726,6 +1605,24 @@ export interface components {
             token_type: string;
             /** Expires In */
             expires_in: number;
+        };
+        /**
+         * TotalConcordanciaOut
+         * @description `suprimido`: menos de `min_pares` pares; o supervisor nao ve a medida.
+         */
+        TotalConcordanciaOut: {
+            /** N */
+            n: number | null;
+            /** Concordancia Decisao */
+            concordancia_decisao: number | null;
+            /** Kappa Decisao */
+            kappa_decisao: number | null;
+            /** Concordancia Motivo */
+            concordancia_motivo: number | null;
+            /** Kappa Motivo */
+            kappa_motivo: number | null;
+            /** Suprimido */
+            suprimido: boolean;
         };
         /** TrocarSenhaIn */
         TrocarSenhaIn: {
@@ -792,6 +1689,23 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** ValoresBaselineOut */
+        ValoresBaselineOut: {
+            /** Classes */
+            classes: {
+                [key: string]: number | null;
+            };
+            /** Taxa Auto Rejeicao */
+            taxa_auto_rejeicao: number | null;
+            /** Zona Cinzenta */
+            zona_cinzenta: number | null;
+            /** P Ruim Medio */
+            p_ruim_medio: number | null;
+            /** Confianca Media */
+            confianca_media: number | null;
+            /** Discordancia */
+            discordancia: number | null;
         };
     };
     responses: never;
@@ -1236,6 +2150,90 @@ export interface operations {
             };
         };
     };
+    proxima_auditoria_proxima_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemAuditoriaOut"];
+                };
+            };
+        };
+    };
+    liberar_auditoria__codigo__liberar_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                codigo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decidir_auditoria__codigo__decisao_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                codigo: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisaoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditoriaDecisaoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listar_quarentena_get: {
         parameters: {
             query?: {
@@ -1333,7 +2331,10 @@ export interface operations {
     };
     qualidade_metricas_qualidade_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description versao da politica (registro POLITICAS); padrao: a ativa */
+                politica?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1346,14 +2347,85 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["QualidadeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
     drift_metricas_drift_get: {
+        parameters: {
+            query?: {
+                /** @description versao da politica (registro POLITICAS); padrao: a ativa */
+                politica?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estado_auto_aprovacao_metricas_auto_aprovacao_get: {
+        parameters: {
+            query?: {
+                /** @description versao da politica (registro POLITICAS); padrao: a ativa */
+                politica?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoAprovacaoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    concordancia_auditoria_metricas_auditoria_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1368,9 +2440,135 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ConcordanciaAuditoriaOut"];
+                };
+            };
+        };
+    };
+    proxima_rotulagem_proxima_post: {
+        parameters: {
+            query?: {
+                rodada?: "a" | "b" | "desempate";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FotoRotulagemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consolidacao_rotulagem_consolidacao_get: {
+        parameters: {
+            query?: {
+                rodada?: components["schemas"]["RodadaRotulagem"][] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolidacaoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exportar_rotulagem_export_get: {
+        parameters: {
+            query?: {
+                rodada?: components["schemas"]["RodadaRotulagem"][] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description rotulos.csv consolidado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gravar_rotulagem__foto_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                foto_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RotuloIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotuloOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

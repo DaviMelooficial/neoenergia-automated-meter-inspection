@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import func, select
 
 from inspecao.config import get_settings
-from inspecao.enums import StatusJob, StatusLeitura, TipoJob
+from inspecao.enums import Papel, StatusJob, StatusLeitura, TipoJob
 from inspecao.inference.detector import DetectorNulo
 from inspecao.jobs import fila
 from inspecao.jobs.handlers import Contexto
@@ -200,7 +200,12 @@ def test_quarentena_lista_resumo_e_resolucao(client, contas, na_fila, db_session
 def test_metricas_qualidade_e_drift(client, contas, na_fila, db_session):
     cab = login(client, contas["supervisor"])
     ids = ids_na_fila(db_session, na_fila)
-    aud = login(client, contas["auditor"])
+    # M8: decisao de conta de teste (@teste.com.br) nao conta como auditoria; a medida
+    # usa uma conta de dominio real.
+    from tests.m8_fixture import DOMINIO_REAL
+    from tests.usuarios_fixture import criar_usuario
+
+    aud = login(client, criar_usuario(db_session, f"auditora{DOMINIO_REAL}", Papel.AUDITOR))
     client.post(f"/fila-humana/{ids[0]}/decisao", headers=aud, json={"decisao": "aprovada"})
     client.post(
         f"/fila-humana/{ids[1]}/decisao",
@@ -217,6 +222,7 @@ def test_metricas_qualidade_e_drift(client, contas, na_fila, db_session):
     assert m["quarentena_por_tipo"]["foto_orfa"] == 1
     assert m["defeitos_qualidade"] == {"glare": 1}
     assert m["revisoes_por_decisao"] == {"aprovada": 1, "reprovada": 1}
+    assert m["decididas_conta_teste"] == 0
     assert m["tempo_medio_decisao_segundos"] is not None and m["tempo_medio_decisao_segundos"] >= 0
     assert m["jobs"]["triagem_qualidade"] == {"concluido": 5}
 
@@ -226,10 +232,12 @@ def test_metricas_qualidade_e_drift(client, contas, na_fila, db_session):
     assert len(serie) == 1
     l0 = serie[0]
     assert l0["lote"] == ls.LOTE and l0["com_foto"] == 5
-    assert l0["taxa_auto_rejeicao"] == 0.0
     assert l0["taxa_reprovacao_humana"] == 0.5
     assert l0["modelos"] == ["nulo@v0"]
-    assert l0["confianca_media"] is None  # detector nulo nao produz score
+    # detector nulo nao produz score: nenhum sinal de drift para a politica ativa (v1)
+    assert l0["n_fotos_com_score"] == 0
+    assert l0["sinais"]["taxa_auto_rejeicao"]["valor"] is None
+    assert l0["sinais"]["confianca_media"]["valor"] is None
 
 
 # ------------------------------------------------------------------ usuarios

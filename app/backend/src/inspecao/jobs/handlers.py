@@ -17,7 +17,7 @@ from inspecao.inference import politica as politica_mod
 from inspecao.inference.detector import Detector, decodificar
 from inspecao.inference.politica import POLITICA_ATUAL, Decisao, Politica
 from inspecao.jobs import fila
-from inspecao.models import Foto, Leitura, Lote, ResultadoInferencia
+from inspecao.models import AuditoriaAmostral, Foto, Leitura, Lote, ResultadoInferencia
 from inspecao.storage.local import LocalFileStorage
 
 log = logging.getLogger(__name__)
@@ -55,10 +55,20 @@ def _foto_principal(sessao: Session, leitura: Leitura) -> Foto:
 
 
 def _redecidivel():
-    """Condicao SQL de leitura que a maquina pode reabrir: decidida pela maquina e sem
-    reserva ativa de auditor. Relogio do banco (`now()`), o mesmo da fila humana."""
-    return Leitura.status_atual.in_([s.value for s in ESTADOS_REDECIDIVEIS]) & or_(
-        Leitura.reservado_ate.is_(None), Leitura.reservado_ate < func.now()
+    """Condicao SQL de leitura que a maquina pode reabrir: decidida pela maquina, sem
+    reserva ativa de auditor e sem auditoria amostral pendente reservada por um segundo
+    revisor (reabrir invalidaria a auditoria na mao dele, e o 404 que ele veria diria que
+    o item era automatico). Relogio do banco (`now()`), o mesmo da fila humana."""
+    auditoria_reservada = exists().where(
+        AuditoriaAmostral.leitura_id == Leitura.id,
+        AuditoriaAmostral.decisao.is_(None),
+        AuditoriaAmostral.invalidada_em.is_(None),
+        AuditoriaAmostral.reservado_ate > func.now(),
+    )
+    return (
+        Leitura.status_atual.in_([s.value for s in ESTADOS_REDECIDIVEIS])
+        & or_(Leitura.reservado_ate.is_(None), Leitura.reservado_ate < func.now())
+        & ~auditoria_reservada
     )
 
 
@@ -79,6 +89,36 @@ def _travar_redecidiveis(sessao: Session, consulta):
     ).all()
 
 
+def _travar_auditorias_pendentes(sessao: Session, leitura_id: int) -> bool:
+    """Trava (FOR UPDATE SKIP LOCKED) as auditorias pendentes da leitura antes de reabri-la.
+
+    O `/auditoria/proxima` disputa o mesmo lock (`reservar_proxima` tambem e SKIP LOCKED):
+    - se o revisor esta reservando agora, a linha dele esta travada e a leitura e pulada;
+    - se ele ja reservou (commit antes), a reserva ativa aparece aqui e a leitura e pulada;
+    - se o job trava primeiro, o `/proxima` pula essa auditoria e nao a entrega, e a
+      invalidacao em `transicionar` acontece sem ninguem com o item na mao.
+    Assim nenhum revisor ve a auditoria sumir depois de reservada (o 404 diria a origem).
+    """
+    # Mesmo predicado da invalidacao em `estados.transicionar` (so decisao automatica: a
+    # auditoria de fila confere uma decisao humana, que nunca e reaberta).
+    pendente = (
+        AuditoriaAmostral.leitura_id == leitura_id,
+        AuditoriaAmostral.origem != "fila",
+        AuditoriaAmostral.decisao.is_(None),
+        AuditoriaAmostral.invalidada_em.is_(None),
+    )
+    total = sessao.scalar(select(func.count()).select_from(AuditoriaAmostral).where(*pendente))
+    travadas = sessao.execute(
+        select(AuditoriaAmostral.id, AuditoriaAmostral.reservado_ate)
+        .where(*pendente)
+        .with_for_update(skip_locked=True)
+    ).all()
+    if len(travadas) < (total or 0):
+        return False
+    agora = sessao.scalar(select(func.now()))
+    return not any(ate is not None and ate > agora for _, ate in travadas)
+
+
 def _decidir(
     politica: Politica, modelo: str, saida: dict[str, Any]
 ) -> tuple[Decisao, float | None, dict]:
@@ -96,6 +136,7 @@ def _decidir(
 def _sair_da_triagem(
     sessao: Session, leitura: Leitura, decisao: Decisao, ator: str, p_ruim, detalhe: dict
 ) -> None:
+    # A auditoria amostral da decisao automatica (M8) e sorteada dentro de `transicionar`.
     transicionar(sessao, leitura, DESTINO[decisao], ator, p_ruim, detalhe)
     if decisao is Decisao.SEGUIR:
         fila.enfileirar(sessao, TipoJob.VALIDACAO_LEITURA, {"leitura_id": leitura.id})
@@ -141,6 +182,13 @@ def triagem_qualidade(ctx: Contexto, sessao: Session, payload: dict) -> None:
                 )
             else:
                 log.info("leitura %s reservada ou decidida: nada a reabrir", leitura.id)
+            return
+        if not _travar_auditorias_pendentes(sessao, leitura.id):
+            log.warning(
+                "leitura %s com auditoria amostral em uso: troca para %s adiada; reenfileire",
+                leitura.id,
+                ctx.detector.nome,
+            )
             return
         status = StatusLeitura(leitura.status_atual)
     foto = _foto_principal(sessao, leitura)
@@ -220,6 +268,9 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
         if not _travar_redecidiveis(sessao, select(Leitura).where(Leitura.id == leitura.id)):
             contagem["reconferencia_falhou"] += 1  # reservada ou decidida depois do SELECT
             continue
+        if not _travar_auditorias_pendentes(sessao, leitura.id):
+            contagem["auditoria_em_uso"] += 1  # auditoria amostral reservada ou travada (M8)
+            continue
         ator = f"modelo:{modelo}"
         de = leitura.status_atual
         transicionar(
@@ -258,6 +309,13 @@ def recalcular_decisao(ctx: Contexto, sessao: Session, payload: dict) -> None:
             "lote %s: %d leituras nao reabertas: reservadas ou decididas depois do SELECT",
             lote.nome,
             contagem["reconferencia_falhou"],
+        )
+    if contagem["auditoria_em_uso"]:
+        log.warning(
+            "lote %s: %d leituras nao reabertas: auditoria amostral em uso por um revisor; "
+            "rode recalcular_decisao de novo depois que ela for decidida ou vencer",
+            lote.nome,
+            contagem["auditoria_em_uso"],
         )
 
 

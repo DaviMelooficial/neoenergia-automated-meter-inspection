@@ -62,6 +62,10 @@ Concordância máquina × humano onde há os dois:
 | produção (auditores reais) | fora da amostra | 0 | | | | | | |
 | Lab 2, conjunto de calibração do M5 | **dentro da amostra** | 322 | 3 | 0 | 140 | 179 | 56,5% | 0,023 |
 
+Contagens do Lab 2, reconciliadas: **329** fotos têm rótulo `lab02` no banco (as do CSV mapeadas); **328** delas têm
+score do `heuristica@v1` (é o número do `heuristicas.md`, que conta as rotuladas com score); **322** são os pares
+acima, porque 6 das 328 empatam na maioria de `legivel` entre os rotuladores e ficam sem veredito.
+
 O Lab 2 foi o conjunto em que o limiar 0,85 do M5 foi escolhido com zero falso positivo: o "0 rejeita ×
 legível" vale por construção e não é evidência fora da amostra. É pelo mesmo motivo que o Lab 2 não entra no
 contador da auto-aprovação. O que o Lab 2 mostra de útil: a heurística deixa passar 140 das 143 ilegíveis. A medida
@@ -189,12 +193,31 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     as auditorias da heurística ficam no estrato `heuristica@v1 · politica@v1` e não entram no da v2.
   - O endpoint e a tela mostram o estrato da **última decisão automática gravada no histórico** (quem decide de
     fato), e não o `POLITICA_ATUAL`, que é constante até a integração com o M7; sem nenhuma decisão, cai na política
-    ativa. Admin vê todos (`estratos_auto_rejeitadas`).
-  - **Fotos de calibração e treino ficam fora**: foto com rótulo `lab02` ou das rodadas cegas (a, b, desempate) não é
-    sorteada para auditoria automática e, se já tiver auditoria, não entra no estrato. Motivo: são acerto por
-    construção (o 0,85 foi escolhido com zero falso positivo no Lab 2) e quem as rotulou poderia recebê-las. No
-    `inspecao_m8` eram 3 das 87 (as 3 rejeições do Lab 2); com elas, 299 auditorias sem erro dariam limite real de
-    1,007%, acima de 1%, e o `alvo_atingido` viraria indevidamente.
+    ativa. Admin vê todos (`estratos_auto_rejeitadas`). Efeito colateral: a última decisão é de qualquer lote, então
+    um recálculo manual com uma política antiga, ou um lote de teste reprocessado, troca o estrato mostrado na tela
+    até a próxima decisão da política vigente.
+  - **Estimando:** falso positivo das auto-rejeições **fora dos conjuntos de calibração**. Regra: o estrato de uma
+    política mede só fotos fora de todo conjunto que calibrou aquela política, ou seja, fora do Lab 2, das rodadas
+    cegas (a, b, desempate) e da inspeção do M5 (`RODADAS_DE_CALIBRACAO`). Uma política nova calibrada por outra
+    inspeção começa um estrato novo, e as fotos daquela inspeção ficam fora dele.
+  - **A inspeção das 200 do M5 também é calibração.** O 0,85 foi escolhido sobre as 200 fotos dos extremos
+    (`ml/reports/heuristicas_amostra_200.csv`), e o grupo `pior` contém as 87 auto-rejeitadas. A inspeção vai para um
+    CSV; o importador (`make rotulos-importar-inspecao`, rodada `inspecao_m5`, migração `a7c9e2f4b610`) grava toda foto
+    do CSV em `rotulos`, inspecionada (com o veredito e o inspetor) ou ainda pendente (legível nulo, inspetor
+    `pendente`), para a exclusão enxergá-las. Sem isso, 84 das 299 auditorias necessárias seriam dentro da amostra e o
+    limite real ficaria em 1,38%.
+  - **Consequência hoje:** as 87 auto-rejeições dos 4 lotes estão todas na amostra de inspeção, então **nenhuma conta
+    para o estrato `heuristica@v1 · politica@v1 · qualidade`**. A medida só começa com lotes novos.
+  - A exclusão do Lab 2 (3 das 87, as 3 rejeições do Lab 2) é estratificada e não aleatória, mas não tem efeito
+    material: as 3 eram acertos conhecidos, e tirá-las puxa para o lado conservador (com elas, 299 sem erro dariam
+    limite real de 1,007%).
+  - **Sorteio simétrico:** fotos de calibração são sorteadas normalmente e só ficam fora da **medida**
+    (`_estratos`). Excluí-las do sorteio automático, como na rodada anterior, faria "foto de calibração na fila de
+    auditoria" significar "veio da fila". Risco residual: um rotulador do Lab 2, ou o inspetor do M5, pode auditar uma
+    foto que já conhece.
+  - **Pré-condição:** a exclusão depende de `make rotulos-importar` (Lab 2) e `make rotulos-importar-inspecao` terem
+    rodado. Sem nenhum rótulo `lab02` ou `inspecao_m5`, o backend loga WARNING e `/metricas/auditoria` lista a rodada
+    em `exclusao_incompleta` (com as contagens em `rotulos_de_calibracao`).
   - Erro, na rejeição de qualidade: qualquer veredito que não seja "reprovada por uma das 5 classes de qualidade":
     aprovada, ou reprovada por `outro`. Na rejeição por divergência (etapa `validacao`), só aprovada é erro, porque
     `outro` é o motivo da divergência. Na auto-aprovada, qualquer reprovada é erro.
@@ -206,13 +229,14 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
     começo é de auto-rejeitadas, e o revisor tende a confirmar a máquina) e a própria definição (um revisor em
     dúvida que reprova por um defeito de qualidade conta como acerto da máquina). Ler o `alvo_atingido` com isso em
     mente.
-- **Tempo para o alvo com taxa de 100%:** os 4 lotes têm 87 auto-rejeições (84 fora as de calibração), cerca de 22
-  por lote, mas a taxa varia de 12 a 32 por lote. 299 sem erro são cerca de **14 lotes no total, contando os 4 que já
-  existem: faltam uns 10**. Com 1 erro, 473 (~22 lotes); com 2, 628 (~29). O limite real é a **vazão do auditor**
-  (cada auditoria é uma decisão a mais na fila dele), não o sorteio. Com a v2 do M7 o estrato **recomeça do zero**, e a
-  vazão passa a ser a de auto-rejeições da v2, não a da heurística.
-- No `inspecao_m8`: 84 de 84 auto-rejeitadas elegíveis sorteadas (taxa 100%; as 3 de calibração ficaram fora),
-  nenhuma decidida; 0 da fila (não há decisão de conta real).
+- **Tempo para o alvo com taxa de 100%:** os 4 lotes têm 87 auto-rejeições, cerca de 22 por lote (a taxa varia de
+  12 a 32), mas **nenhuma delas conta** (todas estão na amostra de inspeção do M5). 299 sem erro, a ~22 por lote, são
+  cerca de **14 lotes novos**. Com 1 erro, 473 (~22 lotes); com 2, 628 (~29). O limite real é a **vazão do auditor**
+  (cada auditoria é uma decisão a mais na fila dele), não o sorteio. Com a v2 do M7 o estrato **recomeça do zero**, e
+  o número de lotes é **desconhecido** até se conhecer a taxa de auto-rejeição da v2.
+- No `inspecao_m8`: 87 de 87 auto-rejeitadas sorteadas (taxa 100%), nenhuma decidida, e as 87 têm rótulo
+  `inspecao_m5` (3 também `lab02`): ficariam fora da medida. 0 da fila (não há decisão de conta real). Os 200 rótulos
+  `inspecao_m5` estão pendentes (o CSV ainda não tem os vereditos).
 - **Quem audita:** só o papel `auditor` (decisão pendente acima). Nunca o autor da decisão (POST e banco).
 - **Resposta única:** toda recusa em `/auditoria/{id}/decisao` e `/auditoria/{id}/liberar` é 404
   `{"detail":"auditoria indisponivel"}`, byte a byte igual para "não existe", "é sua", "pendente sem reserva sua",
@@ -242,7 +266,7 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 
 ### Riscos residuais (declarados, não resolvidos)
 
-- **Cegueira de origem é parcial no começo.** Hoje 100% das auditorias pendentes vêm da máquina (84 de 84), e as
+- **Cegueira de origem é parcial no começo.** Hoje 100% das auditorias pendentes vêm da máquina (87 de 87), e as
   primeiras auditorias de produção serão todas de auto-rejeitadas. Em regime a proporção cai: a fila a 7% de ~2.840
   leituras por lote dá ~198 auditorias de fila, contra ~22 automáticas, uns 10%. Um revisor que sabe que as
   automáticas são maioria no começo tende a esperar "reprovada", o que puxa para concordar com a máquina e
@@ -268,6 +292,11 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 - **Aparência da foto.** Uma foto obviamente ruim (escura, sem foco) foi provavelmente auto-rejeitada; uma foto boa
   veio provavelmente da fila. É o próprio objeto julgado, e não tem como ser escondido.
 - **Nota e quarentena** (ver acima): correlacionadas com a origem, mantidas no item porque o revisor precisa delas.
+- **Leitura pulada fica com a decisão antiga.** Quando a reabertura é adiada (auditoria pendente reservada ou
+  travada), a leitura continua com a decisão anterior até rodar de novo: no `recalcular_decisao` basta repetir o job;
+  na troca de detector (`triagem_qualidade`) é preciso um novo `reprocessar_lote`.
+- **Rotulador que conhece a foto.** Com o sorteio simétrico, uma foto do Lab 2 ou da inspeção do M5 pode cair para
+  quem já a rotulou; a medida não é afetada (a foto fica fora do estrato), mas a concordância dele não é cega.
 - **Escopo do que os gates bloqueiam.** O desenho fecha o que revela a decisão ou a origem de forma direta (status,
   histórico, scores, contagens por lote, ids, mensagens de erro, ordem de entrega). O que fica nesta lista é inferência
   estatística fraca ou canal social.
@@ -305,6 +334,10 @@ com a tabela, sem `drop_index` explícito); ele apaga os rótulos `producao` e a
 rótulos das revisões reais pelo backfill (as auditorias não; o sorteio as recria com `make auditoria-sortear`). Feito
 assim no `inspecao_m8`.
 
+A rodada `inspecao_m5` entrou numa migração **nova**, `a7c9e2f4b610` (depois da `e4b7`, que não foi editada de novo):
+amplia `ck_rotulos_rodada` e deixa `inspecao_m5` com campos nulos em `ck_rotulos_completo`. Reversível; o downgrade
+apaga os rótulos `inspecao_m5`. Head atual: `a7c9e2f4b610`.
+
 ## Para depois do merge com o M7 (registro; ajuste feito na integração)
 
 - `sinais.politica_ativa()` deve usar `politica_para(detector configurado)`, e não `POLITICA_ATUAL`.
@@ -316,7 +349,7 @@ assim no `inspecao_m8`.
 - O bloco da tela usa o estrato da última decisão automática do histórico; depois do merge, ele passa a ser o da v2
   assim que a v2 decidir a primeira leitura. Se o merge trocar `politica_ativa()` por `politica_para(detector)`, o
   fallback (sem nenhuma decisão) segue o mesmo caminho.
-- `RODADAS_DE_CALIBRACAO` (lab02, a, b, desempate) já exclui as fotos de treino do M7; se o M7 usar outra rodada ou
+- `RODADAS_DE_CALIBRACAO` (lab02, a, b, desempate, inspecao_m5) já exclui as fotos de treino do M7; se o M7 usar outra rodada ou
   outro conjunto (por exemplo um split próprio), ela precisa entrar ali.
 - A baseline do drift troca junto com o detector.
 

@@ -165,21 +165,41 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 - **Taxas:** fila e auto-aprovadas com `AUDITORIA_TAXA` = 0,07 (aceita 0,05 a 0,10); auto-rejeitadas com taxa
   própria, `AUDITORIA_TAXA_AUTO_REJEITADA` = 1,0 (decisão do Davi, 2026-10-17; aceita 0,05 a 1,0). Decisão de conta de
   teste não é sorteada.
-- **Quando sorteia:** a decisão de fila, na transação da decisão; a decisão automática, no fim da triagem e do
-  `recalcular_decisao` (`_sair_da_triagem`, na mesma transação), sem depender de alguém rodar `make
-  auditoria-sortear`. A CLI sobra para o retroativo (o que já estava decidido antes do M8), com commit por item.
+- **Quando sorteia:** a decisão de fila, na transação da decisão; a decisão automática, dentro de
+  `estados.transicionar`, no mesmo ponto em que ela é gravada, seja na triagem, no `recalcular_decisao` ou numa
+  futura saída automática da `validacao_leitura` (hoje ela só manda para a fila). `transicionar_em_lote` recusa
+  esses destinos, para nenhuma decisão automática escapar do sorteio. A CLI sobra para o retroativo (o que já estava
+  decidido antes do M8), com commit por item. Colisão no sorteio só é tolerada em `uq_auditorias_historico` (logada
+  em WARNING); qualquer outra violação propaga.
+- **Identificador opaco:** o item e as rotas `/auditoria/{codigo}/*` usam o `codigo` (uuid4 aleatório) da
+  auditoria, nunca o `id` sequencial: as automáticas são sorteadas em rajada na triagem, e um id baixo dentro do lote
+  dava a origem (a sonda do gate 4 acertava 37 de 41). A tela não mostra número de auditoria.
 - **Reabertura:** `rejeitada_qualidade` é re-decidível. Quando a máquina reabre a leitura (recalcular, troca de
   detector), `estados.transicionar` marca `invalidada_em` na auditoria **pendente** da decisão automática antiga: ela
   sai do `/proxima`, de "pendentes" e de toda medida, e `/metricas/auditoria` (admin) conta as invalidadas. A auditoria
   **decidida** fica: é a medida daquela decisão, que existiu. A decisão nova, inclusive a do auditor se a leitura for
   para a fila, sorteia por conta própria, sem colidir (antes, a unicidade por leitura dava um 409 permanente).
-- **Falso positivo da auto-rejeição:** o segundo revisor aprovar uma auto-rejeitada é um falso positivo. O bloco
-  `auto_rejeitadas` mostra a taxa sempre com o limite superior de 95% (Clopper-Pearson) e quantas auditorias
-  sustentariam precisão ≥ 0,99 com os erros de hoje: **299 sem erro, 473 com 1, 628 com 2**. "Alvo sustentado" só
-  aparece quando o limite superior cai abaixo de 1%; com 10 auditadas e 0 erro a tela diz "falso positivo 0,0% (até
-  25,9% com 95%)", não "0%".
-- **Tempo para o alvo com taxa de 100%:** os 4 lotes têm 87 auto-rejeições, cerca de 22 por lote; 299 sem erro levam
-  cerca de 14 lotes, se nenhum falso positivo aparecer (com 1, 473 auditorias, ~22 lotes).
+- **Falso positivo da auto-rejeição: unidade e erro.**
+  - Unidade: a leitura, dentro de um estrato (detector, política) lido da linha do histórico da decisão (ator e
+    `detalhe.politica`). A mesma foto pode ter várias auditorias decididas (reaberta e rejeitada de novo, com a
+    auditoria decidida sobrevivendo à reabertura e taxa de 100%): no estrato, só a auditoria decidida **mais
+    antiga** conta. No `inspecao_m8` as 87 foram auto-rejeitadas duas vezes pela v1; só a decisão vigente foi sorteada,
+    e mesmo que as duas fossem auditadas, contariam uma vez. Estratos diferentes não se somam: na integração com o M7,
+    as auditorias da heurística ficam no estrato `heuristica@v1 · politica@v1` e não entram no da v2.
+  - O endpoint e a tela mostram o estrato da política ativa; admin vê todos (`estratos_auto_rejeitadas`).
+  - Erro: qualquer veredito que não seja "reprovada por uma das 5 classes de qualidade": aprovada, ou reprovada por
+    `outro`. (Na auto-aprovada, qualquer reprovada é erro.)
+  - O bloco mostra a taxa sempre com o limite superior de 95% (Clopper-Pearson) e o total de leituras auditadas que
+    sustentaria precisão ≥ 0,99 com os erros de hoje: **299 sem erro, 473 com 1, 628 com 2** (é o total, não o que
+    falta). `alvo_atingido` quando o limite superior é **menor ou igual** a 1%; com 10 auditadas e 0 erro a tela diz
+    "falso positivo 0,0% (até 25,9% com 95%)", não "0%".
+  - **O estimador tende a subestimar o falso positivo**, por dois caminhos: ancoragem (a maioria das auditorias no
+    começo é de auto-rejeitadas, e o revisor tende a confirmar a máquina) e a própria definição (um revisor em
+    dúvida que reprova por um defeito de qualidade conta como acerto da máquina). Ler o `alvo_atingido` com isso em
+    mente.
+- **Tempo para o alvo com taxa de 100%:** os 4 lotes têm 87 auto-rejeições, cerca de 22 por lote. 299 sem erro são
+  cerca de **14 lotes no total, contando os 4 que já existem: faltam uns 10**. Com 1 erro, 473 (~22 lotes); com 2,
+  628 (~29). O limite real é a **vazão do auditor** (cada auditoria é uma decisão a mais na fila dele), não o sorteio.
 - No `inspecao_m8`: 87 de 87 auto-rejeitadas sorteadas (taxa 100%), nenhuma decidida; 0 da fila (não há decisão de
   conta real).
 - **Quem audita:** só o papel `auditor` (decisão pendente acima). Nunca o autor da decisão (POST e banco).
@@ -211,10 +231,15 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 
 ### Riscos residuais (declarados, não resolvidos)
 
-- **Cegueira de origem é parcial.** Com a auto-rejeição a 100% e a fila a 7%, a maior parte das auditorias vem da
-  máquina: hoje, 100% (87 de 87); quando houver decisões de auditor real, ainda uma fração alta. Um revisor que sabe
-  disso tende a esperar "reprovada", o que puxa para concordar com a máquina e **subestima o falso positivo**. As
-  primeiras auditorias de produção são, todas, de auto-rejeitadas.
+- **Cegueira de origem é parcial no começo.** Hoje 100% das auditorias pendentes vêm da máquina (87 de 87), e as
+  primeiras auditorias de produção serão todas de auto-rejeitadas. Em regime a proporção cai: a fila a 7% de ~2.840
+  leituras por lote dá ~198 auditorias de fila, contra ~22 automáticas, uns 10%. Um revisor que sabe que as
+  automáticas são maioria no começo tende a esperar "reprovada", o que puxa para concordar com a máquina e
+  **subestima o falso positivo** (ver a definição de erro acima).
+- **404 depois de uma reserva válida.** Se a máquina reabre a leitura enquanto o revisor está com a auditoria, ela é
+  invalidada e o POST dele dá a recusa única, o que só acontece com item automático. Mitigado: `_redecidivel` não
+  reabre leitura com auditoria pendente reservada (o `recalcular_decisao` e a troca de detector pulam a leitura
+  enquanto a reserva vale, 10 min). Resta o caso de a reserva vencer no meio da decisão.
 - **Inferência pela observação ao longo do tempo.** O revisor vê lote, linha e medidores no item. Varrendo
   `/fila-humana` ao longo do dia, ele vê quais leituras de um lote estiveram na fila; uma leitura que nunca apareceu
   lá e surge na auditoria é, com alta chance, uma auto-rejeitada. `/leituras/{id}` não ajuda (decisão oculta), mas a
@@ -222,6 +247,15 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 - **Conluio.** Auditor com auditor (um conta ao outro o que decidiu); supervisor com auditor (o supervisor vê
   `por_status` em `/metricas/qualidade` e `/metricas/drift`, que num lote pequeno entrega a decisão de uma leitura);
   admin (vê tudo). O desenho fecha o vazamento por canal técnico para quem audita, não o canal social.
+- **Ritmo de chegada.** As automáticas nascem em rajada, quando um lote é triado ou recalculado; itens novos que
+  surgem de uma vez logo depois de uma triagem são, com boa chance, automáticos. O identificador opaco e a ordem por
+  hash tiram o sinal de cada item, não o do momento.
+- **Aparência da foto.** Uma foto obviamente ruim (escura, sem foco) foi provavelmente auto-rejeitada; uma foto boa
+  veio provavelmente da fila. É o próprio objeto julgado, e não tem como ser escondido.
+- **Nota e quarentena** (ver acima): correlacionadas com a origem, mantidas no item porque o revisor precisa delas.
+- **Escopo do que os gates bloqueiam.** O desenho fecha o que revela a decisão ou a origem de forma direta (status,
+  histórico, scores, contagens por lote, ids, mensagens de erro, ordem de entrega). O que fica nesta lista é inferência
+  estatística fraca ou canal social.
 
 ## Desvios do plano
 
@@ -230,10 +264,13 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 2. **Contador "não aplicável".** O aceite pede o número de rótulos contra os 600; o M8 mostra "0 de 600" com o
    motivo, mas declara o contador não aplicável à heurística, que não tem zona de aprovação com erro baixo.
 3. **Só o papel auditor audita** (decisão pendente acima).
-4. **T-M8-07 com duas taxas.** O plano pede 5% a 10% dos itens decididos; a fila segue nessa faixa, mas as
+4. **Auditoria decidida de decisão reaberta continua no bloco.** A máquina pode reabrir e decidir de novo a mesma
+   leitura; a auditoria já decidida da decisão antiga fica valendo, com a unidade "uma leitura por (detector,
+   política), a auditoria decidida mais antiga".
+5. **T-M8-07 com duas taxas.** O plano pede 5% a 10% dos itens decididos; a fila segue nessa faixa, mas as
    auto-rejeitadas são auditadas a 100% (`AUDITORIA_TAXA_AUTO_REJEITADA`, decisão do Davi) para medir o falso positivo
    da única decisão automática ligada. As decisões da máquina também entram na auditoria, o que o plano não previa.
-5. Drift (plano 04, §7.1):
+6. Drift (plano 04, §7.1):
    - a referência é a baseline fixa, não a média móvel dos últimos 5 lotes: só existem 4 lotes, e a média móvel
      misturaria o lote de teste de julho na própria referência;
    - a baseline contém os próprios lotes de maio: o desvio deles é contra um agregado que os inclui (por isso
@@ -246,7 +283,7 @@ p_ruim**. Os rótulos de produção não são escolhidos pelo score, mas os prim
 
 ## Migração editada no lugar
 
-A `e4b7c2a9d815` foi editada no lugar três vezes durante os gates (nunca foi publicada). **Todo banco que aplicou uma
+A `e4b7c2a9d815` foi editada no lugar quatro vezes durante os gates (a última acrescenta `codigo`) (nunca foi publicada). **Todo banco que aplicou uma
 versão anterior dela precisa de `alembic downgrade c3e1a7d9f204` seguido de `alembic upgrade head`**; o upgrade
 sozinho não faz nada, porque a revisão já consta como aplicada. O downgrade funciona nas duas versões (os índices saem
 com a tabela, sem `drop_index` explícito); ele apaga os rótulos `producao` e as auditorias, e o upgrade recria os
@@ -259,7 +296,8 @@ assim no `inspecao_m8`.
 - `sinais.classes_ativas` (distribuição das classes no drift) deve usar `politica.chaves`.
 - `jobs/cli.py`, `--politica default=POLITICA_ATUAL`, fica resolvido pelo M7.
 - `qualidade.LOTES_DE_TESTE` recebe os lotes de teste do detector do M7.
-- `_sair_da_triagem` (handlers) ja sorteia a decisao automatica; com o M7, a v2 tambem passa por ali.
+- `estados.transicionar` já sorteia toda decisão automática gravada; com o M7, as decisões da v2 passam por ali sem
+  mudança, e caem num estrato próprio (`qualidade@v1 · politica@v2`).
 - A baseline do drift troca junto com o detector.
 
 ## Fora do escopo do M8

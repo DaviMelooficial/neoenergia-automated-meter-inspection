@@ -1,0 +1,386 @@
+{
+ "rodada": "20261016-213656",
+ "semente_escolhida": 0,
+ "limiar_rejeita": 0.976,
+ "modelo_por_semente": {
+  "0": {
+   "legivel": {
+    "n": 83,
+    "f1_legivel": 0.8,
+    "f1_ilegivel": 0.7323943661971831,
+    "macro_f1": 0.7661971830985916,
+    "pr_auc_ilegivel": 0.8668800696634102,
+    "auroc": 0.8719153936545242,
+    "acuracia": 0.7710843373493976,
+    "acuracia_ic95": [
+     0.6699,
+     0.8483
+    ],
+    "matriz_confusao": {
+     "linhas_real": [
+      "legivel",
+      "ilegivel"
+     ],
+     "colunas_previsto": [
+      "legivel",
+      "ilegivel"
+     ],
+     "valores": [
+      [
+       38,
+       8
+      ],
+      [
+       11,
+       26
+      ]
+     ]
+    }
+   },
+   "rejeicao": {
+    "rejeitadas": 3,
+    "cobertura": 0.03571428571428571,
+    "falsos_positivos": 0,
+    "precisao": 1.0,
+    "precisao_ic95": [
+     0.4385,
+     1.0
+    ],
+    "erro_sup95": 0.6315968501359612
+   },
+   "cobertura_max_zero_fp": 0.16666666666666666,
+   "cena": {
+    "n": 83,
+    "macro_f1": 0.38571428571428573,
+    "f1_por_classe": {
+     "digital": 0.9,
+     "eletromecanico": 0.14285714285714285,
+     "ocorrencia": 0.5,
+     "nao_medidor": 0.0
+    },
+    "suporte": {
+     "digital": 70,
+     "eletromecanico": 9,
+     "ocorrencia": 3,
+     "nao_medidor": 1
+    }
+   },
+   "defeitos_informativo": {
+    "reflexo": {
+     "positivos": 39,
+     "n": 80,
+     "f1": 0.13953488372093023,
+     "auroc": 0.5603502188868043
+    },
+    "fora_de_foco": {
+     "positivos": 29,
+     "n": 77,
+     "f1": 0.6274509803921569,
+     "auroc": 0.7456896551724138
+    },
+    "tampa_suja": {
+     "positivos": 14,
+     "n": 80,
+     "f1": 0.23529411764705882,
+     "auroc": 0.6731601731601732
+    },
+    "enquadramento": {
+     "positivos": 20,
+     "n": 79,
+     "f1": 0.3333333333333333,
+     "auroc": 0.6372881355932203
+    },
+    "display_apagado": {
+     "positivos": 4,
+     "n": 84,
+     "f1": 0.0,
+     "auroc": 0.621875
+    }
+   }
+  },
+  "1": {
+   "legivel": {
+    "n": 83,
+    "f1_legivel": 0.8247422680412371,
+    "f1_ilegivel": 0.7536231884057971,
+    "macro_f1": 0.7891827282235171,
+    "pr_auc_ilegivel": 0.8533473604224511,
+    "auroc": 0.8748531139835488,
+    "acuracia": 0.7951807228915663,
+    "acuracia_ic95": [
+     0.6962,
+     0.868
+    ],
+    "matriz_confusao": {
+     "linhas_real": [
+      "legivel",
+      "ilegivel"
+     ],
+     "colunas_previsto": [
+      "legivel",
+      "ilegivel"
+     ],
+     "valores": [
+      [
+       40,
+       6
+      ],
+      [
+       11,
+       26
+      ]
+     ]
+    }
+   },
+   "rejeicao": {
+    "rejeitadas": 0,
+    "cobertura": 0.0,
+    "falsos_positivos": 0,
+    "precisao": null,
+    "precisao_ic95": null,
+    "erro_sup95": null
+   },
+   "cobertura_max_zero_fp": 0.11904761904761904,
+   "cena": {
+    "n": 83,
+    "macro_f1": 0.35996721183496627,
+    "f1_por_classe": {
+     "digital": 0.9051094890510949,
+     "eletromecanico": 0.35294117647058826,
+     "ocorrencia": 0.18181818181818182,
+     "nao_medidor": 0.0
+    },
+    "suporte": {
+     "digital": 70,
+     "eletromecanico": 9,
+     "ocorrencia": 3,
+     "nao_medidor": 1
+    }
+   },
+   "defeitos_informativo": {
+    "reflexo": {
+     "positivos": 39,
+     "n": 80,
+     "f1": 0.32653061224489793,
+     "auroc": 0.6022514071294559
+    },
+    "fora_de_foco": {
+     "positivos": 29,
+     "n": 77,
+     "f1": 0.4888888888888889,
+     "auroc": 0.7370689655172413
+    },
+    "tampa_suja": {
+     "positivos": 14,
+     "n": 80,
+     "f1": 0.2,
+     "auroc": 0.5735930735930737
+    },
+    "enquadramento": {
+     "positivos": 20,
+     "n": 79,
+     "f1": 0.3333333333333333,
+     "auroc": 0.673728813559322
+    },
+    "display_apagado": {
+     "positivos": 4,
+     "n": 84,
+     "f1": 0.0,
+     "auroc": 0.7125
+    }
+   }
+  },
+  "2": {
+   "legivel": {
+    "n": 83,
+    "f1_legivel": 0.8367346938775511,
+    "f1_ilegivel": 0.7647058823529411,
+    "macro_f1": 0.8007202881152461,
+    "pr_auc_ilegivel": 0.8523901307160773,
+    "auroc": 0.8513513513513514,
+    "acuracia": 0.8072289156626506,
+    "acuracia_ic95": [
+     0.7096,
+     0.8777
+    ],
+    "matriz_confusao": {
+     "linhas_real": [
+      "legivel",
+      "ilegivel"
+     ],
+     "colunas_previsto": [
+      "legivel",
+      "ilegivel"
+     ],
+     "valores": [
+      [
+       41,
+       5
+      ],
+      [
+       11,
+       26
+      ]
+     ]
+    }
+   },
+   "rejeicao": {
+    "rejeitadas": 12,
+    "cobertura": 0.14285714285714285,
+    "falsos_positivos": 2,
+    "precisao": 0.8333333333333334,
+    "precisao_ic95": [
+     0.552,
+     0.953
+    ],
+    "erro_sup95": 0.43810543511531136
+   },
+   "cobertura_max_zero_fp": 0.09523809523809523,
+   "cena": {
+    "n": 83,
+    "macro_f1": 0.3194805194805195,
+    "f1_por_classe": {
+     "digital": 0.9142857142857143,
+     "eletromecanico": 0.0,
+     "ocorrencia": 0.36363636363636365,
+     "nao_medidor": 0.0
+    },
+    "suporte": {
+     "digital": 70,
+     "eletromecanico": 9,
+     "ocorrencia": 3,
+     "nao_medidor": 1
+    }
+   },
+   "defeitos_informativo": {
+    "reflexo": {
+     "positivos": 39,
+     "n": 80,
+     "f1": 0.1276595744680851,
+     "auroc": 0.4446529080675422
+    },
+    "fora_de_foco": {
+     "positivos": 29,
+     "n": 77,
+     "f1": 0.4186046511627907,
+     "auroc": 0.7600574712643678
+    },
+    "tampa_suja": {
+     "positivos": 14,
+     "n": 80,
+     "f1": 0.125,
+     "auroc": 0.4675324675324675
+    },
+    "enquadramento": {
+     "positivos": 20,
+     "n": 79,
+     "f1": 0.23076923076923078,
+     "auroc": 0.7067796610169491
+    },
+    "display_apagado": {
+     "positivos": 4,
+     "n": 84,
+     "f1": 0.0,
+     "auroc": 0.665625
+    }
+   }
+  }
+ },
+ "modelo_media_desvio": {
+  "legivel_macro_f1": "0.785 +- 0.018",
+  "legivel_pr_auc_ilegivel": "0.858 +- 0.008",
+  "legivel_auroc": "0.866 +- 0.013",
+  "cena_macro_f1": "0.355 +- 0.033",
+  "rejeicao_cobertura_teste": "0.060 +- 0.074",
+  "rejeicao_falsos_positivos_teste": [
+   0,
+   0,
+   2
+  ]
+ },
+ "v0": {
+  "n_teste_no_banco": 84,
+  "limiar_macro_f1_validacao": 0.07030616708410237,
+  "legivel": {
+   "n": 83,
+   "f1_legivel": 0.7142857142857143,
+   "f1_ilegivel": 0.5882352941176471,
+   "macro_f1": 0.6512605042016807,
+   "pr_auc_ilegivel": 0.623766047070287,
+   "auroc": 0.6703877790834312,
+   "acuracia": 0.6626506024096386,
+   "acuracia_ic95": [
+    0.5558,
+    0.7552
+   ],
+   "matriz_confusao": {
+    "linhas_real": [
+     "legivel",
+     "ilegivel"
+    ],
+    "colunas_previsto": [
+     "legivel",
+     "ilegivel"
+    ],
+    "valores": [
+     [
+      35,
+      11
+     ],
+     [
+      17,
+      20
+     ]
+    ]
+   }
+  },
+  "rejeicao_politica_v1": {
+   "rejeitadas": 1,
+   "cobertura": 0.011904761904761904,
+   "falsos_positivos": 0,
+   "precisao": 1.0,
+   "precisao_ic95": [
+    0.2065,
+    1.0
+   ],
+   "erro_sup95": 0.95
+  },
+  "cobertura_max_zero_fp": 0.047619047619047616,
+  "cobertura_base": 0.00761888081268062
+ },
+ "base_inteira": {
+  "leituras": 11419,
+  "rejeitadas": 425,
+  "cobertura": 0.0372186706366582,
+  "por_lote": {
+   "PSP_EXTRATLEITIMPL_030726_0121": {
+    "leituras": 2795,
+    "rejeitadas": 103
+   },
+   "PSP_EXTRATLEITIMPL_200526_0352": {
+    "leituras": 2922,
+    "rejeitadas": 117
+   },
+   "PSP_EXTRATLEITIMPL_210526_0335": {
+    "leituras": 2881,
+    "rejeitadas": 98
+   },
+   "PSP_EXTRATLEITIMPL_220526_0408": {
+    "leituras": 2821,
+    "rejeitadas": 107
+   }
+  },
+  "concordancia_com_v0": {
+   "ambos_rejeitam": 70,
+   "so_modelo": 355,
+   "so_v0": 17
+  },
+  "segundos_inferencia_mps": 29.5
+ },
+ "criterio_entrada": {
+  "E1_macro_f1_maior_que_v0": true,
+  "E2_zero_fp_no_teste": true,
+  "E3_cobertura_base_maior_ou_igual_v0": true,
+  "entra": true
+ }
+}

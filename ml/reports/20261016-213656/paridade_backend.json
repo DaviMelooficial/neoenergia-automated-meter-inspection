@@ -1,0 +1,19 @@
+{
+ "modelo": "qualidade@v1",
+ "onnx_sha256": "ab653b59e90e5e8e16637bc5ead99f1beac988df693291f724459b8e53304b72",
+ "politica": "politica@v2",
+ "fotos": 11419,
+ "max_dif_abs_p_ilegivel": 5.973881530785263e-06,
+ "p99_dif_abs": 3.3608787307581856e-06,
+ "fotos_acima_1e-4": 0,
+ "rejeitadas_backend": 425,
+ "rejeitadas_torch": 425,
+ "decisoes_diferentes": 0,
+ "latencia_ms_por_foto": {
+  "p50": 7.1852500550448895,
+  "p95": 9.05596271622926,
+  "media": 7.432977440738853,
+  "nota": "onnxruntime CPU 1 thread por chamada, 8 chamadas em paralelo"
+ },
+ "segundos_total": 10.9
+}

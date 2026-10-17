@@ -144,8 +144,9 @@ O aceite do M5 exige zero falso positivo confirmado por inspeção humana de 200
 Como fechar: qualquer `sim` no grupo `pior` com `decisao_v1 = rejeitar` é falso positivo, e o
 limiar sobe acima do `p_ruim` dessa foto. Se o grupo `limitrofe` vier todo `nao`, o limiar pode
 descer até o menor `p_ruim` sem nenhum `sim`. Nos dois casos o limiar novo entra como uma versão
-nova, `politica@v2` em `POLITICAS` (e `POLITICA_ATUAL` apontando para ela), seguida de
-`make recalcular-todos POLITICA=politica@v2`, sem reabrir imagem. **Nunca editar `POLITICA_V1` no
+nova em `POLITICAS`, com o próximo número livre (a `politica@v2` já é a do modelo do M7, então
+a próxima da heurística seria a `politica@v3`). Ela entra no `POLITICA_DO_DETECTOR` da
+`heuristica@v1` e depois roda `make recalcular-todos POLITICA=politica@v3`, sem reabrir imagem. **Nunca editar `POLITICA_V1` no
 lugar**: o histórico de status grava a versão que decidiu cada leitura, e mudar o limiar sob o
 mesmo nome tornaria esse registro falso.
 

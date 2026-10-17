@@ -414,6 +414,15 @@ export function PainelAuditoria({ a }: { a: ConcordanciaAuditoria }) {
           Contagens, série e detalhe por lote são só do admin.
         </Text>
       )}
+      {a.exclusao_incompleta.length > 0 && (
+        <Alert color="orange" title="⚠ Exclusão da calibração incompleta" data-testid="exclusao-incompleta">
+          <Text size="sm">
+            Nenhum rótulo importado em {a.exclusao_incompleta.join(", ")}: o falso positivo das auto-rejeições
+            ainda inclui fotos de calibração. Rode <code>make rotulos-importar</code> e{" "}
+            <code>make rotulos-importar-inspecao</code>.
+          </Text>
+        </Alert>
+      )}
       <Stack gap={2} data-testid="auditoria-auto">
         <Text size="xs" c="dimmed">
           Auto-rejeitadas de {a.auto_rejeitadas.detector} · {a.auto_rejeitadas.politica} ·{" "}

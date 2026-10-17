@@ -202,6 +202,8 @@ const autoLigada: AutoAprovacao = {
 };
 
 const auditoria: ConcordanciaAuditoria = {
+  rotulos_de_calibracao: { lab02: 500, a: 0, b: 0, desempate: 0, inspecao_m5: 0 },
+  exclusao_incompleta: ["inspecao_m5"],
   taxa_configurada: 0.07,
   min_pares: 10,
   detalhe: true,
@@ -343,6 +345,7 @@ describe("Metricas", () => {
     const cartao = within(painel).getByText("Concordância").parentElement!;
     expect(cartao).toHaveTextContent("75,0%");
     expect(within(painel).getByText("0,500")).toBeInTheDocument();
+    expect(within(painel).getByTestId("exclusao-incompleta")).toHaveTextContent("inspecao_m5");
     expect(within(painel).getByTestId("auditoria-auto")).toHaveTextContent(
       "12 auditadas, falso positivo 8,3% (até 33,9% com 95%). Alvo (precisão ≥ 99%) ainda não " +
         "sustentado: são precisas 473 auditorias com 1 erro(s).",

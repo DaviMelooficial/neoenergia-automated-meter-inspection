@@ -48,6 +48,9 @@ class Politica:
     limiar_aprova: float | None = None  # None = nunca auto-aprova (padrao ate M8)
     # Chaves da saida do detector que entram em p_ruim (o maior score entre elas).
     chaves: tuple[str, ...] = CLASSES
+    # Rodada de treino (ml/reports/<rodada>/) cujo modelo exportado esta politica calibrou.
+    # So para detector treinado: o DetectorOnnx recusa um contrato de outra rodada.
+    rodada: str | None = None
 
     def decidir(self, saida: Mapping[str, Any]) -> tuple[Decisao, float | None]:
         """Devolve (decisao, p_ruim). p_ruim = maior score entre as `chaves` presentes."""
@@ -77,6 +80,7 @@ POLITICA_V2 = Politica(
     modelo="qualidade@v1",
     limiar_rejeita=0.976,
     chaves=("ilegivel",),
+    rodada="20261016-213656",
 )
 
 POLITICAS: dict[str, Politica] = {p.versao: p for p in (POLITICA_V0, POLITICA_V1, POLITICA_V2)}
@@ -92,6 +96,39 @@ POLITICA_DO_DETECTOR: dict[str, Politica] = {
 
 def politica_para(modelo: str) -> Politica:
     return POLITICA_DO_DETECTOR.get(modelo, POLITICA_V0)
+
+
+def validar_contrato_onnx(contrato: Mapping[str, Any]) -> Politica:
+    """Confere o `qualidade.json` de um modelo exportado contra a politica registrada para
+    a versao que ele declara. Devolve a politica; levanta RuntimeError na divergencia.
+
+    Sem isso, exportar outra rodada por cima do .onnx (o sha bate, porque o json e regravado
+    junto) faria o worker aplicar o limiar de um modelo a outro e gravar os dois sob o mesmo
+    nome em `resultados_inferencia.modelo`. Rodada nova = versao nova (qualidade@v2) com a
+    politica nova dela (politica@v3) registrada aqui.
+    """
+    versao = contrato.get("versao")
+    politica = POLITICA_DO_DETECTOR.get(versao)
+    if politica is None or politica.rodada is None:
+        raise RuntimeError(
+            f"qualidade.json declara versao {versao!r}, sem politica calibrada para modelo "
+            "treinado em POLITICA_DO_DETECTOR"
+        )
+    divergencias = [
+        f"{campo}: contrato {contrato.get(campo)!r} != politica {esperado!r}"
+        for campo, esperado in (
+            ("rodada", politica.rodada),
+            ("limiar_rejeita", politica.limiar_rejeita),
+        )
+        if contrato.get(campo) != esperado
+    ]
+    if divergencias:
+        raise RuntimeError(
+            f"qualidade.json de {versao} nao e o modelo que {politica.versao} calibrou ("
+            + "; ".join(divergencias)
+            + "). Rodada nova exige versao nova do detector e politica nova."
+        )
+    return politica
 
 
 def obter(versao: str) -> Politica:

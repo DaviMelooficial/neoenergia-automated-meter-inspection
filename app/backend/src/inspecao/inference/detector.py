@@ -10,6 +10,7 @@ sem tocar em imagem.
 | DetectorOnnx        | M7    | modelo treinado via onnxruntime, qualidade_onnx.py |
 """
 
+import json
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -56,12 +57,33 @@ class DetectorHeuristico:
 DETECTORES = ("nulo", "heuristica", "onnx")
 
 
+def _escolha(settings: Settings) -> str:
+    return "onnx" if settings.modelo_qualidade_ativo else settings.detector_qualidade
+
+
+def nome_do_detector_configurado(settings: Settings) -> str:
+    """Nome (`<detector>@vN`) do detector que o worker carregaria, sem carregar o modelo:
+    para o ONNX, a `versao` do qualidade.json ao lado do .onnx."""
+    escolha = _escolha(settings)
+    if escolha == "nulo":
+        return DetectorNulo.nome
+    if escolha == "heuristica":
+        return DetectorHeuristico.nome
+    if escolha == "onnx":
+        contrato = settings.caminho_absoluto(settings.modelo_qualidade_path).with_suffix(".json")
+        if not contrato.is_file():
+            raise RuntimeError(f"modelo de qualidade ausente: {contrato}")
+        return json.loads(contrato.read_text(encoding="utf-8"))["versao"]
+    raise RuntimeError(f"DETECTOR_QUALIDADE={escolha!r}; use um de {list(DETECTORES)}")
+
+
 def carregar_detector(settings: Settings) -> Detector:
     """Escolhe o detector por configuracao. Chamado UMA vez por worker: o modelo ONNX
-    e carregado aqui e reaproveitado em todos os jobs.
+    e carregado aqui (com o contrato conferido contra a politica registrada, ver
+    `politica.validar_contrato_onnx`) e reaproveitado em todos os jobs.
 
     MODELO_QUALIDADE_ATIVO=true equivale a DETECTOR_QUALIDADE=onnx (nome antigo do M3)."""
-    escolha = "onnx" if settings.modelo_qualidade_ativo else settings.detector_qualidade
+    escolha = _escolha(settings)
     if escolha == "nulo":
         return DetectorNulo()
     if escolha == "heuristica":

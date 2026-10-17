@@ -12,9 +12,11 @@ import sys
 
 from sqlalchemy import select
 
+from inspecao.config import Settings, get_settings
 from inspecao.db import SessionLocal
 from inspecao.enums import TipoJob
 from inspecao.inference import politica as politica_mod
+from inspecao.inference.detector import nome_do_detector_configurado
 from inspecao.jobs import fila
 from inspecao.models import Lote
 
@@ -41,8 +43,16 @@ def reprocessar(nomes: list[str] | None) -> int:
     return _enfileirar_por_lote(nomes, TipoJob.REPROCESSAR_LOTE, {})
 
 
-def recalcular(nomes: list[str] | None, versao: str) -> int:
+def politica_padrao(settings: Settings) -> str:
+    """A politica do detector configurado (a mesma que o worker usaria), nao uma fixa:
+    recalcular com a v1 enquanto o worker roda o modelo desfaria a v2 em silencio."""
+    return politica_mod.politica_para(nome_do_detector_configurado(settings)).versao
+
+
+def recalcular(nomes: list[str] | None, versao: str | None) -> int:
+    versao = versao or politica_padrao(get_settings())
     politica_mod.obter(versao)  # falha aqui, nao no worker, se a versao nao existe
+    log.info("recalcular_decisao com %s", versao)
     return _enfileirar_por_lote(nomes, TipoJob.RECALCULAR_DECISAO, {"politica": versao})
 
 
@@ -64,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     for p in (rp, rc):
         p.add_argument("--lote", action="append", help="nome do lote (repetivel)")
         p.add_argument("--todos", action="store_true")
-    rc.add_argument("--politica", default=politica_mod.POLITICA_ATUAL.versao)
+    rc.add_argument("--politica", default=None, help="versao (padrao: a do detector configurado)")
     sub.add_parser("resumo", help="contagem de jobs por tipo e status")
     args = ap.parse_args(argv)
 

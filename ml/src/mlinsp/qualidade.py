@@ -43,7 +43,7 @@ MEDIA = modelo.MEDIA
 DESVIO = modelo.DESVIO
 # Cor do preenchimento do letterbox: a media do ImageNet, que vira ~0 depois de normalizar.
 PREENCHIMENTO = (124, 116, 104)  # round(MEDIA * 255)
-VERSAO = "qualidade@v1"
+VERSAO = "qualidade@v1"  # padrao do export_onnx; rodada nova exige --versao nova
 # Nome do defeito no ml (esquema do Lab 2) -> classe de qualidade do backend (plano 04, 1.1).
 DEFEITO_PARA_CLASSE = {
     "reflexo": "glare",

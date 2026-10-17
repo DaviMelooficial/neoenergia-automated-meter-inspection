@@ -121,12 +121,19 @@ def modelo_onnx(tmp_path):
         },
         "temperatura_legivel": 2.0,
         "temperatura_cena": 1.0,
+        "rodada": POLITICA_V2.rodada,
+        "limiar_rejeita": POLITICA_V2.limiar_rejeita,
     }
     caminho.with_suffix(".json").write_text(json.dumps(contrato))
     return caminho
 
 
-def test_preprocessamento_igual_ao_do_ml():
+def reescrever_contrato(caminho, **campos) -> None:
+    contrato = json.loads(caminho.with_suffix(".json").read_text())
+    caminho.with_suffix(".json").write_text(json.dumps(contrato | campos))
+
+
+def test_preprocessamento_igual_ao_do_ml_ate_1e6():
     x = preprocessar(textura_rgb()[..., ::-1].copy(), ENTRADA)  # o backend recebe BGR
     assert x.shape == (1, 3, 224, 224) and x.dtype == np.float32
     assert float(x.astype(np.float64).sum()) == pytest.approx(OURO_ML["soma"], abs=1e-6)
@@ -171,6 +178,34 @@ def test_recusa_onnx_que_nao_bate_com_o_hash_do_contrato(modelo_onnx):
     modelo_onnx.with_suffix(".json").write_text(json.dumps(contrato))
     with pytest.raises(RuntimeError, match="sha256"):
         DetectorOnnx(modelo_onnx)
+
+
+@pytest.mark.parametrize(
+    ("campos", "mensagem"),
+    [
+        ({"rodada": "20991231-000000"}, "rodada"),  # outra rodada exportada por cima
+        ({"limiar_rejeita": 0.5}, "limiar_rejeita"),
+        ({"versao": "heuristica@v1"}, "sem politica calibrada"),  # herdaria a politica@v1
+        ({"versao": "qualidade@v9"}, "sem politica calibrada"),  # versao sem politica
+    ],
+)
+def test_recusa_contrato_que_diverge_da_politica_registrada(modelo_onnx, campos, mensagem):
+    reescrever_contrato(modelo_onnx, **campos)
+    with pytest.raises(RuntimeError, match=mensagem):
+        DetectorOnnx(modelo_onnx)
+    with pytest.raises(RuntimeError, match=mensagem):
+        carregar_detector(Settings(detector_qualidade="onnx", modelo_qualidade_path=modelo_onnx))
+
+
+def test_recalcular_usa_a_politica_do_detector_configurado(modelo_onnx):
+    from inspecao.jobs.cli import politica_padrao
+
+    assert (
+        politica_padrao(Settings(detector_qualidade="onnx", modelo_qualidade_path=modelo_onnx))
+        == "politica@v2"
+    )
+    assert politica_padrao(Settings(detector_qualidade="heuristica")) == "politica@v1"
+    assert politica_padrao(Settings(detector_qualidade="nulo")) == "politica@v0"
 
 
 def test_recusa_modelo_sem_contrato(modelo_onnx):

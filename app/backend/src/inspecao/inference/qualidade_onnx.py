@@ -2,9 +2,11 @@
 
 O contrato vem de `qualidade.json`, gerado ao lado do `.onnx` por
 `ml/src/mlinsp/export_onnx.py`: pre-processamento, nomes das saidas, temperaturas e o
-sha256 do `.onnx`. O pre-processamento abaixo repete `mlinsp.qualidade.letterbox` e
-`normalizar` passo a passo; a paridade de ponta a ponta (backend gravando no banco contra
-o torch no ml) esta medida no report do M7.
+sha256 do `.onnx`, a rodada e o limiar, conferidos contra a politica registrada para a
+versao (`politica.validar_contrato_onnx`). O pre-processamento abaixo repete
+`mlinsp.qualidade.letterbox` e `normalizar` passo a passo, com diferenca de ate 1e-6 por
+pixel (tests/test_qualidade_onnx.py); a paridade de ponta a ponta (backend contra o torch
+no ml) esta medida no report do M7.
 
 Saida, no mesmo formato do heuristico (chaves de score no nivel de cima):
 - `ilegivel`: 1 - sigmoid(legivel / T), o score de decisao da politica@v2;
@@ -52,8 +54,8 @@ def preprocessar(bgr: np.ndarray, entrada: dict) -> np.ndarray:
     quadro[:] = entrada["preenchimento_rgb"]
     y0, x0 = (lado - nh) // 2, (lado - nw) // 2
     quadro[y0 : y0 + nh, x0 : x0 + nw] = peq
-    # Divisao (e nao multiplicacao por 1/255): e a conta que o torch fez no treino, e
-    # em float32 as duas diferem no ultimo bit.
+    # Divisao (e nao multiplicacao por 1/255): e a conta que o torch fez no treino; a
+    # multiplicacao em float32 acumulava 1e-2 de diferenca na soma do tensor.
     x = quadro.astype(np.float32) / np.float32(round(1 / entrada["escala"]))
     x = (x - np.asarray(entrada["media"], np.float32)) / np.asarray(entrada["desvio"], np.float32)
     return np.ascontiguousarray(x.transpose(2, 0, 1)[None])
@@ -79,6 +81,9 @@ class DetectorOnnx:
                 f"{caminho_onnx.name} nao e o modelo descrito em {caminho_json.name} "
                 f"(sha256 {obtido[:12]} != {self.contrato['onnx_sha256'][:12]})"
             )
+        from inspecao.inference.politica import validar_contrato_onnx
+
+        self.politica = validar_contrato_onnx(self.contrato)
         self.nome: str = self.contrato["versao"]
         opcoes = ort.SessionOptions()
         # Lote 1 em CPU: 1 thread por worker e o mais rapido (medido no Lab 2) e nao

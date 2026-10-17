@@ -11,7 +11,7 @@ import torch
 from mlinsp import modelo, qualidade
 from mlinsp.calibrate import limiar_zero_fp
 from mlinsp.evaluate import cobertura_maxima_zero_fp, metricas_legivel, rejeicao, wilson
-from mlinsp.export_onnx import exportar, paridade
+from mlinsp.export_onnx import exportar, paridade, versao_ja_usada
 
 RAIZ = Path(__file__).resolve().parents[2]
 
@@ -116,3 +116,11 @@ def test_exportacao_onnx_com_paridade(tmp_path):
 def test_todo_defeito_tem_classe_no_backend(d):
     assert qualidade.DEFEITO_PARA_CLASSE[d] in {
         "fora_de_foco", "glare", "tampa_suja", "enquadramento_incorreto", "display_apagado"}
+
+
+def test_rodada_nova_nao_reusa_versao_ja_exportada(tmp_path):
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "qualidade.json").write_text('{"versao": "qualidade@v1", "rodada": "r1"}')
+    assert versao_ja_usada(tmp_path, "qualidade@v1", "r2") == "r1"
+    assert versao_ja_usada(tmp_path, "qualidade@v1", "r1") is None  # reexportar a mesma
+    assert versao_ja_usada(tmp_path, "qualidade@v2", "r2") is None

@@ -21,13 +21,26 @@ Criterio de alerta (desvio = valor do lote - valor da baseline):
 - zona cinzenta (proxy de fabricante ou aparencia nova): fracao com 0,5 <= p_ruim <
   limiar_rejeita. Alerta com desvio > +10 p.p.
 
-Complemento, carta p com sobredispersao (para as fracoes: classes, auto-rejeicao, zona
-cinzenta): z = (p_lote - p_base) / sqrt(phi * p_base * (1 - p_base) / n_lote), com phi =
-qui-quadrado de Pearson / (k - 1) entre os k lotes da baseline (minimo 1). Alerta com
-|z| > 3. Motivo: o limiar absoluto de 10 p.p. e cego para taxas de 1% a 5% (a
-auto-rejeicao fica em 0,8%, com erro-padrao de ~0,17 p.p. por lote); e os lotes de maio
-ja diferem entre si alem do binomial (qui-quadrado ~9,8 com 2 g.l., p ~0,007), o que o
-phi absorve para a carta nao alarmar por variacao normal entre lotes.
+Complemento, carta p (para as fracoes: classes, auto-rejeicao, zona cinzenta):
+z = (p_lote - p_base) / sqrt(phi * p_base * (1 - p_base) * (1/n_lote + 1/n_base)). O termo
+1/n_base conta a incerteza da propria baseline; para um lote que esta na baseline os dois
+nao sao independentes, e o z dele so serve de referencia. Alerta com |z| > 3. Motivo: o
+limiar absoluto de 10 p.p. e cego para taxas de 1% a 5% (a auto-rejeicao fica em 0,8%,
+com erro-padrao de ~0,17 p.p. por lote).
+
+phi (sobredispersao) = qui-quadrado de Pearson / (k - 1) entre os k lotes da baseline,
+minimo 1, e SO e aplicado com k >= 5 lotes (`MIN_LOTES_PHI`); abaixo disso a carta usa
+phi = 1 e publica o estimado a parte. Com os 3 lotes de maio o phi da auto-rejeicao sai
+4,95 (qui-quadrado ~9,9 com 2 g.l., p ~0,007), mas com 2 g.l. o intervalo de 95% dele vai
+de ~1,3 a ~195: aplica-lo deixaria o limite de alerta oscilando com cada lote novo (~1,87%
+contra ~1,27% com phi = 1, na auto-rejeicao). Com phi = 1 a carta pode alarmar pela
+variacao normal entre lotes, que os lotes de maio mostram existir; o alerta da carta e um
+convite a olhar, nao um veredito.
+
+Pontos cegos declarados: `glare` tem p_base = 0 (a heuristica quase nunca da score >= 0,5
+para reflexo), e a carta nao calcula z com p_base 0; `fora_de_foco` e
+`enquadramento_incorreto` sao o mesmo sinal na heuristica (ambos limitados pelo score de
+foco), entao um alerta num aparece no outro e conta uma vez so como evidencia.
 
 Desvios do plano, conscientes: (1) a referencia e a baseline fixa, e nao a media
 movel dos ultimos 5 lotes: so existem 4 lotes, e a media movel sobre eles misturaria
@@ -63,6 +76,7 @@ LOTES_SEGUIDOS_CONFIANCA = 2
 SUBIDA_DISCORDANCIA = 0.10
 SUBIDA_ZONA_CINZENTA = 0.10
 Z_CARTA_P = 3.0
+MIN_LOTES_PHI = 5
 
 CRITERIO: dict[str, Any] = {
     "min_fotos": MIN_FOTOS,
@@ -77,6 +91,7 @@ CRITERIO: dict[str, Any] = {
     "subida_discordancia": SUBIDA_DISCORDANCIA,
     "subida_zona_cinzenta": SUBIDA_ZONA_CINZENTA,
     "z_carta_p": Z_CARTA_P,
+    "min_lotes_phi": MIN_LOTES_PHI,
 }
 
 
@@ -165,10 +180,10 @@ def _sobredispersao(contagens: list[tuple[int, int]]) -> float:
     return max(1.0, chi2 / (len(validos) - 1))
 
 
-def _z(k: int, n: int, p_base: float | None, phi: float) -> float | None:
-    if not n or p_base is None or p_base in (0.0, 1.0):
+def _z(k: int, n: int, p_base: float | None, n_base: int, phi: float) -> float | None:
+    if not n or not n_base or p_base is None or p_base in (0.0, 1.0):
         return None
-    return (k / n - p_base) / math.sqrt(phi * p_base * (1 - p_base) / n)
+    return (k / n - p_base) / math.sqrt(phi * p_base * (1 - p_base) * (1 / n + 1 / n_base))
 
 
 # fracao -> (contagem, denominador) num Acumulado; a carta p vale para estas
@@ -198,10 +213,12 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
         for nome, f in _fracoes_contaveis().items()
         if tem_limiar or nome.startswith("classe:")
     }
-    phi = {
+    phi_estimado = {
         nome: _sobredispersao([f(acumulados.get(lote.id, Acumulado())) for lote in na_baseline])
         for nome, f in contaveis.items()
     }
+    usa_phi = len(na_baseline) >= MIN_LOTES_PHI
+    phi = {nome: (v if usa_phi else 1.0) for nome, v in phi_estimado.items()}
 
     serie: list[dict[str, Any]] = []
     seguidos_rejeicao = 0
@@ -228,7 +245,8 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
                 else bloco[nome]
             )
             k, n = f_contagem(a)
-            s["z"] = _z(k, n, s["baseline"], phi[nome]) if fb else None
+            n_base = f_contagem(base)[1]
+            s["z"] = _z(k, n, s["baseline"], n_base, phi[nome]) if fb else None
         if not suficiente:
             seguidos_rejeicao = seguidos_confianca = 0
         else:
@@ -298,6 +316,7 @@ def calcular(db: Session, politica: Politica, lotes_baseline: list[str]) -> dict
             "n_pares_discordancia": base.pares.n,
             "valores": fb,
             "sobredispersao": phi,
+            "sobredispersao_estimada": phi_estimado,
         },
         "serie": serie,
     }

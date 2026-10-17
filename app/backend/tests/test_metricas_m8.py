@@ -336,25 +336,77 @@ def test_criterio_de_alerta_publicado(client, contas, serie_drift):
     ]
     assert c["desvio_classe"] == 0.10 and c["lotes_seguidos_rejeicao"] == 3
     assert math.isclose(c["queda_confianca"], 0.05) and c["z_carta_p"] == 3.0
+    assert c["min_lotes_phi"] == 5
 
 
-def test_drift_carta_p_com_sobredispersao(client, db_session, contas, monkeypatch):
-    """Baseline com 2 lotes de 100 fotos (0 e 4 rejeitadas): p = 0,02 e phi = 4/0,98. Um
-    lote com 8/100 desvia 6 p.p. (abaixo dos 10 p.p. absolutos); sem phi seria z = 4,3, com
-    phi e 2,1: nao alerta. Um lote com 14/100 (z = 4,2 com phi) alerta pela carta p."""
+def _lotes_rejeicao(db_session, monkeypatch, rejeitadas, n_baseline):
+    """Um lote de 100 fotos por contagem de rejeitadas; os `n_baseline` primeiros sao a
+    baseline."""
     monkeypatch.setattr(drift, "MIN_FOTOS", 10)
-    lotes = [fx.lote(db_session, f"1{i}26_0002", date(2026, 1, i + 1)) for i in range(4)]
-    monkeypatch.setattr(get_settings(), "drift_lotes_baseline", [lt.nome for lt in lotes[:2]])
-    for lt, rejeitadas in zip(lotes, (0, 4, 8, 14), strict=True):
+    lotes = [
+        fx.lote(db_session, f"1{i}26_0002", date(2026, 1, i + 1)) for i in range(len(rejeitadas))
+    ]
+    nomes = [lt.nome for lt in lotes[:n_baseline]]
+    monkeypatch.setattr(get_settings(), "drift_lotes_baseline", nomes)
+    for lt, k in zip(lotes, rejeitadas, strict=True):
         for i in range(100):
-            fx.leitura(db_session, lt, S.FILA_HUMANA, fx.scores(0.9 if i < rejeitadas else 0.0))
+            fx.leitura(db_session, lt, S.FILA_HUMANA, fx.scores(0.9 if i < k else 0.0))
     db_session.commit()
+
+
+def test_drift_carta_p_sem_phi_abaixo_de_5_lotes(client, db_session, contas, monkeypatch):
+    """Baseline de 2 lotes (0 e 4 de 100): phi estimado 4/0,98, mas aplicado 1. Com a
+    variancia da baseline (1/100 + 1/200), 8/100 da z = 3,50: alerta pela carta p com
+    desvio de so 6 p.p.; 3/100 da z = 0,58: nao alerta."""
+    _lotes_rejeicao(db_session, monkeypatch, (0, 4, 8, 3), n_baseline=2)
     d = client.get("/metricas/drift", headers=login(client, contas["supervisor"])).json()
-    phi = d["baseline"]["sobredispersao"]["taxa_auto_rejeicao"]
-    assert phi == pytest.approx(4 / 0.98)
+    assert d["baseline"]["sobredispersao_estimada"]["taxa_auto_rejeicao"] == pytest.approx(4 / 0.98)
+    assert d["baseline"]["sobredispersao"]["taxa_auto_rejeicao"] == 1.0
     l3 = d["lotes"][2]["sinais"]["taxa_auto_rejeicao"]
     l4 = d["lotes"][3]["sinais"]["taxa_auto_rejeicao"]
-    assert l3["z"] == pytest.approx(0.06 / math.sqrt(phi * 0.02 * 0.98 / 100))
-    assert not l3["alerta"] and abs(l3["desvio"]) < 0.10
-    assert l4["z"] > 3 and l4["alerta"] and l4["desvio"] == pytest.approx(0.12)
-    assert any(a.startswith("carta p, taxa_auto_rejeicao") for a in d["lotes"][3]["alertas"])
+    esperado = 0.06 / math.sqrt(0.02 * 0.98 * (1 / 100 + 1 / 200))
+    assert l3["z"] == pytest.approx(esperado) and esperado > 3
+    assert l3["alerta"] and l3["desvio"] == pytest.approx(0.06)
+    assert any(a.startswith("carta p, taxa_auto_rejeicao") for a in d["lotes"][2]["alertas"])
+    assert l4["z"] == pytest.approx(0.01 / math.sqrt(0.02 * 0.98 * (1 / 100 + 1 / 200)))
+    assert not l4["alerta"]
+
+
+def test_drift_carta_p_com_phi_a_partir_de_5_lotes(client, db_session, contas, monkeypatch):
+    """Baseline de 5 lotes (0, 4, 0, 4, 2 de 100): p = 0,02, phi = (4 * 4/1,96) / 4 = 2,04,
+    aplicado. O mesmo 8/100 agora da z = 2,74: nao alerta."""
+    _lotes_rejeicao(db_session, monkeypatch, (0, 4, 0, 4, 2, 8), n_baseline=5)
+    d = client.get("/metricas/drift", headers=login(client, contas["supervisor"])).json()
+    phi = d["baseline"]["sobredispersao"]["taxa_auto_rejeicao"]
+    assert phi == pytest.approx(4 * (4 / 1.96) / 4)
+    s = d["lotes"][5]["sinais"]["taxa_auto_rejeicao"]
+    assert s["z"] == pytest.approx(0.06 / math.sqrt(phi * 0.02 * 0.98 * (1 / 100 + 1 / 500)))
+    assert s["z"] < 3 and not s["alerta"]
+
+
+def test_lab02_de_detector_treinado_depende_do_split_dele(
+    client, db_session, contas, cenario, monkeypatch
+):
+    """Detector treinado sem lotes de teste declarados: sem concordancia contra o Lab 2
+    (nada de recorte por DRIFT_LOTES_BASELINE). Com os lotes declarados, so eles entram."""
+    from inspecao.inference import politica as politica_mod
+    from inspecao.inference.politica import Politica
+    from inspecao.monitoramento import qualidade as qualidade_mod
+
+    p = Politica(versao="politica@teste-treinada", modelo="heuristica@treinada", limiar_rejeita=0.5)
+    monkeypatch.setitem(politica_mod.POLITICAS, p.versao, p)
+    for lt in (cenario["a"], cenario["b"]):
+        _, foto = fx.leitura(db_session, lt, S.FILA_HUMANA, fx.scores(0.9), modelo=p.modelo)
+        _lab02(db_session, foto.id, False)
+    db_session.commit()
+    cab = login(client, contas["supervisor"])
+
+    def lab02():
+        q = client.get("/metricas/qualidade", params={"politica": p.versao}, headers=cab).json()
+        return next(c for c in q["concordancia_maquina_humano"] if c["fonte"] == "lab02")
+
+    sem_split = lab02()
+    assert sem_split["n"] == 0 and "pendente da integracao com o M7" in sem_split["escopo"]
+    monkeypatch.setitem(qualidade_mod.LOTES_DE_TESTE, p.modelo, (cenario["b"].nome,))
+    com_split = lab02()
+    assert com_split["n"] == 1 and com_split["escopo"] == "so os lotes de teste do detector"

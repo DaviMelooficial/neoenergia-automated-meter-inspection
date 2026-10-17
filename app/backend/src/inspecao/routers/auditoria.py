@@ -1,4 +1,11 @@
-"""Auditoria amostral (marco M8): segundo revisor cego. Regras em `inspecao.auditoria`."""
+"""Auditoria amostral (marco M8): segundo revisor cego. Regras em `inspecao.auditoria`.
+
+So o papel `auditor` audita (403 constante para supervisor e admin, que leem as
+metricas). Toda outra recusa em `/auditoria/{id}/*` e a mesma resposta, 404
+`AUDITORIA_INDISPONIVEL`: "nao existe", "a decisao e sua", "ja decidida", "reservada por
+outro" e falha de gravacao nao se distinguem, para o primeiro revisor nao descobrir que
+foi sorteado. A validacao do corpo (422) vem antes e nao depende da auditoria.
+"""
 
 from datetime import UTC, datetime
 from typing import Annotated
@@ -11,26 +18,32 @@ from sqlalchemy.orm import Session
 from inspecao import auditoria as servico
 from inspecao.auth.deps import Auditor
 from inspecao.db import get_db
-from inspecao.enums import DecisaoHumana, MotivoReprovacao
-from inspecao.models import AuditoriaAmostral
+from inspecao.enums import DecisaoHumana, MotivoReprovacao, Papel
+from inspecao.models import AuditoriaAmostral, Usuario
 from inspecao.rotulagem import producao
-from inspecao.rotulagem.servico import eh_admin
 from inspecao.routers.operacao import carregar_leitura, leitura_completa
 from inspecao.schemas import AuditoriaDecisaoOut, DecisaoIn, ItemAuditoriaOut, QuarentenaCegaOut
 
 router = APIRouter(prefix="/auditoria", tags=["auditoria"])
 DB = Annotated[Session, Depends(get_db)]
-PROPRIA_DECISAO = "o primeiro revisor nao audita a propria decisao"
-ADMIN_NAO_AUDITA = "admin ve a concordancia por par e por lote e por isso nao audita"
+SO_AUDITOR = "auditoria amostral e feita so pelo papel auditor"
+AUDITORIA_INDISPONIVEL = "auditoria indisponivel"
 
 
-def _barrar_admin(usuario) -> None:
-    if eh_admin(usuario):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, ADMIN_NAO_AUDITA)
+def _so_auditor(usuario: Usuario) -> None:
+    """Depende so do papel de quem chama, nunca da auditoria: nao e oraculo."""
+    if Papel(usuario.papel) is not Papel.AUDITOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, SO_AUDITOR)
+
+
+def _indisponivel(db: Session) -> HTTPException:
+    db.rollback()
+    return HTTPException(status.HTTP_404_NOT_FOUND, AUDITORIA_INDISPONIVEL)
 
 
 def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAuditoriaOut:
-    """Monta a lista fechada: sem status, historico, revisoes nem id da leitura."""
+    """Lista fechada, igual para as tres origens: sem status, historico, revisoes, scores
+    da maquina nem id da leitura."""
     completa = leitura_completa(db, carregar_leitura(db, auditoria.leitura_id))
     return ItemAuditoriaOut(
         auditoria_id=auditoria.id,
@@ -42,7 +55,6 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
         nota=completa.nota,
         foto_principal=completa.foto_principal,
         fotos=completa.fotos,
-        inferencias=completa.inferencias,
         quarentena=[
             QuarentenaCegaOut(tipo=q.tipo, severidade=q.severidade, detalhe=q.detalhe)
             for q in completa.quarentena
@@ -52,15 +64,27 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
     )
 
 
+def _travar_disponivel(db: Session, auditoria_id: int, usuario_id: int) -> AuditoriaAmostral:
+    """A auditoria travada se este usuario pode decidi-la ou libera-la agora; senao a
+    resposta unica. Mesma condicao do `/proxima` (`servico.livre_para`)."""
+    auditoria = db.scalar(
+        select(AuditoriaAmostral)
+        .where(AuditoriaAmostral.id == auditoria_id, servico.livre_para(usuario_id))
+        .with_for_update()
+    )
+    if auditoria is None:
+        raise _indisponivel(db)
+    return auditoria
+
+
 @router.post("/proxima", response_model=ItemAuditoriaOut)
 def proxima(db: DB, usuario: Auditor) -> ItemAuditoriaOut:
     """Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma
-    decisao dele mesmo, nunca uma reservada por outro revisor. Admin nao audita."""
-    _barrar_admin(usuario)
+    decisao dele mesmo, nunca uma reservada por outro revisor."""
+    _so_auditor(usuario)
     auditoria = servico.reservar_proxima(db, usuario.id)
     if auditoria is None:
-        db.rollback()
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "nenhuma auditoria pendente para voce")
+        raise _indisponivel(db)
     item = _item(db, auditoria, usuario.id)
     db.commit()
     return item
@@ -68,15 +92,13 @@ def proxima(db: DB, usuario: Auditor) -> ItemAuditoriaOut:
 
 @router.post("/{auditoria_id}/liberar", status_code=status.HTTP_204_NO_CONTENT)
 def liberar(auditoria_id: int, db: DB, usuario: Auditor) -> None:
-    auditoria = db.scalar(
-        select(AuditoriaAmostral).where(AuditoriaAmostral.id == auditoria_id).with_for_update()
-    )
-    if auditoria is None:
-        db.rollback()
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "auditoria nao encontrada")
-    if auditoria.reservado_por == usuario.id:
-        auditoria.reservado_por = None
-        auditoria.reservado_ate = None
+    """Devolve a reserva propria. Qualquer outro caso: a resposta unica."""
+    _so_auditor(usuario)
+    auditoria = _travar_disponivel(db, auditoria_id, usuario.id)
+    if auditoria.reservado_por != usuario.id:
+        raise _indisponivel(db)
+    auditoria.reservado_por = None
+    auditoria.reservado_ate = None
     db.commit()
 
 
@@ -88,43 +110,23 @@ def liberar(auditoria_id: int, db: DB, usuario: Auditor) -> None:
 def decidir(auditoria_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> AuditoriaDecisaoOut:
     """Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.
 
-    Vale aqui, e nao so no `/proxima`: o primeiro revisor recebe 403; auditoria ja
-    decidida ou reservada por outro revisor, 409. O banco repete a regra
-    (`ck_auditorias_segundo_revisor`), e a linha fica travada ate o commit.
+    A regra vale aqui, e nao so no `/proxima`: a auditoria tem de estar pendente, nao ser
+    decisao do proprio usuario e nao estar reservada por outro (lock da linha ate o
+    commit). O banco repete a regra (`ck_auditorias_segundo_revisor`, gatilho de
+    imutabilidade). Toda recusa e a resposta unica.
     """
-    _barrar_admin(usuario)
+    _so_auditor(usuario)
     if dados.decisao is DecisaoHumana.REPROVADA and dados.motivo is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "reprovacao exige motivo")
     if dados.decisao is DecisaoHumana.APROVADA and dados.motivo is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "aprovacao nao leva motivo")
 
-    auditoria = db.scalar(
-        select(AuditoriaAmostral).where(AuditoriaAmostral.id == auditoria_id).with_for_update()
-    )
-    if auditoria is None:
-        db.rollback()
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "auditoria nao encontrada")
-    if auditoria.revisor_original_id == usuario.id:
-        db.rollback()
-        raise HTTPException(status.HTTP_403_FORBIDDEN, PROPRIA_DECISAO)
-    if auditoria.decisao is not None:
-        db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "auditoria ja decidida")
-    agora = datetime.now(UTC)
-    reservada_por_outro = (
-        auditoria.reservado_por not in (None, usuario.id)
-        and auditoria.reservado_ate is not None
-        and auditoria.reservado_ate > agora
-    )
-    if reservada_por_outro:
-        db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "auditoria reservada por outro revisor")
-
+    auditoria = _travar_disponivel(db, auditoria_id, usuario.id)
     auditoria.revisor_id = usuario.id
     auditoria.decisao = dados.decisao.value
     auditoria.motivo = dados.motivo.value if dados.motivo else None
     auditoria.observacao = dados.observacao
-    auditoria.decidida_em = agora
+    auditoria.decidida_em = datetime.now(UTC)
     auditoria.reservado_por = None
     auditoria.reservado_ate = None
     try:
@@ -139,8 +141,7 @@ def decidir(auditoria_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Au
         )
         db.commit()
     except IntegrityError as erro:
-        db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "auditoria nao gravada") from erro
+        raise _indisponivel(db) from erro
     return AuditoriaDecisaoOut(
         auditoria_id=auditoria.id,
         decisao=DecisaoHumana(auditoria.decisao),

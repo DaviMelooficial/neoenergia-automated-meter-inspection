@@ -31,8 +31,9 @@ medida por zona de p_ruim feita cedo representa esse lote, nao os quatro.
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from inspecao.contas_teste import email_de_teste
 from inspecao.enums import DecisaoHumana, MotivoReprovacao, RodadaRotulagem
-from inspecao.models import Foto, Rotulo
+from inspecao.models import Foto, Rotulo, Usuario
 
 MOTIVO_PARA_COLUNA: dict[MotivoReprovacao, str] = {
     MotivoReprovacao.FORA_DE_FOCO: "fora_de_foco",
@@ -74,8 +75,13 @@ def registrar(
 
     Quem chama esta na transacao da decisao e faz o commit (ou o rollback, se o
     flush daqui violar um indice unico). Leitura sem foto principal nao gera rotulo:
-    o rotulo e da foto. Devolve o rotulo, ou None quando nao ha foto.
+    o rotulo e da foto. Decisao de conta de teste (`inspecao.contas_teste`: E2E, demo)
+    tambem nao: nao e evidencia, e nao gravar fecha a porta para um consumidor que
+    esqueca o filtro. Devolve o rotulo, ou None quando nao grava.
     """
+    email = db.scalar(select(Usuario.email).where(Usuario.id == usuario_id))
+    if email is None or email_de_teste(email):
+        return None
     foto_id = db.scalar(
         select(Foto.id).where(Foto.leitura_id == leitura_id, Foto.principal.is_(True))
     )

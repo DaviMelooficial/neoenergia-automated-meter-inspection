@@ -12,10 +12,11 @@ Create Date: 2026-10-17 10:00:00.000000
 2. `auditorias_amostrais`: item decidido sorteado para um segundo revisor. A
    regra "segundo revisor diferente do primeiro" vive tambem no banco
    (`ck_auditorias_segundo_revisor`), e nao so no endpoint.
-   `origem`: `fila` (decisao de auditor, com revisao e revisor original) ou
-   `auto_aprovada` (decisao da maquina, sem revisao nem revisor original). Decisao
-   gravada nao muda: o gatilho `trg_auditorias_decisao_imutavel` recusa UPDATE de
-   revisor, decisao, motivo, observacao ou data depois de decidida. DELETE fica
+   `origem`: `fila` (decisao de auditor, com revisao e revisor original),
+   `auto_aprovada` ou `auto_rejeitada` (decisao da maquina, sem revisao nem revisor
+   original). Decisao gravada nao muda: o gatilho `trg_auditorias_decisao_imutavel`
+   recusa UPDATE de revisor, decisao, motivo, observacao, data, leitura, revisao,
+   revisor original e origem depois de decidida. DELETE fica
    permitido: a auditoria so some junto com a leitura (cascata de reingestao com
    `--reprocessar`), como a revisao humana que ela confere.
 3. Backfill: cada revisao humana ja gravada vira um rotulo `producao`, com o mesmo
@@ -69,6 +70,10 @@ BEGIN
         OR NEW.motivo IS DISTINCT FROM OLD.motivo
         OR NEW.observacao IS DISTINCT FROM OLD.observacao
         OR NEW.decidida_em IS DISTINCT FROM OLD.decidida_em
+        OR NEW.leitura_id IS DISTINCT FROM OLD.leitura_id
+        OR NEW.revisao_id IS DISTINCT FROM OLD.revisao_id
+        OR NEW.revisor_original_id IS DISTINCT FROM OLD.revisor_original_id
+        OR NEW.origem IS DISTINCT FROM OLD.origem
     ) THEN
         RAISE EXCEPTION 'auditoria % ja decidida: decisao imutavel', OLD.id;
     END IF;
@@ -100,7 +105,7 @@ def upgrade() -> None:
     sa.Column('motivo', sa.String(length=40), nullable=True),
     sa.Column('observacao', sa.Text(), nullable=True),
     sa.Column('decidida_em', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id IS NOT NULL WHEN origem = 'auto_aprovada' THEN revisao_id IS NULL AND revisor_original_id IS NULL ELSE false END", name='ck_auditorias_origem'),
+    sa.CheckConstraint("CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id IS NOT NULL WHEN origem IN ('auto_aprovada', 'auto_rejeitada') THEN revisao_id IS NULL AND revisor_original_id IS NULL ELSE false END", name='ck_auditorias_origem'),
     sa.CheckConstraint('revisor_id IS NULL OR revisor_id <> revisor_original_id', name='ck_auditorias_segundo_revisor'),
     sa.CheckConstraint('reservado_por IS NULL OR reservado_por <> revisor_original_id', name='ck_auditorias_reserva_de_outro'),
     sa.CheckConstraint('(revisor_id IS NULL) = (decisao IS NULL) AND (decisao IS NULL) = (decidida_em IS NULL)', name='ck_auditorias_decisao_completa'),

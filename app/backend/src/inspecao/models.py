@@ -510,8 +510,8 @@ class AuditoriaAmostral(Base):
     __table_args__ = (
         CheckConstraint(
             "CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id "
-            "IS NOT NULL WHEN origem = 'auto_aprovada' THEN revisao_id IS NULL AND "
-            "revisor_original_id IS NULL ELSE false END",
+            "IS NOT NULL WHEN origem IN ('auto_aprovada', 'auto_rejeitada') THEN revisao_id "
+            "IS NULL AND revisor_original_id IS NULL ELSE false END",
             name="ck_auditorias_origem",
         ),
         CheckConstraint(
@@ -555,8 +555,9 @@ class AuditoriaAmostral(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     leitura_id: Mapped[int] = mapped_column(ForeignKey("leituras.id", ondelete="CASCADE"))
-    # fila: decisao de auditor (revisao e revisor original preenchidos); auto_aprovada:
-    # decisao da maquina, sem revisao nem revisor original (ck_auditorias_origem).
+    # fila: decisao de auditor (revisao e revisor original preenchidos); auto_aprovada e
+    # auto_rejeitada: decisao da maquina, sem revisao nem revisor original
+    # (ck_auditorias_origem).
     origem: Mapped[str] = mapped_column(String(20), default="fila", server_default="fila")
     revisao_id: Mapped[int | None] = mapped_column(
         ForeignKey("revisoes_humanas.id", ondelete="CASCADE"), nullable=True

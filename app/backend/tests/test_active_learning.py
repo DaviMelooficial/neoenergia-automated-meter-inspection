@@ -49,7 +49,9 @@ def test_mapeamento_da_decisao_para_o_esquema_v2(decisao, motivo, esperado):
     assert campos == dict.fromkeys(colunas) | esperado
 
 
-def test_decisao_na_fila_grava_rotulo_producao(client, db_session, contas, na_fila):
+def test_decisao_na_fila_grava_rotulo_producao(client, db_session, na_fila):
+    contas = fx.contas_reais(db_session)
+    db_session.commit()
     lei, foto = na_fila[0]
     cab = login(client, contas["auditor"])
     r = client.post(
@@ -69,7 +71,9 @@ def test_decisao_na_fila_grava_rotulo_producao(client, db_session, contas, na_fi
     )
 
 
-def test_rotulo_e_decisao_na_mesma_transacao(client, db_session, contas, na_fila):
+def test_rotulo_e_decisao_na_mesma_transacao(client, db_session, na_fila):
+    contas = fx.contas_reais(db_session)
+    db_session.commit()
     """Se o rotulo nao entra (indice unico por foto, rodada e usuario), a decisao
     tambem nao: 409, leitura continua na fila e nenhuma revisao nova."""
     lei, foto = na_fila[1]
@@ -101,6 +105,18 @@ def test_rotulo_e_decisao_na_mesma_transacao(client, db_session, contas, na_fila
         .select_from(HistoricoStatus)
         .where(HistoricoStatus.leitura_id == lei.id, HistoricoStatus.status == "aprovada_humano")
     )
+
+
+def test_decisao_de_conta_de_teste_nao_grava_rotulo(client, db_session, contas, na_fila):
+    """E2E/demo (@teste.com.br) decide normalmente, mas nao vira evidencia: sem rotulo."""
+    lei, foto = na_fila[2]
+    r = client.post(
+        f"/fila-humana/{lei.id}/decisao",
+        json={"decisao": "aprovada"},
+        headers=login(client, contas["auditor"]),
+    )
+    assert r.status_code == 201
+    assert _rotulos(db_session, foto.id) == []
 
 
 def test_rotulo_incompleto_so_na_rodada_producao(db_session, na_fila, contas):

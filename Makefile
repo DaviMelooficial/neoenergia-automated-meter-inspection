@@ -93,7 +93,7 @@ rotulos-exportar:  ## grava ml/artifacts/rotulos.csv consolidado por maioria (RO
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo
 
-auditoria-sortear:  ## sorteia para segundo revisor (5-10%) decisoes da fila sem sorteio e auto-aprovadas; idempotente
+auditoria-sortear:  ## sorteia para segundo revisor (5-10%) decisoes da fila sem sorteio, auto-aprovadas e auto-rejeitadas; idempotente
 	cd app/backend && uv run python -m inspecao.jobs.cli auditoria-sortear
 
 front-dev:  ## sobe o vite dev server

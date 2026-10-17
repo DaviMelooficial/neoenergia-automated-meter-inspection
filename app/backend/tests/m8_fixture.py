@@ -133,6 +133,7 @@ def contas_reais(db: Session) -> dict:
     return {
         "auditor": conta("auditora", Papel.AUDITOR),
         "auditor2": conta("auditor2", Papel.AUDITOR),
+        "auditor3": conta("auditor3", Papel.AUDITOR),
         "supervisor": conta("supervisora", Papel.SUPERVISOR),
         "admin": conta("admin", Papel.ADMIN),
     }

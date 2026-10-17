@@ -92,7 +92,7 @@ def leitura_completa(db: Session, leitura: Leitura) -> LeituraOut:
 
 
 @router.get("/lotes", response_model=list[LoteOut])
-def listar_lotes(db: DB, _: Auditor) -> list[LoteOut]:
+def listar_lotes(db: DB, usuario: Auditor) -> list[LoteOut]:
     lotes = db.scalars(select(Lote).order_by(Lote.data_extracao, Lote.nome)).all()
     contagens = db.execute(
         select(Leitura.lote_id, Leitura.status_atual, func.count()).group_by(
@@ -106,43 +106,50 @@ def listar_lotes(db: DB, _: Auditor) -> list[LoteOut]:
     for lote in lotes:
         item = LoteOut.model_validate(lote)
         item.por_status = por_lote.get(lote.id, {})
+        if not eh_admin(usuario):
+            item.por_status = juntar_decididas(item.por_status)
         saida.append(item)
     return saida
 
 
-# Decisoes finais que um segundo revisor poderia conferir (auditoria amostral, M8).
+def juntar_decididas(por_status: dict[str, int]) -> dict[str, int]:
+    """Para quem nao e admin, os status finais conferiveis viram uma chave `decidida`: a
+    contagem por lote, junto com o lote do item de auditoria, entregaria a decisao
+    anterior (lote de uma leitura so, ou diferenca antes e depois de liberar)."""
+    saida: dict[str, int] = {}
+    for status_, n in por_status.items():
+        chave = STATUS_OCULTO if status_ in DECISOES_OCULTAS else status_
+        saida[chave] = saida.get(chave, 0) + n
+    return saida
+
+
+# Decisoes que um segundo revisor pode conferir (auditoria amostral, M8): as humanas e as
+# da maquina (auto-aprovada, auto-rejeitada / rejeitada na qualidade).
 DECISOES_OCULTAS = {
     StatusLeitura.APROVADA_HUMANO.value,
     StatusLeitura.REPROVADA_HUMANO.value,
     StatusLeitura.AUTO_APROVADA.value,
+    StatusLeitura.AUTO_REJEITADA.value,
+    StatusLeitura.REJEITADA_QUALIDADE.value,
 }
 STATUS_OCULTO = "decidida"
 
 
 def ocultar_decisao(saida: LeituraOut, leitura: Leitura, usuario: Usuario) -> LeituraOut:
-    """Leitura com decisao final vista por quem nao a tomou nem e admin: status vira
-    `decidida`, saem as revisoes e as linhas de historico da decisao.
+    """Leitura decidida vista por quem nao a decidiu nem e admin: status vira `decidida`,
+    e saem revisoes, historico e inferencias (os scores entregariam a decisao e a origem
+    da maquina).
 
-    A regra vale para TODA leitura decidida, em auditoria ou nao: bloquear so as que
-    estao em auditoria faria do proprio bloqueio um oraculo de "esta leitura foi
-    sorteada", e um auditor varrendo ids acharia o item que tem para auditar. O custo e
-    pequeno: auditor e supervisor nao precisam ver a decisao alheia para trabalhar; admin
-    ve tudo e por isso nao audita.
+    Vale para TODA leitura decidida, em auditoria ou nao: bloquear so as que estao em
+    auditoria faria do proprio bloqueio um oraculo de "esta leitura foi sorteada". O custo
+    e pequeno: quem nao decidiu nao precisa da decisao para trabalhar; admin ve tudo e por
+    isso nao audita.
     """
     autores = {r.usuario_id for r in leitura.revisoes}
     if leitura.status_atual not in DECISOES_OCULTAS or usuario.id in autores or eh_admin(usuario):
         return saida
-    return saida.model_copy(
-        update={
-            "status_atual": STATUS_OCULTO,
-            "revisoes": [],
-            "historico": [
-                h
-                for h in saida.historico
-                if h.status not in DECISOES_OCULTAS and not h.ator.startswith("usuario:")
-            ],
-        }
-    )
+    oculto = {"status_atual": STATUS_OCULTO}
+    return saida.model_copy(update=oculto | {"revisoes": [], "historico": [], "inferencias": []})
 
 
 @router.get("/leituras/{leitura_id}", response_model=LeituraOut)

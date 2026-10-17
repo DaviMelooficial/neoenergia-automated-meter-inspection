@@ -47,12 +47,12 @@ ROTAS = [
 ]
 ORDEM = {Papel.AUDITOR: 1, Papel.SUPERVISOR: 2, Papel.ADMIN: 3}
 # Excecao a hierarquia: admin ve o kappa das rodadas cegas, entao nao rotula nelas.
-# Idem na auditoria amostral (M8): admin ve a concordancia por par e por lote.
-ADMIN_BARRADO = {
-    ("POST", "/rotulagem/proxima"),
-    ("POST", "/rotulagem/1"),
+ADMIN_BARRADO = {("POST", "/rotulagem/proxima"), ("POST", "/rotulagem/1")}
+# Auditoria amostral (M8): so o papel auditor audita; supervisor e admin leem as metricas.
+SO_AUDITOR = {
     ("POST", "/auditoria/proxima"),
     ("POST", "/auditoria/1/decisao"),
+    ("POST", "/auditoria/1/liberar"),
 }
 
 
@@ -70,7 +70,10 @@ def test_sem_token_da_401(client, contas, metodo, rota, minimo, corpo):
 def test_papel_contra_rota(client, contas, papel, metodo, rota, minimo, corpo):
     cab = login(client, contas[papel.value])
     status = chamar(client, metodo, rota, corpo, cab).status_code
-    if ORDEM[papel] < ORDEM[minimo] or (papel is Papel.ADMIN and (metodo, rota) in ADMIN_BARRADO):
+    barrado = (papel is Papel.ADMIN and (metodo, rota) in ADMIN_BARRADO) or (
+        papel is not Papel.AUDITOR and (metodo, rota) in SO_AUDITOR
+    )
+    if ORDEM[papel] < ORDEM[minimo] or barrado:
         assert status == 403, (papel, metodo, rota, status)
     else:
         # Autorizado: a rota pode devolver 404/409/422/501 pelo estado vazio do banco,

@@ -29,7 +29,6 @@ from typing import Any
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from inspecao.config import get_settings
 from inspecao.contas_teste import decidida_por_teste
 from inspecao.enums import StatusLeitura
 from inspecao.inference.politica import Politica
@@ -49,8 +48,12 @@ BUCKET_DO_STATUS = {st.value: b for b, sts in BUCKETS.items() for st in sts}
 TESTE = "decidida_conta_teste"
 BUCKET_DO_STATUS[TESTE] = TESTE
 # Detectores sem treino nem calibracao sobre o Lab 2 alem do limiar do M5. Para os
-# treinados (M7), a concordancia contra o Lab 2 so vale no lote de teste.
+# treinados (M7), a concordancia contra o Lab 2 so vale nos lotes de TESTE do proprio
+# detector, declarados aqui junto com ele (o contrato do modelo, `qualidade.json` do M7,
+# e quem os define). Detector treinado sem lotes de teste declarados: sem concordancia
+# contra o Lab 2, em vez de um recorte adivinhado.
 DETECTORES_SEM_TREINO = {"heuristica@v1", "nulo@v0"}
+LOTES_DE_TESTE: dict[str, tuple[str, ...]] = {}
 
 
 def _status():
@@ -166,18 +169,20 @@ def concordancia_maquina_humano(db: Session, politica: Politica) -> list[dict[st
     - `lab02`: o Lab 2 e o conjunto de calibracao do limiar do M5, logo DENTRO da
       amostra: o "zero falso positivo na rejeicao" vale por construcao, e e pelo mesmo
       motivo que o Lab 2 fica fora do contador da auto-aprovacao. Para detector treinado
-      (M7), so as fotos do lote de teste (fora de `DRIFT_LOTES_BASELINE`, treino e
-      validacao) entram.
+      (M7), so as fotos dos lotes de teste do detector (`LOTES_DE_TESTE`) entram.
     """
     resultados = sinais.ultimos_resultados(db, politica.modelo)
     escopo_lab02 = "dentro da amostra (calibracao do M5)"
     resultados_lab02 = resultados
     if politica.modelo not in DETECTORES_SEM_TREINO:
-        maio = set(
-            db.scalars(select(Lote.id).where(Lote.nome.in_(get_settings().drift_lotes_baseline)))
+        teste = LOTES_DE_TESTE.get(politica.modelo or "", ())
+        ids = set(db.scalars(select(Lote.id).where(Lote.nome.in_(teste)))) if teste else set()
+        resultados_lab02 = [r for r in resultados if r.lote_id in ids]
+        escopo_lab02 = (
+            "so os lotes de teste do detector"
+            if teste
+            else "split do detector nao declarado: pendente da integracao com o M7"
         )
-        resultados_lab02 = [r for r in resultados if r.lote_id not in maio]
-        escopo_lab02 = "so o lote de teste (fora de treino e validacao)"
     return [
         _concordancia(
             politica,

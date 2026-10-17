@@ -409,7 +409,10 @@ class BaselineDriftOut(BaseModel):
     n_pares_discordancia: int
     valores: ValoresBaselineOut | None
     sobredispersao: dict[str, float] = Field(
-        description="phi da carta p por fracao (qui-quadrado/(k-1) entre os lotes da baseline)"
+        description="phi APLICADO na carta p (1 com menos de min_lotes_phi lotes na baseline)"
+    )
+    sobredispersao_estimada: dict[str, float] = Field(
+        description="phi estimado entre os lotes da baseline (qui-quadrado/(k-1)), informativo"
     )
 
 
@@ -426,6 +429,7 @@ class CriterioDriftOut(BaseModel):
     subida_discordancia: float
     subida_zona_cinzenta: float
     z_carta_p: float
+    min_lotes_phi: int
 
 
 class DriftOut(BaseModel):
@@ -482,8 +486,9 @@ class QuarentenaCegaOut(BaseModel):
 
 
 class ItemAuditoriaOut(BaseModel):
-    """O que o segundo revisor recebe. Lista fechada (extra="forbid"): nada de status,
-    historico, revisao anterior nem id da leitura. O teste de vazamento confere."""
+    """O que o segundo revisor recebe, igual para as origens fila, auto_aprovada e
+    auto_rejeitada. Lista fechada (extra="forbid"): nada de status, historico, revisao
+    anterior, scores da maquina nem id da leitura. O teste de vazamento confere."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -496,7 +501,6 @@ class ItemAuditoriaOut(BaseModel):
     nota: NotaOut | None
     foto_principal: FotoOut | None
     fotos: list[FotoOut]
-    inferencias: list[InferenciaOut]
     quarentena: list[QuarentenaCegaOut]
     reservado_ate: datetime | None
     restantes: int
@@ -526,11 +530,12 @@ class TotalConcordanciaOut(MedidasConcordanciaOut):
     suprimido: bool
 
 
-class AutoAprovadasAuditoriaOut(BaseModel):
-    """Auditorias de leituras auto-aprovadas pela maquina: reprovada = erro da maquina."""
+class DecisaoAutomaticaAuditoriaOut(BaseModel):
+    """Auditorias de decisao da maquina. Erro: auto-aprovada reprovada pelo revisor, ou
+    auto-rejeitada aprovada pelo revisor (falso positivo)."""
 
     n: int | None
-    reprovadas_pelo_revisor: int | None
+    erros: int | None
     taxa_erro: float | None
     suprimido: bool
 
@@ -555,6 +560,7 @@ class ConcordanciaAuditoriaOut(BaseModel):
     pendentes: int | None
     decididas: int | None
     total: TotalConcordanciaOut
-    auto_aprovadas: AutoAprovadasAuditoriaOut
+    auto_aprovadas: DecisaoAutomaticaAuditoriaOut
+    auto_rejeitadas: DecisaoAutomaticaAuditoriaOut
     por_lote: list[ConcordanciaLoteOut]
     serie: list[ConcordanciaDiaOut]

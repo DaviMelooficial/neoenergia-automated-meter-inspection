@@ -12,11 +12,14 @@ Create Date: 2026-10-17 10:00:00.000000
 2. `auditorias_amostrais`: item decidido sorteado para um segundo revisor. A
    regra "segundo revisor diferente do primeiro" vive tambem no banco
    (`ck_auditorias_segundo_revisor`), e nao so no endpoint.
-   `origem`: `fila` (decisao de auditor, com revisao e revisor original),
-   `auto_aprovada` ou `auto_rejeitada` (decisao da maquina, sem revisao nem revisor
-   original). Decisao gravada nao muda: o gatilho `trg_auditorias_decisao_imutavel`
-   recusa UPDATE de revisor, decisao, motivo, observacao, data, leitura, revisao,
-   revisor original e origem depois de decidida. DELETE fica
+   A auditoria confere uma DECISAO, nao uma leitura: `fila` aponta a revisao do
+   auditor (`revisao_id`, unico) e `auto_aprovada`/`auto_rejeitada` apontam a linha do
+   historico em que a maquina decidiu (`historico_id`, unico). Uma leitura reaberta pela
+   maquina (recalcular, troca de detector) pode ter varias auditorias, uma por decisao;
+   a pendente da decisao antiga ganha `invalidada_em` e sai das medidas, a decidida fica.
+   Decisao gravada nao muda: o gatilho `trg_auditorias_decisao_imutavel` recusa UPDATE
+   de revisor, decisao, motivo, observacao, data, leitura, revisao, historico, revisor
+   original e origem depois de decidida. DELETE fica
    permitido: a auditoria so some junto com a leitura (cascata de reingestao com
    `--reprocessar`), como a revisao humana que ela confere.
 3. Backfill: cada revisao humana ja gravada vira um rotulo `producao`, com o mesmo
@@ -72,6 +75,7 @@ BEGIN
         OR NEW.decidida_em IS DISTINCT FROM OLD.decidida_em
         OR NEW.leitura_id IS DISTINCT FROM OLD.leitura_id
         OR NEW.revisao_id IS DISTINCT FROM OLD.revisao_id
+        OR NEW.historico_id IS DISTINCT FROM OLD.historico_id
         OR NEW.revisor_original_id IS DISTINCT FROM OLD.revisor_original_id
         OR NEW.origem IS DISTINCT FROM OLD.origem
     ) THEN
@@ -96,7 +100,9 @@ def upgrade() -> None:
     sa.Column('leitura_id', sa.BigInteger(), nullable=False),
     sa.Column('origem', sa.String(length=20), server_default='fila', nullable=False),
     sa.Column('revisao_id', sa.BigInteger(), nullable=True),
+    sa.Column('historico_id', sa.BigInteger(), nullable=True),
     sa.Column('revisor_original_id', sa.Integer(), nullable=True),
+    sa.Column('invalidada_em', sa.DateTime(timezone=True), nullable=True),
     sa.Column('sorteada_em', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('reservado_por', sa.Integer(), nullable=True),
     sa.Column('reservado_ate', sa.DateTime(timezone=True), nullable=True),
@@ -105,7 +111,8 @@ def upgrade() -> None:
     sa.Column('motivo', sa.String(length=40), nullable=True),
     sa.Column('observacao', sa.Text(), nullable=True),
     sa.Column('decidida_em', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id IS NOT NULL WHEN origem IN ('auto_aprovada', 'auto_rejeitada') THEN revisao_id IS NULL AND revisor_original_id IS NULL ELSE false END", name='ck_auditorias_origem'),
+    sa.CheckConstraint("CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id IS NOT NULL AND historico_id IS NULL WHEN origem IN ('auto_aprovada', 'auto_rejeitada') THEN historico_id IS NOT NULL AND revisao_id IS NULL AND revisor_original_id IS NULL ELSE false END", name='ck_auditorias_origem'),
+    sa.CheckConstraint('invalidada_em IS NULL OR decisao IS NULL', name='ck_auditorias_invalidada_pendente'),
     sa.CheckConstraint('revisor_id IS NULL OR revisor_id <> revisor_original_id', name='ck_auditorias_segundo_revisor'),
     sa.CheckConstraint('reservado_por IS NULL OR reservado_por <> revisor_original_id', name='ck_auditorias_reserva_de_outro'),
     sa.CheckConstraint('(revisor_id IS NULL) = (decisao IS NULL) AND (decisao IS NULL) = (decidida_em IS NULL)', name='ck_auditorias_decisao_completa'),
@@ -115,14 +122,16 @@ def upgrade() -> None:
     sa.CheckConstraint("decisao IS DISTINCT FROM 'aprovada' OR motivo IS NULL", name='ck_auditorias_aprovada_sem_motivo'),
     sa.ForeignKeyConstraint(['leitura_id'], ['leituras.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['revisao_id'], ['revisoes_humanas.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['historico_id'], ['historico_status.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['revisor_original_id'], ['usuarios.id'], ondelete='RESTRICT'),
     sa.ForeignKeyConstraint(['reservado_por'], ['usuarios.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['revisor_id'], ['usuarios.id'], ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('leitura_id', name='uq_auditorias_leitura'),
     sa.UniqueConstraint('revisao_id', name='uq_auditorias_revisao'),
+    sa.UniqueConstraint('historico_id', name='uq_auditorias_historico'),
     )
-    op.create_index('ix_auditorias_pendentes', 'auditorias_amostrais', ['sorteada_em', 'id'], unique=False, postgresql_where='decisao IS NULL')
+    op.create_index('ix_auditorias_leitura', 'auditorias_amostrais', ['leitura_id'], unique=False)
+    op.create_index('ix_auditorias_pendentes', 'auditorias_amostrais', ['sorteada_em', 'id'], unique=False, postgresql_where='decisao IS NULL AND invalidada_em IS NULL')
 
     op.add_column('rotulos', sa.Column('auditoria_id', sa.BigInteger(), nullable=True))
     op.create_foreign_key('fk_rotulos_auditoria', 'rotulos', 'auditorias_amostrais', ['auditoria_id'], ['id'], ondelete='CASCADE')
@@ -151,7 +160,8 @@ def downgrade() -> None:
     op.drop_constraint('ck_rotulos_completo', 'rotulos', type_='check')
     op.drop_constraint('fk_rotulos_auditoria', 'rotulos', type_='foreignkey')
     op.drop_column('rotulos', 'auditoria_id')
-    op.drop_index('ix_auditorias_pendentes', table_name='auditorias_amostrais', postgresql_where='decisao IS NULL')
+    # Os indices saem com a tabela. Sem drop_index explicito, o downgrade tambem funciona
+    # num banco que aplicou uma versao anterior desta migracao (editada antes do merge).
     op.drop_table('auditorias_amostrais')
     op.drop_constraint('fk_rotulos_revisao', 'rotulos', type_='foreignkey')
     op.drop_column('rotulos', 'revisao_id')

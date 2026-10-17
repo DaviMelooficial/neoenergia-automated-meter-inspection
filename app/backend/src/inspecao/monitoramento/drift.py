@@ -26,16 +26,16 @@ z = (p_lote - p_base) / sqrt(phi * p_base * (1 - p_base) * (1/n_lote + 1/n_base)
 1/n_base conta a incerteza da propria baseline; para um lote que esta na baseline os dois
 nao sao independentes, e o z dele so serve de referencia. Alerta com |z| > 3. Motivo: o
 limiar absoluto de 10 p.p. e cego para taxas de 1% a 5% (a auto-rejeicao fica em 0,8%,
-com erro-padrao de ~0,17 p.p. por lote).
+com erro-padrao de ~0,19 p.p. por lote contra a baseline, ja com o termo 1/n_base).
 
 phi (sobredispersao) = qui-quadrado de Pearson / (k - 1) entre os k lotes da baseline,
 minimo 1, e SO e aplicado com k >= 5 lotes (`MIN_LOTES_PHI`); abaixo disso a carta usa
 phi = 1 e publica o estimado a parte. Com os 3 lotes de maio o phi da auto-rejeicao sai
 4,95 (qui-quadrado ~9,9 com 2 g.l., p ~0,007), mas com 2 g.l. o intervalo de 95% dele vai
-de ~1,3 a ~195: aplica-lo deixaria o limite de alerta oscilando com cada lote novo (~1,87%
-contra ~1,27% com phi = 1, na auto-rejeicao). Com phi = 1 a carta pode alarmar pela
-variacao normal entre lotes, que os lotes de maio mostram existir; o alerta da carta e um
-convite a olhar, nao um veredito.
+de ~1,3 a ~195: aplica-lo deixaria o limite de alerta oscilando com cada lote novo (~2,03%
+contra ~1,33% com phi = 1, na auto-rejeicao, |z| = 3 com o termo 1/n_base). Com phi = 1
+a carta pode alarmar pela variacao normal entre lotes, que os lotes de maio mostram
+existir; o alerta da carta e um convite a olhar, nao um veredito.
 
 Pontos cegos declarados: `glare` tem p_base = 0 (a heuristica quase nunca da score >= 0,5
 para reflexo), e a carta nao calcula z com p_base 0; `fora_de_foco` e

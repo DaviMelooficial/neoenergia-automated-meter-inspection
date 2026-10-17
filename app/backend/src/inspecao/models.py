@@ -496,13 +496,17 @@ class Rotulo(Base):
 
 
 class AuditoriaAmostral(Base):
-    """Item ja decidido na fila humana, sorteado para um segundo revisor.
+    """Decisao (de auditor ou da maquina) sorteada para um segundo revisor.
 
-    O segundo revisor nao ve a primeira decisao (a resposta do `/auditoria/proxima`
-    nao a traz) e nunca e o primeiro: a regra vale no POST e no banco
-    (`ck_auditorias_segundo_revisor`, `ck_auditorias_reserva_de_outro`). Uma auditoria
-    por leitura. A decisao do segundo revisor nao muda o status da leitura: serve
-    para medir a concordancia inter-anotador continua. Depois de gravada, a decisao e
+    A unidade e a DECISAO, nao a leitura: `fila` aponta a revisao do auditor
+    (`revisao_id`, unico); `auto_aprovada`/`auto_rejeitada` apontam a linha do historico
+    em que a maquina decidiu (`historico_id`, unico). Leitura reaberta pela maquina tem
+    uma auditoria por decisao; a pendente da decisao antiga ganha `invalidada_em` e sai
+    das medidas, a ja decidida continua valendo para aquela decisao.
+
+    O segundo revisor nao ve a primeira decisao e nunca e o primeiro: a regra vale no
+    POST e no banco (`ck_auditorias_segundo_revisor`, `ck_auditorias_reserva_de_outro`).
+    A decisao do segundo revisor nao muda o status da leitura. Depois de gravada, e
     imutavel no banco (gatilho `trg_auditorias_decisao_imutavel`, da migracao).
     """
 
@@ -510,9 +514,13 @@ class AuditoriaAmostral(Base):
     __table_args__ = (
         CheckConstraint(
             "CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id "
-            "IS NOT NULL WHEN origem IN ('auto_aprovada', 'auto_rejeitada') THEN revisao_id "
-            "IS NULL AND revisor_original_id IS NULL ELSE false END",
+            "IS NOT NULL AND historico_id IS NULL WHEN origem IN ('auto_aprovada', "
+            "'auto_rejeitada') THEN historico_id IS NOT NULL AND revisao_id IS NULL AND "
+            "revisor_original_id IS NULL ELSE false END",
             name="ck_auditorias_origem",
+        ),
+        CheckConstraint(
+            "invalidada_em IS NULL OR decisao IS NULL", name="ck_auditorias_invalidada_pendente"
         ),
         CheckConstraint(
             "revisor_id IS NULL OR revisor_id <> revisor_original_id",
@@ -543,13 +551,14 @@ class AuditoriaAmostral(Base):
             "decisao IS DISTINCT FROM 'aprovada' OR motivo IS NULL",
             name="ck_auditorias_aprovada_sem_motivo",
         ),
-        UniqueConstraint("leitura_id", name="uq_auditorias_leitura"),
         UniqueConstraint("revisao_id", name="uq_auditorias_revisao"),
+        UniqueConstraint("historico_id", name="uq_auditorias_historico"),
+        Index("ix_auditorias_leitura", "leitura_id"),
         Index(
             "ix_auditorias_pendentes",
             "sorteada_em",
             "id",
-            postgresql_where="decisao IS NULL",
+            postgresql_where="decisao IS NULL AND invalidada_em IS NULL",
         ),
     )
 
@@ -562,9 +571,15 @@ class AuditoriaAmostral(Base):
     revisao_id: Mapped[int | None] = mapped_column(
         ForeignKey("revisoes_humanas.id", ondelete="CASCADE"), nullable=True
     )
+    historico_id: Mapped[int | None] = mapped_column(
+        ForeignKey("historico_status.id", ondelete="CASCADE"), nullable=True
+    )
     revisor_original_id: Mapped[int | None] = mapped_column(
         ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True
     )
+    # Pendente que deixou de valer: a maquina reabriu a leitura e a decisao conferida nao
+    # existe mais. Fora do /proxima e das medidas (ck_auditorias_invalidada_pendente).
+    invalidada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sorteada_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

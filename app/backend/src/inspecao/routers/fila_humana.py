@@ -203,6 +203,6 @@ def decidir(leitura_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Revi
         db.commit()
     except IntegrityError as erro:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "decisao nao gravada") from erro
+        raise HTTPException(status.HTTP_409_CONFLICT, ITEM_INDISPONIVEL) from erro
     db.refresh(revisao)
     return RevisaoOut.model_validate(revisao)

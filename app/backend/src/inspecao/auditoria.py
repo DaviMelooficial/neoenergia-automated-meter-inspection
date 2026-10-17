@@ -1,34 +1,38 @@
-"""Auditoria amostral (T-M8-07): segundo revisor cego para 5% a 10% das decisoes.
+"""Auditoria amostral (T-M8-07): segundo revisor cego para as decisoes de auditor e da
+maquina.
 
-Sorteio: com probabilidade `AUDITORIA_TAXA` (configuravel, 0,05 a 0,10), deterministico
-por leitura, sha256 de "salt:auditoria:leitura_id" com o salt secreto do servidor
-(`ROTULAGEM_SALT`): reprocessar nao sorteia de novo e o auditor nao consegue prever
-quais decisoes dele serao conferidas. Duas origens:
-- `fila`: na mesma transacao da decisao do auditor (`sortear`). Decisao de conta de
-  teste (`inspecao.contas_teste`) nao e sorteada: nao e auditoria de verdade;
-- `auto_aprovada` e `auto_rejeitada`: leitura que a maquina decidiu sozinha
-  (`sortear_automaticas`, pelo `make auditoria-sortear`). Auto-aprovadas hoje sao 0
-  (politica sem limiar_aprova); auto-rejeitadas sao a unica decisao automatica ligada, e
-  o segundo revisor mede o falso positivo dela em operacao.
+A unidade e a DECISAO, nao a leitura:
+- `fila`: decisao do auditor (`revisao_id`), sorteada na transacao da decisao
+  (`sortear`) com `AUDITORIA_TAXA` (0,05 a 0,10). Decisao de conta de teste
+  (`inspecao.contas_teste`) nao e sorteada;
+- `auto_rejeitada` / `auto_aprovada`: decisao da maquina, identificada pela linha do
+  historico em que ela foi aplicada (`historico_id`), sorteada no fim da triagem e do
+  `recalcular_decisao` (`sortear_decisao_automatica`, na mesma transacao). Auto-rejeicao
+  tem taxa propria, `AUDITORIA_TAXA_AUTO_REJEITADA` (padrao 1,0: decisao do Davi, para
+  medir o falso positivo da unica decisao automatica ligada); auto-aprovacao usa a da
+  fila (hoje sao 0). `make auditoria-sortear` aplica o mesmo sorteio ao que ja estava
+  decidido antes do M8.
+O sorteio e deterministico por decisao: sha256 de "salt:auditoria:<origem>:<id da
+decisao>" com o salt secreto do servidor (`ROTULAGEM_SALT`). Leitura reaberta pela
+maquina (`rejeitada_qualidade` e re-decidivel) volta a triagem e ganha decisao nova: a
+auditoria PENDENTE da decisao antiga e marcada `invalidada_em` (em `estados.transicionar`)
+e sai do `/proxima` e das medidas; a ja DECIDIDA continua valendo como medida daquela
+decisao. A decisao nova, inclusive a de um auditor na fila, sorteia por conta propria.
 
 Regras da escrita, valendo no POST e no banco (nao so no `/proxima`):
 - o segundo revisor nunca e o primeiro (`ck_auditorias_segundo_revisor`; o
   primeiro tambem nao reserva, `ck_auditorias_reserva_de_outro`);
-- cada leitura tem no maximo uma auditoria, decidida uma vez (`uq_auditorias_leitura`,
-  o lock da linha no POST e o gatilho que torna a decisao imutavel);
+- cada decisao tem no maximo uma auditoria, decidida uma vez (`uq_auditorias_revisao`,
+  `uq_auditorias_historico`, o lock da linha no POST e o gatilho de imutabilidade);
 - so o papel `auditor` audita: supervisor e admin leem metricas, e o diferencial dos
   agregados (por lote, por status) diria a eles a decisao anterior;
-- toda recusa de `/auditoria/{id}/*` e a mesma resposta (404 "auditoria indisponivel"),
-  para "nao existe", "e sua", "ja decidida" e "reservada por outro": nada diz ao primeiro
-  revisor que ele foi sorteado.
+- toda recusa de `/auditoria/{id}/*` e a mesma resposta (404 "auditoria indisponivel").
 Cegueira: o item entregue (`ItemAuditoriaOut`) e igual para as tres origens e nao traz
-status, historico, revisao anterior, scores da maquina nem id de leitura (nem na
-quarentena). Fora dele, a decisao final de qualquer leitura (humana ou da maquina) so
+status, historico, revisao anterior, scores da maquina, id de leitura nem contagem exata
+de restantes; a ordem de entrega e um hash com salt do id da auditoria, e nao a ordem do
+sorteio (que agruparia as automaticas). Fora dele, a decisao final de qualquer leitura so
 aparece ao proprio autor e a admin (`routers.operacao`), `/lotes` junta os status finais
 numa chave so para quem nao e admin, e a recusa da fila e de texto constante.
-
-A decisao do segundo revisor nao muda o status da leitura: mede a concordancia
-inter-anotador continua e vira rotulo `producao` (active learning), na mesma transacao.
 """
 
 import hashlib
@@ -44,7 +48,15 @@ from sqlalchemy.orm import Session
 from inspecao.config import get_settings
 from inspecao.contas_teste import email_de_teste, usuario_real
 from inspecao.enums import StatusLeitura
-from inspecao.models import AuditoriaAmostral, Leitura, Lote, RevisaoHumana, Usuario
+from inspecao.models import (
+    AuditoriaAmostral,
+    HistoricoStatus,
+    Leitura,
+    Lote,
+    RevisaoHumana,
+    Usuario,
+)
+from inspecao.monitoramento.auto_aprovacao import amostras_necessarias, limite_superior
 from inspecao.rotulagem.consolidacao import kappa_cohen
 
 log = logging.getLogger(__name__)
@@ -55,21 +67,38 @@ RECIFE = timezone(timedelta(hours=-3), "America/Recife")
 # discordou de quem.
 MIN_PARES = 10
 
+# Decisoes da maquina auditadas: status -> origem da auditoria.
+ORIGEM_AUTOMATICA = {
+    StatusLeitura.AUTO_APROVADA.value: "auto_aprovada",
+    StatusLeitura.AUTO_REJEITADA.value: "auto_rejeitada",
+    StatusLeitura.REJEITADA_QUALIDADE.value: "auto_rejeitada",
+}
+# Erro tolerado por origem automatica (plano 04, secao 5): precisao da auto-rejeicao >=
+# 0,99; erro de auto-aprovacao < 0,5%.
+ALVO_ERRO = {"auto_rejeitada": 0.01, "auto_aprovada": 0.005}
 
-def sorteada(leitura_id: int, taxa: float, salt: str) -> bool:
-    h = hashlib.sha256(f"{salt}:auditoria:{leitura_id}".encode()).digest()
+
+def sorteada(chave: object, taxa: float, salt: str) -> bool:
+    if taxa >= 1.0:
+        return True
+    h = hashlib.sha256(f"{salt}:auditoria:{chave}".encode()).digest()
     return int.from_bytes(h[:8], "big") / 2**64 < taxa
 
 
-def _sorteia(leitura_id: int) -> bool:
+def taxa_da_origem(origem: str) -> float:
     s = get_settings()
-    return sorteada(leitura_id, s.auditoria_taxa, s.salt_da_rotulagem())
+    return s.auditoria_taxa_auto_rejeitada if origem == "auto_rejeitada" else s.auditoria_taxa
+
+
+def _sorteia(origem: str, decisao_id: int) -> bool:
+    salt = get_settings().salt_da_rotulagem()
+    return sorteada(f"{origem}:{decisao_id}", taxa_da_origem(origem), salt)
 
 
 def sortear(db: Session, revisao: RevisaoHumana) -> AuditoriaAmostral | None:
-    """Cria a auditoria se a leitura for sorteada. Sem commit: roda na transacao da
-    decisao, que ja travou a leitura. Decisao de conta de teste nao e sorteada."""
-    if not _sorteia(revisao.leitura_id):
+    """Cria a auditoria da decisao de fila se ela for sorteada. Sem commit: roda na
+    transacao da decisao, que ja travou a leitura. Conta de teste nao e sorteada."""
+    if not _sorteia("fila", revisao.id):
         return None
     email = db.scalar(select(Usuario.email).where(Usuario.id == revisao.usuario_id))
     if email is None or email_de_teste(email):
@@ -86,12 +115,26 @@ def sortear(db: Session, revisao: RevisaoHumana) -> AuditoriaAmostral | None:
     return auditoria
 
 
-def _sem_auditoria(coluna_leitura_id):
-    return ~(
-        select(AuditoriaAmostral.id)
-        .where(AuditoriaAmostral.leitura_id == coluna_leitura_id)
-        .exists()
-    )
+def sortear_decisao_automatica(
+    db: Session, leitura_id: int, decisao: HistoricoStatus
+) -> AuditoriaAmostral | None:
+    """Auditoria da decisao da maquina registrada em `decisao` (a linha do historico), se
+    for de uma origem auditada e sorteada. Num savepoint: decisao ja auditada (corrida com
+    o sorteio retroativo) nao derruba a transacao de quem chama. Sem commit."""
+    origem = ORIGEM_AUTOMATICA.get(decisao.status)
+    if origem is None or not _sorteia(origem, decisao.id):
+        return None
+    try:
+        with db.begin_nested():
+            auditoria = AuditoriaAmostral(
+                leitura_id=leitura_id, origem=origem, historico_id=decisao.id
+            )
+            db.add(auditoria)
+            db.flush()
+    except IntegrityError:
+        log.info("decisao %s (historico) ja tem auditoria", decisao.id)
+        return None
+    return auditoria
 
 
 def _travar(db: Session, leitura_id: int) -> bool:
@@ -107,73 +150,80 @@ def _talvez_commit(db: Session, commit_por_item: bool) -> None:
 
 def sortear_decididas(db: Session, commit_por_item: bool = False) -> int:
     """Aplica o sorteio as decisoes de fila gravadas antes do M8. Idempotente (sorteio
-    deterministico, leitura com auditoria nao e sorteada de novo).
+    deterministico, decisao com auditoria nao e sorteada de novo).
 
     Cada leitura e travada com SKIP LOCKED (em uso por outra transacao, fica para a proxima
-    passada) e vai num savepoint: uma colisao (a decisao acabou de sortear a mesma leitura)
-    perde so aquele item. O lock so cai no commit; com `commit_por_item` (a CLI) cada item
-    e commitado e solto na hora, sem segurar as leituras ate o fim do lote.
+    passada) e vai num savepoint: uma colisao perde so aquele item. O lock so cai no
+    commit; com `commit_por_item` (a CLI) cada item e commitado e solto na hora.
     """
+    sem_auditoria = ~(
+        select(AuditoriaAmostral.id)
+        .where(AuditoriaAmostral.revisao_id == RevisaoHumana.id)
+        .exists()
+    )
     revisoes = db.scalars(
         select(RevisaoHumana)
-        .where(_sem_auditoria(RevisaoHumana.leitura_id), usuario_real(RevisaoHumana.usuario_id))
-        .distinct(RevisaoHumana.leitura_id)
-        .order_by(RevisaoHumana.leitura_id, RevisaoHumana.id)
+        .where(sem_auditoria, usuario_real(RevisaoHumana.usuario_id))
+        .order_by(RevisaoHumana.id)
     ).all()
     n = 0
     for r in revisoes:
-        if not _sorteia(r.leitura_id):
+        if not _sorteia("fila", r.id):
             continue
         try:
             with db.begin_nested():
                 if _travar(db, r.leitura_id) and sortear(db, r) is not None:
                     n += 1
         except IntegrityError:
-            log.warning("leitura %s ja ganhou auditoria em outra transacao", r.leitura_id)
+            log.warning("revisao %s ja ganhou auditoria em outra transacao", r.id)
         _talvez_commit(db, commit_por_item)
     return n
 
 
-# Decisoes da maquina auditadas: status -> origem da auditoria.
-ORIGEM_AUTOMATICA = {
-    StatusLeitura.AUTO_APROVADA.value: "auto_aprovada",
-    StatusLeitura.AUTO_REJEITADA.value: "auto_rejeitada",
-    StatusLeitura.REJEITADA_QUALIDADE.value: "auto_rejeitada",
-}
-
-
 def sortear_automaticas(db: Session, commit_por_item: bool = False) -> dict[str, int]:
-    """Sorteia para segundo revisor as decisoes da maquina, com a mesma taxa e as mesmas
-    garantias de `sortear_decididas`: auto-aprovadas (hoje 0) e auto-rejeitadas
-    (`rejeitada_qualidade`, a unica decisao automatica ligada). Na auto-rejeitada, o
-    segundo revisor aprovar e um falso positivo da maquina (alvo: precisao >= 0,99)."""
+    """Sorteio retroativo das decisoes da maquina ainda vigentes (a linha de historico mais
+    recente com o status atual da leitura), com as mesmas garantias de
+    `sortear_decididas`. O caminho normal e o sorteio no fim da triagem e do recalculo."""
+    vigente = (
+        select(HistoricoStatus.leitura_id, HistoricoStatus.id.label("historico_id"))
+        .join(Leitura, Leitura.id == HistoricoStatus.leitura_id)
+        .where(
+            Leitura.status_atual.in_(list(ORIGEM_AUTOMATICA)),
+            HistoricoStatus.status == Leitura.status_atual,
+        )
+        .distinct(HistoricoStatus.leitura_id)
+        .order_by(HistoricoStatus.leitura_id, HistoricoStatus.id.desc())
+        .subquery()
+    )
+    sem_auditoria = ~(
+        select(AuditoriaAmostral.id)
+        .where(AuditoriaAmostral.historico_id == vigente.c.historico_id)
+        .exists()
+    )
     linhas = db.execute(
-        select(Leitura.id, Leitura.status_atual)
-        .where(Leitura.status_atual.in_(list(ORIGEM_AUTOMATICA)), _sem_auditoria(Leitura.id))
-        .order_by(Leitura.id)
+        select(vigente.c.leitura_id, vigente.c.historico_id)
+        .where(sem_auditoria)
+        .order_by(vigente.c.leitura_id)
     ).all()
     contagem = dict.fromkeys(set(ORIGEM_AUTOMATICA.values()), 0)
-    for leitura_id, status in linhas:
-        if not _sorteia(leitura_id):
+    for leitura_id, historico_id in linhas:
+        decisao = db.get(HistoricoStatus, historico_id)
+        origem = ORIGEM_AUTOMATICA[decisao.status]
+        if not _sorteia(origem, decisao.id):
             continue
-        origem = ORIGEM_AUTOMATICA[status]
-        try:
-            with db.begin_nested():
-                if _travar(db, leitura_id):
-                    db.add(AuditoriaAmostral(leitura_id=leitura_id, origem=origem))
-                    db.flush()
-                    contagem[origem] += 1
-        except IntegrityError:
-            log.warning("leitura %s ja ganhou auditoria em outra transacao", leitura_id)
+        with db.begin_nested():
+            if _travar(db, leitura_id) and sortear_decisao_automatica(db, leitura_id, decisao):
+                contagem[origem] += 1
         _talvez_commit(db, commit_por_item)
     return contagem
 
 
 def livre_para(usuario_id: int):
-    """Pendente, nao e decisao do usuario, sem reserva ativa de outro."""
+    """Pendente, valida, nao e decisao do usuario, sem reserva ativa de outro."""
     return (
         AuditoriaAmostral.decisao.is_(None)
-        # IS DISTINCT FROM: auditoria de auto-aprovada nao tem revisor original (NULL).
+        & AuditoriaAmostral.invalidada_em.is_(None)
+        # IS DISTINCT FROM: auditoria de decisao da maquina nao tem revisor original (NULL).
         & AuditoriaAmostral.revisor_original_id.is_distinct_from(usuario_id)
         & or_(
             AuditoriaAmostral.reservado_ate.is_(None),
@@ -190,17 +240,25 @@ def pendentes_para(db: Session, usuario_id: int) -> int:
     )
 
 
+def ordem_de_entrega():
+    """md5 de salt secreto e id da auditoria: estavel, sem relacao com a origem nem com a
+    ordem do sorteio (as automaticas sao sorteadas em bloco)."""
+    salt = get_settings().salt_da_rotulagem()
+    return func.md5(func.concat(salt, ":ordem:", AuditoriaAmostral.id))
+
+
 def reservar_proxima(db: Session, usuario_id: int) -> AuditoriaAmostral | None:
     """Reserva por 10 min a proxima auditoria que este usuario pode fazer. Sem commit.
 
-    `FOR UPDATE SKIP LOCKED`: dois revisores ao mesmo tempo recebem itens diferentes.
+    Reserva propria primeiro; depois `ordem_de_entrega`. `FOR UPDATE SKIP LOCKED`: dois
+    revisores ao mesmo tempo recebem itens diferentes.
     """
     auditoria = db.scalar(
         select(AuditoriaAmostral)
         .where(livre_para(usuario_id))
         .order_by(
             case((AuditoriaAmostral.reservado_por == usuario_id, 0), else_=1),
-            AuditoriaAmostral.sorteada_em,
+            ordem_de_entrega(),
             AuditoriaAmostral.id,
         )
         .with_for_update(skip_locked=True)
@@ -241,8 +299,40 @@ def _suprimido(medidas: dict[str, Any]) -> dict[str, Any]:
     return dict.fromkeys(medidas) | {"suprimido": True}
 
 
+def _bloco_automatico(db: Session, origem: str, erro: str, detalhe: bool) -> dict[str, Any]:
+    """Erro da maquina medido pelo segundo revisor, com o limite superior de 95%
+    (Clopper-Pearson) e quantas auditorias sustentariam o alvo com os erros de hoje.
+    `alvo_atingido` so quando o limite superior cai abaixo do alvo, nunca pela taxa."""
+    linhas = db.execute(
+        select(AuditoriaAmostral.decisao, func.count())
+        .where(
+            AuditoriaAmostral.origem == origem,
+            AuditoriaAmostral.decisao.is_not(None),
+            usuario_real(AuditoriaAmostral.revisor_id),
+        )
+        .group_by(AuditoriaAmostral.decisao)
+    ).all()
+    n = sum(k for _, k in linhas)
+    erros = sum(k for d, k in linhas if d == erro)
+    alvo = ALVO_ERRO[origem]
+    teto = limite_superior(erros, n)
+    bloco = {
+        "n": n,
+        "erros": erros,
+        "taxa_erro": erros / n if n else None,
+        "limite_superior_erro": teto,
+        "alvo_erro": alvo,
+        "necessarias": amostras_necessarias(erros, alvo),
+        "alvo_atingido": teto is not None and teto <= alvo,
+    }
+    if detalhe or n >= MIN_PARES:
+        return bloco | {"suprimido": False}
+    return _suprimido(bloco) | {"alvo_erro": alvo}
+
+
 def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
-    """Primeiro x segundo revisor nas auditorias decididas, so com contas reais.
+    """Primeiro x segundo revisor nas auditorias decididas, so com contas reais, e o erro
+    da maquina nas decisoes automaticas auditadas. Auditoria invalidada fica de fora.
 
     `detalhe` (admin): contagens, por lote e a serie acumulada por dia (America/Recife).
     Sem detalhe (supervisor): so os totais, e cada um so com ao menos `MIN_PARES` pares;
@@ -270,31 +360,15 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
         .order_by(AuditoriaAmostral.decidida_em, AuditoriaAmostral.id)
     ).all()
     pares = [(a, b, c, d) for a, b, c, d, _lote, _quando in linhas]
-
-    def bloco_automatico(origem: str, erro: str) -> dict[str, Any]:
-        linhas_auto = db.execute(
-            select(AuditoriaAmostral.decisao, func.count())
-            .where(
-                AuditoriaAmostral.origem == origem,
-                AuditoriaAmostral.decisao.is_not(None),
-                usuario_real(AuditoriaAmostral.revisor_id),
-            )
-            .group_by(AuditoriaAmostral.decisao)
-        ).all()
-        n = sum(k for _, k in linhas_auto)
-        erros = sum(k for d, k in linhas_auto if d == erro)
-        bloco = {"n": n, "erros": erros, "taxa_erro": erros / n if n else None}
-        if detalhe or n >= MIN_PARES:
-            return bloco | {"suprimido": False}
-        return _suprimido(bloco)
-
     # Auto-aprovada reprovada pelo revisor = falso negativo da maquina; auto-rejeitada
     # aprovada pelo revisor = falso positivo (1 - precisao da auto-rejeicao).
-    auto_aprovadas = bloco_automatico("auto_aprovada", "reprovada")
-    auto_rejeitadas = bloco_automatico("auto_rejeitada", "aprovada")
+    auto_aprovadas = _bloco_automatico(db, "auto_aprovada", "reprovada", detalhe)
+    auto_rejeitadas = _bloco_automatico(db, "auto_rejeitada", "aprovada", detalhe)
     total = _medidas(pares)
+    s = get_settings()
     base: dict[str, Any] = {
-        "taxa_configurada": get_settings().auditoria_taxa,
+        "taxa_configurada": s.auditoria_taxa,
+        "taxa_auto_rejeitada": s.auditoria_taxa_auto_rejeitada,
         "min_pares": MIN_PARES,
         "detalhe": detalhe,
     }
@@ -304,6 +378,7 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
             "sorteadas": None,
             "taxa_observada": None,
             "pendentes": None,
+            "invalidadas": None,
             "decididas": None,
             "total": total | {"suprimido": False} if len(pares) >= MIN_PARES else _suprimido(total),
             "auto_aprovadas": auto_aprovadas,
@@ -319,27 +394,13 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
         por_dia[quando.astimezone(RECIFE).date()] = i + 1
     serie = [{"dia": dia, **_medidas(pares[:ate])} for dia, ate in sorted(por_dia.items())]
 
-    sorteadas = (
-        db.scalar(
-            select(func.count())
-            .select_from(AuditoriaAmostral)
-            .where(AuditoriaAmostral.origem == "fila")
-        )
-        or 0
-    )
+    def contar(*condicoes) -> int:
+        return db.scalar(select(func.count()).select_from(AuditoriaAmostral).where(*condicoes)) or 0
+
+    sorteadas = contar(AuditoriaAmostral.origem == "fila")
     decisoes_fila = (
         db.scalar(
-            select(func.count(func.distinct(RevisaoHumana.leitura_id))).where(
-                usuario_real(RevisaoHumana.usuario_id)
-            )
-        )
-        or 0
-    )
-    pendentes = (
-        db.scalar(
-            select(func.count())
-            .select_from(AuditoriaAmostral)
-            .where(AuditoriaAmostral.decisao.is_(None))
+            select(func.count(RevisaoHumana.id)).where(usuario_real(RevisaoHumana.usuario_id))
         )
         or 0
     )
@@ -347,7 +408,10 @@ def concordancia(db: Session, detalhe: bool) -> dict[str, Any]:
         "decisoes_na_fila": decisoes_fila,
         "sorteadas": sorteadas,
         "taxa_observada": sorteadas / decisoes_fila if decisoes_fila else None,
-        "pendentes": pendentes,
+        "pendentes": contar(
+            AuditoriaAmostral.decisao.is_(None), AuditoriaAmostral.invalidada_em.is_(None)
+        ),
+        "invalidadas": contar(AuditoriaAmostral.invalidada_em.is_not(None)),
         "decididas": len(pares),
         "total": total | {"suprimido": False},
         "auto_aprovadas": auto_aprovadas,

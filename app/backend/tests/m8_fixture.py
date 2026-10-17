@@ -17,6 +17,8 @@ SAIDA_DA_TRIAGEM = {
     StatusLeitura.FILA_HUMANA: StatusLeitura.FILA_HUMANA,
     StatusLeitura.APROVADA_HUMANO: StatusLeitura.FILA_HUMANA,
     StatusLeitura.REPROVADA_HUMANO: StatusLeitura.FILA_HUMANA,
+    # a decisao da maquina que a auditoria das automaticas confere (linha do historico)
+    StatusLeitura.AUTO_APROVADA: StatusLeitura.AUTO_APROVADA,
 }
 _seq = {"n": 0}
 

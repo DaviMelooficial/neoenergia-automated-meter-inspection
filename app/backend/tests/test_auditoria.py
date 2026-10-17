@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 from inspecao import auditoria
 from inspecao.config import Settings
 from inspecao.enums import StatusLeitura as S
-from inspecao.models import AuditoriaAmostral, Leitura, Quarentena, RevisaoHumana, Rotulo
+from inspecao.models import (
+    AuditoriaAmostral,
+    HistoricoStatus,
+    Leitura,
+    Quarentena,
+    RevisaoHumana,
+    Rotulo,
+)
 from inspecao.routers.auditoria import AUDITORIA_INDISPONIVEL
 from inspecao.routers.fila_humana import ITEM_INDISPONIVEL
 from tests import m8_fixture as fx
@@ -34,7 +41,7 @@ CAMPOS_ITEM = {
     "fotos",
     "quarentena",
     "reservado_ate",
-    "restantes",
+    "ha_mais",
 }
 
 
@@ -131,27 +138,107 @@ def test_decisao_nao_sorteada_nao_cria_auditoria(client, db_session, reais, lote
     assert db_session.scalar(select(AuditoriaAmostral)) is None
 
 
-def test_integrity_error_do_sorteio_desfaz_a_decisao(client, db_session, reais, lote_aud, sempre):
-    """Leitura que ja tem auditoria (corrida com o sorteio retroativo): o INSERT da
-    auditoria viola `uq_auditorias_leitura` e a decisao inteira volta, com 409."""
+def test_integrity_error_do_sorteio_desfaz_a_decisao(
+    client, db_session, reais, lote_aud, monkeypatch
+):
+    """Falha de gravacao no sorteio: a decisao inteira volta, com o 409 de texto constante
+    (o mesmo de "ja decidida" e "reservada por outro")."""
     lei, _ = fx.leitura(db_session, lote_aud, S.FILA_HUMANA, fx.scores(0.2))
-    antiga = RevisaoHumana(leitura_id=lei.id, usuario_id=reais["auditor2"].id, decisao="aprovada")
-    db_session.add(antiga)
-    db_session.flush()
-    db_session.add(
-        AuditoriaAmostral(
-            leitura_id=lei.id, revisao_id=antiga.id, revisor_original_id=reais["auditor2"].id
-        )
-    )
     db_session.commit()
+
+    def falha(*_):
+        raise IntegrityError("INSERT auditorias_amostrais", {}, Exception("colisao"))
+
+    monkeypatch.setattr(auditoria, "sortear", falha)
     cab = login(client, reais["auditor"])
     r = client.post(f"/fila-humana/{lei.id}/decisao", json={"decisao": "aprovada"}, headers=cab)
-    assert r.status_code == 409
+    assert (r.status_code, r.json()) == (409, {"detail": ITEM_INDISPONIVEL})
     db_session.expire_all()
     assert db_session.get(Leitura, lei.id).status_atual == S.FILA_HUMANA.value
-    revisoes = db_session.scalars(select(RevisaoHumana).where(RevisaoHumana.leitura_id == lei.id))
-    assert [r.usuario_id for r in revisoes] == [reais["auditor2"].id]
+    assert not db_session.scalars(
+        select(RevisaoHumana).where(RevisaoHumana.leitura_id == lei.id)
+    ).all()
     assert not db_session.scalars(select(Rotulo).where(Rotulo.rodada == "producao")).all()
+
+
+def _reabrir_e_mandar_para_fila(db_session, lei):
+    from inspecao.estados import transicionar
+
+    transicionar(db_session, lei, S.TRIAGEM_QUALIDADE, ator="modelo:heuristica@v1")
+    transicionar(db_session, lei, S.FILA_HUMANA, ator="modelo:heuristica@v1")
+    db_session.commit()
+
+
+def test_auto_rejeitada_reaberta_e_decidida_na_fila(client, db_session, reais, lote_aud, sempre):
+    """Bloqueante do gate 3: auto-rejeitada sorteada que a maquina reabre e manda para a
+    fila. A pendente da decisao antiga e invalidada; a decisao do auditor grava (201) e
+    ganha auditoria propria, sem colidir com a da leitura."""
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    assert auditoria.sortear_automaticas(db_session)["auto_rejeitada"] == 1
+    db_session.commit()
+    _reabrir_e_mandar_para_fila(db_session, lei)
+    antiga = db_session.scalar(
+        select(AuditoriaAmostral).where(AuditoriaAmostral.origem == "auto_rejeitada")
+    )
+    assert antiga.invalidada_em is not None and antiga.decisao is None
+    cab = login(client, reais["auditor"])
+    r = client.post(f"/fila-humana/{lei.id}/decisao", json={"decisao": "aprovada"}, headers=cab)
+    assert r.status_code == 201, r.text
+    origens = sorted(
+        a.origem
+        for a in db_session.scalars(
+            select(AuditoriaAmostral).where(AuditoriaAmostral.leitura_id == lei.id)
+        )
+    )
+    assert origens == ["auto_rejeitada", "fila"]
+    # a invalidada nao e entregue nem conta como pendente
+    item = client.post("/auditoria/proxima", headers=login(client, reais["auditor2"])).json()
+    nova = db_session.scalar(select(AuditoriaAmostral).where(AuditoriaAmostral.origem == "fila"))
+    assert item["auditoria_id"] == nova.id and item["ha_mais"] is False
+    admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
+    assert (admin["pendentes"], admin["invalidadas"]) == (1, 1)
+
+
+def test_auditoria_decidida_sobrevive_a_reabertura(client, db_session, reais, lote_aud, sempre):
+    """A auditoria ja decidida mede a decisao antiga e continua contando."""
+    lei, _ = fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    db_session.commit()
+    aud = db_session.scalar(select(AuditoriaAmostral))
+    cab = login(client, reais["auditor2"])
+    assert client.post("/auditoria/proxima", headers=cab).status_code == 200
+    r = client.post(f"/auditoria/{aud.id}/decisao", json={"decisao": "aprovada"}, headers=cab)
+    assert r.status_code == 201
+    _reabrir_e_mandar_para_fila(db_session, lei)
+    db_session.expire_all()
+    aud = db_session.get(AuditoriaAmostral, aud.id)
+    assert aud.invalidada_em is None and aud.decisao == "aprovada"
+    admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
+    assert admin["auto_rejeitadas"]["n"] == 1 and admin["auto_rejeitadas"]["erros"] == 1
+
+
+def test_triagem_sorteia_a_auto_rejeicao_na_mesma_transacao(db_session, lote_aud):
+    """Sem `make auditoria-sortear`: a saida da triagem para rejeitada_qualidade ja cria a
+    auditoria (taxa padrao de auto-rejeicao = 100%), apontando a linha do historico."""
+    from inspecao.inference.politica import POLITICA_V1
+    from inspecao.jobs.handlers import _sair_da_triagem
+
+    lei, _ = fx.leitura(db_session, lote_aud, S.TRIAGEM_QUALIDADE, fx.scores(0.95))
+    decisao, p, detalhe = POLITICA_V1.decidir(fx.scores(0.95)) + ({"politica": "politica@v1"},)
+    _sair_da_triagem(db_session, lei, decisao, "modelo:heuristica@v1", p, detalhe)
+    aud = db_session.scalar(select(AuditoriaAmostral).where(AuditoriaAmostral.leitura_id == lei.id))
+    assert aud.origem == "auto_rejeitada" and aud.historico_id is not None
+    assert db_session.get(HistoricoStatus, aud.historico_id).status == S.REJEITADA_QUALIDADE.value
+
+
+def test_taxa_de_auto_rejeicao_e_separada_da_fila():
+    from inspecao.config import Settings
+
+    s = Settings()
+    assert (s.auditoria_taxa, s.auditoria_taxa_auto_rejeitada) == (0.07, 1.0)
+    with pytest.raises(ValidationError):
+        Settings(auditoria_taxa_auto_rejeitada=1.5)
+    assert auditoria.sorteada("auto_rejeitada:1", 1.0, "salt") is True
 
 
 def test_sortear_decididas_idempotente_e_sem_contas_de_teste(
@@ -272,7 +359,7 @@ def test_item_cego_lista_fechada_inclusive_quarentena(client, reais, decidida):
     assert item["quarentena"] == [
         {"tipo": "medidor_multiplo", "severidade": "informativo", "detalhe": {"quantidade": 2}}
     ]
-    assert item["restantes"] == 1
+    assert item["ha_mais"] is False
     for vazamento in ("reprovada", "nota secreta", "historico", "revisoes", "leitura_id", "p_ruim"):
         assert vazamento not in r.text
     assert "inferencias" not in r.text and "fora_de_foco" not in r.text
@@ -298,7 +385,7 @@ def test_item_igual_para_as_tres_origens(client, db_session, reais, lote_aud, de
     neutros = [
         {k: v for k, v in i.items() if k not in ("auditoria_id", "linha_csv", "medidores")}
         | {"posicao_lida": None, "foto_principal": None, "fotos": None, "reservado_ate": None}
-        | {"restantes": None}
+        | {"ha_mais": None}
         for i in itens
     ]
     assert all(set(i) == CAMPOS_ITEM for i in itens)
@@ -535,7 +622,11 @@ def test_decisoes_da_maquina_tambem_sao_auditadas(
     r = client.post(f"/auditoria/{aud.id}/decisao", json=corpo, headers=cab)
     assert r.status_code == 201, r.text
     admin = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
-    assert admin[bloco] == {"n": 1, "erros": 1, "taxa_erro": 1.0, "suprimido": False}
+    b = admin[bloco]
+    assert (b["n"], b["erros"], b["taxa_erro"], b["suprimido"]) == (1, 1, 1.0, False)
+    assert b["limite_superior_erro"] == 1.0 and b["alvo_atingido"] is False
+    # com 1 erro: 473 auditorias para precisao >= 0,99; 947 para erro < 0,5%
+    assert b["necessarias"] == {"auto_rejeitadas": 473, "auto_aprovadas": 947}[bloco]
     sup = client.get("/metricas/auditoria", headers=login(client, reais["supervisor"])).json()
     assert sup[bloco]["suprimido"] is True and sup[bloco]["n"] is None
 
@@ -661,3 +752,62 @@ def test_concordancia_ignora_contas_de_teste(client, db_session, reais, contas, 
     db_session.commit()
     c = client.get("/metricas/auditoria", headers=login(client, reais["admin"])).json()
     assert c["decididas"] == 0 and c["total"]["n"] == 0
+
+
+def test_ordem_de_entrega_nao_segue_o_sorteio(client, db_session, reais, lote_aud, sempre):
+    """Bloqueante do gate 3: as automaticas sao sorteadas em bloco; entregar por ordem de
+    sorteio diria a origem. A entrega segue md5(salt:ordem:id), igual para as origens."""
+    import hashlib
+
+    from inspecao.config import get_settings
+
+    for _ in range(3):
+        fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    for _ in range(3):
+        lei, _ = fx.leitura(db_session, lote_aud, S.APROVADA_HUMANO, fx.scores(0.2))
+        rev = fx.decisao(db_session, lei, reais["auditor"].id, "aprovada")
+        auditoria.sortear(db_session, rev)
+    db_session.commit()
+    salt = get_settings().salt_da_rotulagem()
+    ids = [a.id for a in db_session.scalars(select(AuditoriaAmostral))]
+    esperado = sorted(ids, key=lambda i: (hashlib.md5(f"{salt}:ordem:{i}".encode()).hexdigest(), i))
+    cab = login(client, reais["auditor2"])
+    entregues = []
+    for _ in ids:
+        item = client.post("/auditoria/proxima", headers=cab).json()
+        entregues.append(item["auditoria_id"])
+        # reserva propria volta primeiro: o mesmo item ate decidir
+        assert (
+            client.post("/auditoria/proxima", headers=cab).json()["auditoria_id"] == entregues[-1]
+        )
+        client.post(
+            f"/auditoria/{entregues[-1]}/decisao", json={"decisao": "aprovada"}, headers=cab
+        )
+    assert entregues == esperado
+
+
+def test_falso_positivo_com_intervalo_e_sem_alvo_antes_da_hora(
+    client, db_session, reais, lote_aud, sempre
+):
+    """Bloqueante de dados do gate 3: 10 auto-rejeicoes confirmadas e 0 erro nao sao
+    "falso positivo 0%": o limite superior de 95% e 25,9%, faltam 299 para sustentar
+    precisao >= 0,99, e o alvo nao esta atingido."""
+    for _ in range(10):
+        fx.leitura(db_session, lote_aud, S.REJEITADA_QUALIDADE, fx.scores(0.95))
+    auditoria.sortear_automaticas(db_session)
+    agora = datetime.now(UTC)
+    for aud in db_session.scalars(select(AuditoriaAmostral)):
+        aud.revisor_id, aud.decisao, aud.motivo, aud.decidida_em = (
+            reais["auditor2"].id,
+            "reprovada",
+            "fora_de_foco",
+            agora,
+        )
+    db_session.commit()
+    sup = client.get("/metricas/auditoria", headers=login(client, reais["supervisor"])).json()
+    b = sup["auto_rejeitadas"]
+    assert (b["n"], b["erros"], b["taxa_erro"]) == (10, 0, 0.0)
+    assert b["limite_superior_erro"] == pytest.approx(0.2589, abs=1e-4)
+    assert (b["alvo_erro"], b["necessarias"], b["alvo_atingido"]) == (0.01, 299, False)
+    assert sup["taxa_auto_rejeitada"] == 1.0 and sup["taxa_configurada"] == 0.07

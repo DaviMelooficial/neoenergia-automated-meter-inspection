@@ -60,7 +60,8 @@ def _item(db: Session, auditoria: AuditoriaAmostral, usuario_id: int) -> ItemAud
             for q in completa.quarentena
         ],
         reservado_ate=auditoria.reservado_ate,
-        restantes=servico.pendentes_para(db, usuario_id),
+        # o item ja reservado conta em pendentes_para; ha_mais = existe outro alem dele
+        ha_mais=servico.pendentes_para(db, usuario_id) > 1,
     )
 
 

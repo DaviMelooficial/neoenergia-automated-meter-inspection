@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from inspecao import auditoria
 from inspecao.config import Settings
 from inspecao.enums import StatusLeitura, TipoJob
 from inspecao.estados import ESTADOS_REDECIDIVEIS, transicionar
@@ -96,7 +97,10 @@ def _decidir(
 def _sair_da_triagem(
     sessao: Session, leitura: Leitura, decisao: Decisao, ator: str, p_ruim, detalhe: dict
 ) -> None:
-    transicionar(sessao, leitura, DESTINO[decisao], ator, p_ruim, detalhe)
+    registro = transicionar(sessao, leitura, DESTINO[decisao], ator, p_ruim, detalhe)
+    # Auditoria amostral (M8): a decisao automatica e sorteada aqui, na mesma transacao,
+    # sem depender de alguem rodar `make auditoria-sortear`. So origens auditadas sorteiam.
+    auditoria.sortear_decisao_automatica(sessao, leitura.id, registro)
     if decisao is Decisao.SEGUIR:
         fila.enfileirar(sessao, TipoJob.VALIDACAO_LEITURA, {"leitura_id": leitura.id})
 

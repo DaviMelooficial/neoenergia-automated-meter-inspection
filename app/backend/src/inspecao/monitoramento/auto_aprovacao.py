@@ -76,6 +76,23 @@ def limite_superior(erros: int, n: int, confianca: float = CONFIANCA) -> float |
     return hi
 
 
+def amostras_necessarias(erros: int, alvo: float, confianca: float = CONFIANCA) -> int:
+    """Menor n em que `erros` erros ainda sustentam erro <= alvo com a confianca pedida
+    (limite superior de Clopper-Pearson <= alvo). Alvo 1%: 299 sem erro, 473 com 1, 628
+    com 2; alvo 0,5% sem erro: 598 (a regra dos tres arredonda para 600)."""
+    alto = max(erros + 1, 1)
+    while limite_superior(erros, alto, confianca) > alvo:
+        alto *= 2
+    baixo = erros
+    while alto - baixo > 1:
+        meio = (alto + baixo) // 2
+        if limite_superior(erros, meio, confianca) <= alvo:
+            alto = meio
+        else:
+            baixo = meio
+    return alto
+
+
 def limite_inferior(erros: int, n: int, confianca: float = CONFIANCA) -> float | None:
     """Limite inferior unilateral exato (Clopper-Pearson): a taxa e ao menos isto."""
     if n == 0:

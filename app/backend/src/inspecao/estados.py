@@ -8,11 +8,11 @@ ou `transicionar_em_lote`; nenhum deles toca a coluna diretamente. Um teste
 
 from collections.abc import Iterable, Sequence
 
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from inspecao.enums import StatusLeitura
-from inspecao.models import HistoricoStatus, Leitura
+from inspecao.models import AuditoriaAmostral, HistoricoStatus, Leitura
 
 ESTADO_INICIAL = StatusLeitura.RECEBIDA
 
@@ -91,6 +91,19 @@ def transicionar(
     sessao.refresh(leitura, with_for_update=True)
     validar_transicao(leitura.status_atual, destino)
 
+    if destino is StatusLeitura.TRIAGEM_QUALIDADE and leitura.status_atual != ESTADO_INICIAL:
+        # Reabertura pela maquina: a decisao automatica conferida deixa de existir, e a
+        # auditoria PENDENTE dela deixa de valer (M8). A decidida fica como medida.
+        sessao.execute(
+            update(AuditoriaAmostral)
+            .where(
+                AuditoriaAmostral.leitura_id == leitura.id,
+                AuditoriaAmostral.origem != "fila",
+                AuditoriaAmostral.decisao.is_(None),
+                AuditoriaAmostral.invalidada_em.is_(None),
+            )
+            .values(invalidada_em=func.now(), reservado_por=None, reservado_ate=None)
+        )
     leitura.status_atual = destino.value
     registro = HistoricoStatus(
         leitura_id=leitura.id,

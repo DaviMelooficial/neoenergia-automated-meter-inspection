@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     # Auditoria amostral (M8): fracao dos itens decididos na fila humana que vai para
     # um segundo revisor. O plano pede de 5% a 10%; fora disso a API nao sobe.
     auditoria_taxa: float = 0.07
+    # Auto-rejeicoes (a unica decisao automatica ligada) tem taxa propria: decisao do Davi
+    # (2026-10-17), 100%, para medir o falso positivo da auto-rejeicao em operacao.
+    auditoria_taxa_auto_rejeitada: float = 1.0
 
     # Drift (M8): lotes que formam a baseline dos 5 sinais. Padrao: os 3 lotes de maio
     # (treino e validacao do split temporal, plano 04 secao 3.2); julho e o teste.
@@ -123,6 +126,8 @@ class Settings(BaseSettings):
             raise ValueError("JWT_ALG precisa ser HS256, HS384 ou HS512")
         if not 0.05 <= self.auditoria_taxa <= 0.10:
             raise ValueError("AUDITORIA_TAXA precisa estar entre 0.05 e 0.10 (5% a 10%)")
+        if not 0.05 <= self.auditoria_taxa_auto_rejeitada <= 1.0:
+            raise ValueError("AUDITORIA_TAXA_AUTO_REJEITADA precisa estar entre 0.05 e 1.0")
         if self.ambiente != "dev":
             inseguros = [
                 nome

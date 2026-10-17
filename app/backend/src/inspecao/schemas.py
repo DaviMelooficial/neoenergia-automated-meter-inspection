@@ -503,7 +503,9 @@ class ItemAuditoriaOut(BaseModel):
     fotos: list[FotoOut]
     quarentena: list[QuarentenaCegaOut]
     reservado_ate: datetime | None
-    restantes: int
+    # Booleano, nao a contagem: o salto da contagem quando as automaticas sao sorteadas
+    # em bloco diria a origem do proximo item.
+    ha_mais: bool
 
 
 class AuditoriaDecisaoOut(BaseModel):
@@ -537,6 +539,14 @@ class DecisaoAutomaticaAuditoriaOut(BaseModel):
     n: int | None
     erros: int | None
     taxa_erro: float | None
+    limite_superior_erro: float | None = Field(
+        description="limite superior unilateral de 95% (Clopper-Pearson) do erro"
+    )
+    alvo_erro: float
+    necessarias: int | None = Field(
+        description="auditorias que sustentariam erro <= alvo com 95%, com os erros de hoje"
+    )
+    alvo_atingido: bool | None
     suprimido: bool
 
 
@@ -552,12 +562,14 @@ class ConcordanciaAuditoriaOut(BaseModel):
     """`detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares."""
 
     taxa_configurada: float
+    taxa_auto_rejeitada: float
     min_pares: int
     detalhe: bool
     decisoes_na_fila: int | None
     sorteadas: int | None
     taxa_observada: float | None
     pendentes: int | None
+    invalidadas: int | None
     decididas: int | None
     total: TotalConcordanciaOut
     auto_aprovadas: DecisaoAutomaticaAuditoriaOut

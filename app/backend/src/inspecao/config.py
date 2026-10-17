@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     worker_max_tentativas: int = 3
 
     # Modelos. DETECTOR_QUALIDADE escolhe o detector do worker: "heuristica" (M5,
-    # padrao), "onnx" (modelo do M7 em MODELO_QUALIDADE_PATH, com o qualidade.json ao
+    # padrao), "onnx" (modelo do M7 em MODELO_QUALIDADE_PATH, com o <versao>.json ao
     # lado) ou "nulo" (tudo para humano). A politica segue o detector (politica_para).
     detector_qualidade: str = "heuristica"
     # Um arquivo por versao (<versao>.onnx + <versao>.json): exportar a proxima versao nao

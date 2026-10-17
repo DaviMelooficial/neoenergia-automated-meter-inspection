@@ -52,7 +52,14 @@ def payload_recalcular(versao: str | None) -> dict:
 
 
 def recalcular(nomes: list[str] | None, versao: str | None) -> int:
-    log.info("recalcular_decisao com %s", versao or "a politica do worker")
+    if versao is None:
+        log.warning(
+            "recalcular_decisao sem --politica: cada lote usa a politica do worker que pegar "
+            "o job; com workers de detectores diferentes no ar, lotes podem receber politicas "
+            "diferentes"
+        )
+    else:
+        log.info("recalcular_decisao com %s", versao)
     return _enfileirar_por_lote(nomes, TipoJob.RECALCULAR_DECISAO, payload_recalcular(versao))
 
 
@@ -74,7 +81,12 @@ def main(argv: list[str] | None = None) -> int:
     for p in (rp, rc):
         p.add_argument("--lote", action="append", help="nome do lote (repetivel)")
         p.add_argument("--todos", action="store_true")
-    rc.add_argument("--politica", default=None, help="versao (padrao: a do detector configurado)")
+    rc.add_argument(
+        "--politica",
+        default=None,
+        help="versao (padrao: a politica do worker que pegar o job; com workers de detectores "
+        "diferentes no ar, cada lote pode receber uma politica diferente)",
+    )
     sub.add_parser("resumo", help="contagem de jobs por tipo e status")
     args = ap.parse_args(argv)
 

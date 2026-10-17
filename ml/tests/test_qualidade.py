@@ -11,7 +11,7 @@ import torch
 from mlinsp import modelo, qualidade
 from mlinsp.calibrate import limiar_zero_fp
 from mlinsp.evaluate import cobertura_maxima_zero_fp, metricas_legivel, rejeicao, wilson
-from mlinsp.export_onnx import exportar, paridade, versao_ja_usada
+from mlinsp.export_onnx import exportar, paridade, publicar, versao_ja_usada
 
 RAIZ = Path(__file__).resolve().parents[2]
 
@@ -124,3 +124,16 @@ def test_rodada_nova_nao_reusa_versao_ja_exportada(tmp_path):
     assert versao_ja_usada(tmp_path, "qualidade@v1", "r2") == "r1"
     assert versao_ja_usada(tmp_path, "qualidade@v1", "r1") is None  # reexportar a mesma
     assert versao_ja_usada(tmp_path, "qualidade@v2", "r2") is None
+
+
+def test_reexportar_a_mesma_versao_so_com_arquivo_identico(tmp_path):
+    destino = tmp_path / "qualidade@v1.onnx"
+    destino.write_bytes(b"modelo")
+    tmp = tmp_path / "novo.tmp"
+    tmp.write_bytes(b"modelo")
+    publicar(tmp, destino)  # mesmo sha: idempotente
+    assert destino.read_bytes() == b"modelo" and not tmp.exists()
+    tmp.write_bytes(b"outro modelo")
+    with pytest.raises(SystemExit, match="outro sha256"):
+        publicar(tmp, destino)
+    assert destino.read_bytes() == b"modelo" and not tmp.exists()  # o em uso ficou intacto

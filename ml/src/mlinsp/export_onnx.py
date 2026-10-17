@@ -70,6 +70,22 @@ def origem_do_codigo(repo: Path) -> dict:
             "arvore_suja": None if sujo is None else bool(sujo)}
 
 
+def publicar(temporario: Path, destino: Path) -> None:
+    """Move o .onnx novo para `destino`. Se ja existe um arquivo diferente com esse nome
+    (mesma versao, outra semente ou outro torch), recusa: sobrescrever trocaria o modelo que
+    o worker carrega por um que a politica nao calibrou. Arquivo identico e idempotente."""
+    if destino.exists():
+        novo, atual = qualidade.sha256(temporario), qualidade.sha256(destino)
+        if atual != novo:
+            temporario.unlink()
+            raise SystemExit(
+                f"{destino.name} ja existe com outro sha256 ({atual[:12]} != {novo[:12]}). "
+                "Exporte com --versao nova; reexportar a mesma versao so e aceito se o arquivo "
+                "for identico."
+            )
+    temporario.replace(destino)
+
+
 def versao_ja_usada(reports: Path, versao: str, rodada: str) -> str | None:
     """Rodada que ja exportou `versao`, se nao for esta. Cada versao do detector pertence
     a uma rodada so: o backend amarra versao, rodada e limiar a uma politica registrada."""
@@ -151,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         temporario.unlink()
         raise SystemExit(f"paridade torch x onnxruntime falhou: {par} (tolerancia {TOLERANCIA})")
     destino = args.artefatos / f"{args.versao}.onnx"
-    temporario.replace(destino)
+    publicar(temporario, destino)
 
     contrato = {
         "versao": args.versao,

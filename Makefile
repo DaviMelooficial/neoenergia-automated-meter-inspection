@@ -70,7 +70,7 @@ worker-dev:  ## sobe o worker no host
 triagem-todos:  ## enfileira triagem: "recebida" e as sem resultado do detector atual (volta a detector ja usado: recalcular-todos)
 	cd app/backend && uv run python -m inspecao.jobs.cli reprocessar --todos
 
-recalcular-todos:  ## reaplica a politica aos resultados gravados, sem reabrir imagem (POLITICA=; padrao: a do detector configurado)
+recalcular-todos:  ## reaplica a politica aos resultados gravados, sem reabrir imagem (POLITICA=; padrao: a politica do worker que pegar o job)
 	cd app/backend && uv run python -m inspecao.jobs.cli recalcular --todos $(if $(POLITICA),--politica $(POLITICA),)
 
 relatorio-heuristicas:  ## exporta os scores do banco e gera ml/reports/heuristicas_* (LIMIAR=limiar_rejeita da v1)

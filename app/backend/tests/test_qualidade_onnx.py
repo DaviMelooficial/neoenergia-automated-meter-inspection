@@ -302,3 +302,17 @@ def test_triagem_com_detector_onnx_grava_e_decide_pela_v2(db_session, tmp_path, 
         select(ResultadoInferencia.saida).join(Foto).where(Foto.leitura_id == leitura.id)
     )
     assert saida["ilegivel"] > POLITICA_V2.limiar_rejeita and "cena" in saida
+
+
+def test_politica_v2_bate_com_o_contrato_versionado_da_rodada():
+    """A politica@v2 e o qualidade.json versionado da rodada que ela calibrou nao podem
+    divergir: a divergencia aparece aqui, e nao so quando o worker sobe com o modelo."""
+    from inspecao.config import RAIZ_REPO
+
+    copia = RAIZ_REPO / "ml" / "reports" / POLITICA_V2.rodada / "qualidade.json"
+    contrato = json.loads(copia.read_text(encoding="utf-8"))
+    assert contrato["versao"] == POLITICA_V2.modelo
+    assert contrato["rodada"] == POLITICA_V2.rodada
+    assert contrato["onnx_sha256"] == POLITICA_V2.onnx_sha256
+    assert contrato["limiar_rejeita"] == pytest.approx(POLITICA_V2.limiar_rejeita, abs=1e-9)
+    assert contrato["arvore_suja"] is False

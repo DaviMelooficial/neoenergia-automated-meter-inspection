@@ -208,6 +208,7 @@ const auditoria: ConcordanciaAuditoria = {
   auto_aprovadas: {
     detector: "heuristica@v1",
     politica: "politica@v1",
+    etapa: "qualidade",
     n: 0,
     erros: 0,
     taxa_erro: null,
@@ -220,6 +221,7 @@ const auditoria: ConcordanciaAuditoria = {
   auto_rejeitadas: {
     detector: "heuristica@v1",
     politica: "politica@v1",
+    etapa: "qualidade",
     n: 12,
     erros: 1,
     taxa_erro: 1 / 12,
@@ -354,6 +356,7 @@ describe("Metricas", () => {
       auto_rejeitadas: {
         detector: "heuristica@v1",
         politica: "politica@v1",
+        etapa: "qualidade",
         n: 10,
         erros: 0,
         taxa_erro: 0,
@@ -392,6 +395,7 @@ describe("Metricas", () => {
       auto_aprovadas: {
         detector: "heuristica@v1",
         politica: "politica@v1",
+        etapa: "qualidade",
         n: null,
         erros: null,
         taxa_erro: null,
@@ -404,6 +408,7 @@ describe("Metricas", () => {
       auto_rejeitadas: {
         detector: "heuristica@v1",
         politica: "politica@v1",
+        etapa: "qualidade",
         n: null,
         erros: null,
         taxa_erro: null,

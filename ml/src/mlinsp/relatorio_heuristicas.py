@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from mlinsp.dados import ler_manifesto
-from mlinsp.heuristicas import features_v0_lote
+from mlinsp.heuristicas import NOMES_V0, features_v0_lote
 
 CLASSES = ["fora_de_foco", "glare", "tampa_suja", "enquadramento_incorreto", "display_apagado"]
 # Os 5 sinais do plano 04 (secao 2) e o sinal que o detector usa para foco.
@@ -44,6 +44,10 @@ SINAIS_PLANO = {
     "bordas_centro": "entropia_bordas (Canny centro)",
 }
 ESCALA_LOG = {"lap_var", "tenengrad"}
+# Contas de teste E2E, demo e seed (dominios de exemplo): decisao delas nao e auditoria
+# e nao entra como evidencia. No banco local de 2026-10-16 eram as 55 da fila
+# (auditor.e2e@exemplo.com.br e demo@exemplo.com.br).
+DOMINIOS_DE_TESTE = ("@exemplo.com.br", "@teste.com.br")
 GRADE = np.round(np.arange(0.50, 1.0001, 0.025), 3)
 N_PIORES = 100
 N_LIMITROFES = 100
@@ -51,11 +55,13 @@ N_LIMITROFES = 100
 
 def ler_exportacao(caminho: Path) -> pd.DataFrame:
     """Uma linha por leitura com foto: arquivo, lote, status, saida (json), latencia_ms,
-    decisao_humana. `p_ruim` = maior score entre as 5 classes, como na politica."""
+    decisao_humana, email_revisor. `p_ruim` = maior score entre as 5 classes, como na
+    politica; `sinais` guarda os sinais brutos gravados pelo backend."""
     df = pd.read_csv(caminho)
     saidas = df.pop("saida").map(json.loads)
     for c in CLASSES:
         df[c] = saidas.map(lambda s, c=c: s.get(c))
+    df["sinais"] = saidas.map(lambda s: s.get("sinais", {}))
     df["p_ruim"] = df[CLASSES].max(axis=1)
     df["classe_max"] = df[CLASSES].idxmax(axis=1)
     return df.set_index("arquivo")
@@ -72,12 +78,30 @@ def ler_rotulos(caminho: Path) -> pd.DataFrame:
 
 
 def evidencia(exp: pd.DataFrame, rot: pd.DataFrame) -> pd.DataFrame:
-    """Leituras com alguma verdade humana: `legivel` = 1 se algum humano leu."""
+    """Leituras com alguma verdade humana: `legivel` = 1 se algum humano leu.
+
+    Decisoes da fila feitas por contas de DOMINIOS_DE_TESTE ficam de fora."""
     lab = exp.join(rot, how="inner")
     lab = lab.assign(legivel=lab.legivel_algum, fonte="rotulo_lab02")
-    hum = exp[exp.decisao_humana.notna() & ~exp.index.isin(lab.index)]
+    de_teste = exp.email_revisor.fillna("").str.lower().str.endswith(DOMINIOS_DE_TESTE)
+    hum = exp[exp.decisao_humana.notna() & ~de_teste & ~exp.index.isin(lab.index)]
     hum = hum.assign(legivel=(hum.decisao_humana == "aprovada").astype(int), fonte="fila_humana")
     return pd.concat([lab, hum])
+
+
+def paridade(feat: pd.DataFrame, exp: pd.DataFrame) -> dict:
+    """Compara `features_v0` (calculado aqui) com os sinais que o backend gravou, foto a
+    foto, sem passar por CSV: a medida de paridade do report."""
+    gravado = pd.DataFrame(list(exp.sinais), index=exp.index)[NOMES_V0]
+    calculado = feat.loc[gravado.index, NOMES_V0]
+    dif = (calculado - gravado).abs()
+    rel = dif / gravado.abs().where(gravado.abs() > 0, 1.0)
+    return {
+        "fotos": len(gravado),
+        "max_dif_abs": float(dif.max().max()),
+        "max_dif_rel": float(rel.max().max()),
+        "fotos_com_diferenca": int((dif > 0).any(axis=1).sum()),
+    }
 
 
 def tabela_limiar(exp: pd.DataFrame, ev: pd.DataFrame) -> pd.DataFrame:
@@ -269,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     legiveis = ev[ev.legivel == 1].sort_values("p_ruim", ascending=False)
     resumo = {
         "fotos_base": len(feat),
+        "paridade_backend_mlinsp": paridade(feat, exp),
         "leituras_com_heuristica": len(exp),
         "limiar_rejeita": args.limiar,
         "auto_rejeitadas": len(rej),
@@ -311,7 +336,8 @@ def main(argv: list[str] | None = None) -> int:
     (args.saida / "heuristicas_resumo.json").write_text(
         json.dumps(resumo, indent=1, ensure_ascii=False), encoding="utf-8"
     )
-    print(json.dumps({k: resumo[k] for k in ("auto_rejeitadas", "cobertura", "evidencia")},
+    print(json.dumps({k: resumo[k] for k in ("auto_rejeitadas", "cobertura",
+                                             "paridade_backend_mlinsp", "evidencia")},
                      indent=1, ensure_ascii=False))
     return 0
 

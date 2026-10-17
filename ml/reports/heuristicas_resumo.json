@@ -1,5 +1,11 @@
 {
  "fotos_base": 12340,
+ "paridade_backend_mlinsp": {
+  "fotos": 11419,
+  "max_dif_abs": 0.0,
+  "max_dif_rel": 0.0,
+  "fotos_com_diferenca": 0
+ },
  "leituras_com_heuristica": 11419,
  "limiar_rejeita": 0.85,
  "auto_rejeitadas": 87,

@@ -11,12 +11,12 @@ banco local. Reprodutível com `make triagem-todos` (worker com `DETECTOR_QUALID
 | --- | --- |
 | Limiar escolhido (`limiar_rejeita`) | **0,85** sobre `p_ruim` (maior score entre as 5 classes); `limiar_aprova` continua `None` |
 | Auto-rejeitado | **87 de 11.419 leituras com foto (0,76%)** |
-| Meta do plano (5% a 15%) | **Não atingida.** Ver "Por que a cobertura fica abaixo da meta" |
+| Meta do plano (5% a 15%) | **Não atingida.** O Davi aceitou 0,76% como linha de base que o M7 precisa bater (seção 4) |
 | Falso positivo nas fotos rotuladas do Lab 2 | **0** (3 rotuladas auto-rejeitadas, todas ilegíveis para todos os rotuladores) |
 | Inspeção humana das 200 fotos dos extremos | **Pendente** (amostra e página prontas, ver "Pendência humana") |
 | Triagem das 11.419 leituras, 4 workers no host | **41,5 s** do primeiro claim ao último job (aceite: < 10 min). Latência por imagem: média 3,6 ms, p95 5 ms |
 | `recalcular_decisao` nos 4 lotes | 1 a 2 s por passada, sem abrir imagem (teste com storage que falha em qualquer leitura) |
-| Paridade backend × `mlinsp` (Lab 2) | 12 features idênticas nas 12.340 fotos: maior diferença relativa 6,4e-13 (arredondamento do CSV de comparação) |
+| Paridade backend × `mlinsp` (Lab 2) | 12 features **idênticas, bit a bit**, nas 11.419 fotos com resultado: `features_v0` recalculado pelo relatório contra os `sinais` que o worker gravou (`paridade_backend_mlinsp` em `heuristicas_resumo.json`). As 921 fotos restantes (866 órfãs e 55 já decididas na fila) não passam pela triagem |
 
 ## 1. Sinais
 
@@ -71,8 +71,9 @@ tela (por que a foto é ruim), mas não decidem sozinhos.
 
 Evidência de falso positivo: as 328 fotos rotuladas no Lab 2 que estão no banco (188 legíveis para
 algum rotulador). Foto auto-rejeitada que **qualquer** rotulador marcou legível conta como falso
-positivo. As 55 decisões da fila humana no banco local são de testes E2E e demo
-(`auditor.e2e@`, `demo@`), não de auditoria, e ficaram fora da evidência.
+positivo. Decisões da fila humana também contam como evidência, exceto as de contas de domínio de
+exemplo ou teste (`DOMINIOS_DE_TESTE` em `relatorio_heuristicas.py`): as 55 do banco local são de
+testes E2E e demo (`auditor.e2e@exemplo.com.br`, `demo@exemplo.com.br`), não de auditoria.
 
 | limiar | auto-rejeitadas | % | rotuladas acima | falsos positivos |
 | --- | --- | --- | --- | --- |
@@ -121,8 +122,12 @@ positivos entre as 16 rotuladas acima dele.
 
 O que isso diz para o plano: a heurística serve para tirar da fila o lixo óbvio (quadro preto,
 foto sem nenhum detalhe), não para reduzir a fila em 5% a 15%. A redução de carga real depende do
-modelo do M7, que agora tem uma linha de base concreta para bater: 0,76% de cobertura com zero
-falso positivo.
+modelo do M7.
+
+**Decisão (Davi, 2026-10-16):** a meta de 5% a 15% do M5 é substituída por esta linha de base.
+O M7 precisa bater **0,76% de auto-rejeição com zero falso positivo** no mesmo conjunto rotulado
+(além do critério de macro-F1 do doc 06). Se o modelo treinado não rejeitar mais do que isso sem
+falso positivo, a heurística segue em operação.
 
 ## 5. Pendência humana: inspeção das 200 fotos dos extremos
 
@@ -138,5 +143,8 @@ O aceite do M5 exige zero falso positivo confirmado por inspeção humana de 200
 
 Como fechar: qualquer `sim` no grupo `pior` com `decisao_v1 = rejeitar` é falso positivo, e o
 limiar sobe acima do `p_ruim` dessa foto. Se o grupo `limitrofe` vier todo `nao`, o limiar pode
-descer até o menor `p_ruim` sem nenhum `sim`. Nos dois casos a troca é uma linha em
-`POLITICA_V1` (ou uma `politica@v2`) seguida de `make recalcular-todos`, sem reabrir imagem.
+descer até o menor `p_ruim` sem nenhum `sim`. Nos dois casos o limiar novo entra como uma versão
+nova, `politica@v2` em `POLITICAS` (e `POLITICA_ATUAL` apontando para ela), seguida de
+`make recalcular-todos POLITICA=politica@v2`, sem reabrir imagem. **Nunca editar `POLITICA_V1` no
+lugar**: o histórico de status grava a versão que decidiu cada leitura, e mudar o limiar sob o
+mesmo nome tornaria esse registro falso.

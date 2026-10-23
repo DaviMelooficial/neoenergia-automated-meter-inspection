@@ -32,6 +32,11 @@ def _descobrir_raiz() -> Path:
 
 RAIZ_REPO = _descobrir_raiz()
 
+# Valor do .env.example: serve em dev, e recusado fora de dev como os demais exemplos.
+SALT_ROTULAGEM_EXEMPLO = "9b846d587d76561b49133bcbd9da8808"
+# Usado em dev com ROTULAGEM_SALT vazio. Publico (esta no codigo): recusado fora de dev.
+SALT_ROTULAGEM_DEV = "rotulagem-dev-sem-salt"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -74,13 +79,38 @@ class Settings(BaseSettings):
     # so desligue em ambiente onde isso nao vale.
     cookie_secure: bool = True
 
+    # Rotulagem (M6). Salt secreto da ordem de entrega do /rotulagem/proxima: sem ele,
+    # md5(foto:usuario) com ids sequenciais deixaria um rotulador calcular a ordem do
+    # outro. Vazio so em dev (cai num valor fixo); fora de dev a API nao sobe.
+    rotulagem_salt: str = ""
+
+    # Auditoria amostral (M8): fracao dos itens decididos na fila humana que vai para
+    # um segundo revisor. O plano pede de 5% a 10%; fora disso a API nao sobe.
+    auditoria_taxa: float = 0.07
+    # Auto-rejeicoes (a unica decisao automatica ligada) tem taxa propria: decisao do Davi
+    # (2026-10-17), 100%, para medir o falso positivo da auto-rejeicao em operacao.
+    auditoria_taxa_auto_rejeitada: float = 1.0
+
+    # Drift (M8): lotes que formam a baseline dos 5 sinais. Padrao: os 3 lotes de maio
+    # (treino e validacao do split temporal, plano 04 secao 3.2); julho e o teste.
+    drift_lotes_baseline: list[str] = [
+        "PSP_EXTRATLEITIMPL_200526_0352",
+        "PSP_EXTRATLEITIMPL_210526_0335",
+        "PSP_EXTRATLEITIMPL_220526_0408",
+    ]
+
     # Workers
     worker_concurrency: int = 4
     worker_poll_segundos: int = 2
     worker_max_tentativas: int = 3
 
-    # Modelos
-    modelo_qualidade_path: Path = Path("./ml/artifacts/qualidade.onnx")
+    # Modelos. DETECTOR_QUALIDADE escolhe o detector do worker: "heuristica" (M5,
+    # padrao), "onnx" (modelo do M7 em MODELO_QUALIDADE_PATH, com o <versao>.json ao
+    # lado) ou "nulo" (tudo para humano). A politica segue o detector (politica_para).
+    detector_qualidade: str = "heuristica"
+    # Um arquivo por versao (<versao>.onnx + <versao>.json): exportar a proxima versao nao
+    # mexe no arquivo que o worker esta usando.
+    modelo_qualidade_path: Path = Path("./ml/artifacts/qualidade@v1.onnx")
     modelo_qualidade_ativo: bool = False
 
     PLACEHOLDERS_INSEGUROS: ClassVar[frozenset[str]] = frozenset(
@@ -88,6 +118,8 @@ class Settings(BaseSettings):
             "trocar_em_producao",
             "trocar_em_producao_use_openssl_rand_hex_32",
             "trocar_no_primeiro_login",
+            SALT_ROTULAGEM_EXEMPLO,
+            SALT_ROTULAGEM_DEV,
         }
     )
 
@@ -95,12 +127,17 @@ class Settings(BaseSettings):
     def _proibir_placeholders_fora_de_dev(self) -> "Settings":
         if self.jwt_alg not in {"HS256", "HS384", "HS512"}:
             raise ValueError("JWT_ALG precisa ser HS256, HS384 ou HS512")
+        if not 0.05 <= self.auditoria_taxa <= 0.10:
+            raise ValueError("AUDITORIA_TAXA precisa estar entre 0.05 e 0.10 (5% a 10%)")
+        if not 0.05 <= self.auditoria_taxa_auto_rejeitada <= 1.0:
+            raise ValueError("AUDITORIA_TAXA_AUTO_REJEITADA precisa estar entre 0.05 e 1.0")
         if self.ambiente != "dev":
             inseguros = [
                 nome
                 for nome, valor in (
                     ("JWT_SECRET", self.jwt_secret),
                     ("ADMIN_SENHA_INICIAL", self.admin_senha_inicial),
+                    ("ROTULAGEM_SALT", self.rotulagem_salt),
                 )
                 if valor in self.PLACEHOLDERS_INSEGUROS or len(valor) < 16
             ]
@@ -109,6 +146,9 @@ class Settings(BaseSettings):
                     f"AMBIENTE={self.ambiente}: defina valores fortes para {', '.join(inseguros)}"
                 )
         return self
+
+    def salt_da_rotulagem(self) -> str:
+        return self.rotulagem_salt or SALT_ROTULAGEM_DEV
 
     def caminho_absoluto(self, caminho: Path) -> Path:
         """Resolve um caminho relativo contra a raiz do repositorio."""

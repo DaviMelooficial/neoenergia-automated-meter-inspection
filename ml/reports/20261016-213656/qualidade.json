@@ -1,0 +1,99 @@
+{
+ "versao": "qualidade@v1",
+ "rodada": "20261016-213656",
+ "semente": 0,
+ "commit": "9fda8602a938e1036c8c7ca3873e09d9bfece86c",
+ "arvore_suja": false,
+ "onnx_sha256": "ab653b59e90e5e8e16637bc5ead99f1beac988df693291f724459b8e53304b72",
+ "onnx_bytes": 3742111,
+ "entrada": {
+  "nome": "entrada",
+  "layout": "NCHW",
+  "dtype": "float32",
+  "cores": "RGB",
+  "lado": 224,
+  "letterbox": "lado maior a 224 com INTER_AREA, centralizado",
+  "preenchimento_rgb": [
+   124,
+   116,
+   104
+  ],
+  "escala": 0.00392156862745098,
+  "media": [
+   0.485,
+   0.456,
+   0.406
+  ],
+  "desvio": [
+   0.229,
+   0.224,
+   0.225
+  ]
+ },
+ "saidas": {
+  "cena": [
+   "digital",
+   "eletromecanico",
+   "ocorrencia",
+   "nao_medidor"
+  ],
+  "defeitos": [
+   "reflexo",
+   "fora_de_foco",
+   "tampa_suja",
+   "enquadramento",
+   "display_apagado"
+  ],
+  "legivel": [
+   "legivel"
+  ]
+ },
+ "defeito_para_classe": {
+  "reflexo": "glare",
+  "fora_de_foco": "fora_de_foco",
+  "tampa_suja": "tampa_suja",
+  "enquadramento": "enquadramento_incorreto",
+  "display_apagado": "display_apagado"
+ },
+ "temperatura_legivel": 1.0226845378116836,
+ "temperatura_cena": 1.091070053874651,
+ "limiar_rejeita": 0.976,
+ "limiar_aprova": null,
+ "decisao": "p_ilegivel = 1 - sigmoid(legivel / temperatura_legivel); defeitos so informativos (kappa humano baixo), fora da decisao",
+ "paridade": {
+  "fotos": 100,
+  "tolerancia": 0.0001,
+  "max_dif_logit": {
+   "cena": 3.0517578125e-05,
+   "defeitos": 0.00011157989501953125,
+   "legivel": 3.94284725189209e-05
+  },
+  "max_dif_probabilidade": {
+   "cena": 4.351139068603516e-06,
+   "defeitos": 8.106231689453125e-06,
+   "legivel": 9.357929229736328e-06
+  },
+  "criterio": 3.94284725189209e-05
+ },
+ "teste": {
+  "legivel_macro_f1": 0.7661971830985916,
+  "rejeicao": {
+   "rejeitadas": 3,
+   "cobertura": 0.03571428571428571,
+   "falsos_positivos": 0,
+   "precisao": 1.0,
+   "precisao_ic95_wilson": [
+    0.4385,
+    1.0
+   ],
+   "erro_sup95_clopper_pearson_unilateral": 0.6315968501359612
+  },
+  "criterio_entrada": {
+   "E1_macro_f1_maior_que_heuristica": true,
+   "E2_zero_fp_no_teste": true,
+   "E3_cobertura_base_maior_ou_igual_heuristica": true,
+   "cobertura_base": 0.0372186706366582,
+   "entra": true
+  }
+ }
+}

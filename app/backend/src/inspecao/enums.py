@@ -78,7 +78,7 @@ class TipoJob(StrEnum):
     VALIDACAO_LEITURA = "validacao_leitura"
     REPROCESSAR_LOTE = "reprocessar_lote"
     INGERIR_LOTE = "ingerir_lote"
-    # recalcular_decisao entra no marco M5 (T-M5-06), junto com a politica calibrada.
+    RECALCULAR_DECISAO = "recalcular_decisao"
 
 
 class DecisaoHumana(StrEnum):
@@ -95,3 +95,43 @@ class MotivoReprovacao(StrEnum):
     ENQUADRAMENTO_INCORRETO = "enquadramento_incorreto"
     DISPLAY_APAGADO = "display_apagado"
     OUTRO = "outro"
+
+
+# ---------------------------------------------------------------------------
+# Rotulagem (marco M6), esquema v2 de lab-02/rotulos/esquema.md
+# ---------------------------------------------------------------------------
+
+
+class RodadaRotulagem(StrEnum):
+    """`lab02` e importada do app `rotulador/`; `a`, `b` e `desempate` sao feitas na
+    tela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8)."""
+
+    LAB02 = "lab02"
+    A = "a"
+    B = "b"
+    DESEMPATE = "desempate"
+    PRODUCAO = "producao"
+    # Inspecao humana das 200 fotos dos extremos do M5 (calibrou o limiar 0,85): so legivel.
+    INSPECAO_M5 = "inspecao_m5"
+    # Inspecao humana das 355 fotos que so a `politica@v2` (M7) rejeita: e o que decide
+    # ativar o modelo, entao e calibracao dele. So legivel.
+    INSPECAO_M7 = "inspecao_m7"
+
+
+class Cena(StrEnum):
+    """Exclusiva: uma cena por foto."""
+
+    DIGITAL = "digital"
+    ELETROMECANICO = "eletromecanico"
+    OCORRENCIA = "ocorrencia"
+    NAO_MEDIDOR = "nao_medidor"
+
+
+class Defeito(StrEnum):
+    """Multirrotulo: zero, um ou varios por foto. Cada um vira uma coluna booleana."""
+
+    REFLEXO = "reflexo"
+    FORA_DE_FOCO = "fora_de_foco"
+    TAMPA_SUJA = "tampa_suja"
+    ENQUADRAMENTO = "enquadramento"
+    DISPLAY_APAGADO = "display_apagado"

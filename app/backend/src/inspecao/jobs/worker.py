@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from inspecao.config import Settings, get_settings
 from inspecao.db import SessionLocal
 from inspecao.inference.detector import carregar_detector
+from inspecao.inference.politica import politica_para
 from inspecao.jobs import fila
 from inspecao.jobs.handlers import REGISTRY, Contexto
 from inspecao.models import Job
@@ -63,10 +64,13 @@ class Worker:
         self.fabrica = fabrica
         self.worker_id = f"{socket.gethostname()}:{uuid.uuid4().hex[:8]}"
         self.parar = threading.Event()
+        detector = carregar_detector(self.settings)  # uma vez por worker
         self.ctx = Contexto(
             settings=self.settings,
-            detector=carregar_detector(self.settings),  # uma vez por worker
+            detector=detector,
             storage=LocalFileStorage(),
+            # A politica calibrada para este detector: limiar de um nao vale para outro.
+            politica=politica_para(detector.nome),
         )
 
     def _sinal(self, signum, frame) -> None:
@@ -76,7 +80,12 @@ class Worker:
     def executar(self) -> None:
         signal.signal(signal.SIGTERM, self._sinal)
         signal.signal(signal.SIGINT, self._sinal)
-        log.info("worker %s iniciado, detector=%s", self.worker_id, self.ctx.detector.nome)
+        log.info(
+            "worker %s iniciado, detector=%s, politica=%s",
+            self.worker_id,
+            self.ctx.detector.nome,
+            self.ctx.politica.versao,
+        )
         while not self.parar.is_set():
             try:
                 n = uma_volta(

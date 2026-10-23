@@ -11,11 +11,14 @@ evita a circularidade sem perder informacao:
     foto orfa (866 casos)    -> leitura_id nulo,       principal = False
 """
 
+import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -25,13 +28,15 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
+    text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from inspecao.db import Base
-from inspecao.enums import StatusLeitura
+from inspecao.enums import Cena, DecisaoHumana, MotivoReprovacao, RodadaRotulagem, StatusLeitura
 
 
 class Lote(Base):
@@ -359,3 +364,269 @@ class RevisaoHumana(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     leitura: Mapped["Leitura"] = relationship(back_populates="revisoes")
+
+
+# ---------------------------------------------------------------------------
+# Rotulagem (marco M6)
+# ---------------------------------------------------------------------------
+
+
+def _lista_sql(enum: type[StrEnum]) -> str:
+    return ", ".join(f"'{m.value}'" for m in enum)
+
+
+class Rotulo(Base):
+    """Rotulo humano de uma foto no esquema v2: cena, 5 defeitos e legivel.
+
+    A unidade e a foto, nao a leitura (`fotos.leitura_id` liga as duas). Quem
+    rotulou e um usuario da plataforma ou, para a rodada `lab02` importada do app
+    `rotulador/`, um identificador externo (`davi_melo`, `ivan`...): exatamente um
+    dos dois. Um rotulador tem no maximo um rotulo por foto e rodada; como
+    `usuario_id` e `rotulador_externo` sao anulaveis, a regra vive em dois indices
+    unicos parciais em vez de uma UNIQUE comum (NULL nunca colide).
+    """
+
+    __tablename__ = "rotulos"
+    __table_args__ = (
+        CheckConstraint(
+            "(usuario_id IS NULL) <> (rotulador_externo IS NULL)", name="ck_rotulos_um_rotulador"
+        ),
+        CheckConstraint(f"rodada IN ({_lista_sql(RodadaRotulagem)})", name="ck_rotulos_rodada"),
+        CheckConstraint(f"cena IN ({_lista_sql(Cena)})", name="ck_rotulos_cena"),
+        Index(
+            "uq_rotulos_foto_rodada_usuario",
+            "foto_id",
+            "rodada",
+            "usuario_id",
+            unique=True,
+            postgresql_where="usuario_id IS NOT NULL",
+        ),
+        Index(
+            "uq_rotulos_foto_rodada_externo",
+            "foto_id",
+            "rodada",
+            "rotulador_externo",
+            unique=True,
+            postgresql_where="rotulador_externo IS NOT NULL",
+        ),
+        # Rodadas a, b e desempate se excluem por usuario e foto: quem votou numa nao
+        # vota nas outras. No banco, e nao so no endpoint, para fechar a corrida entre
+        # duas abas do mesmo usuario.
+        Index(
+            "uq_rotulos_foto_usuario_dupla_cega",
+            "foto_id",
+            "usuario_id",
+            unique=True,
+            postgresql_where="usuario_id IS NOT NULL AND rodada IN ('a', 'b', 'desempate')",
+        ),
+        # Cada rodada cega rotula cada foto uma vez: sem isso um segundo rotulador
+        # gravaria a mesma foto pelo id e desfaria o empate (fugindo do desempate).
+        Index(
+            "uq_rotulos_foto_rodada_cega",
+            "foto_id",
+            "rodada",
+            unique=True,
+            postgresql_where="rodada IN ('a', 'b', 'desempate')",
+        ),
+        Index("ix_rotulos_rodada_foto", "rodada", "foto_id"),
+        # Fora de `producao` o esquema v2 e completo. Em `producao` (decisao de auditor,
+        # M8) cena e os defeitos nao declarados pela decisao ficam nulos.
+        CheckConstraint(
+            "rodada IN ('producao', 'inspecao_m5', 'inspecao_m7') OR (cena IS NOT NULL AND "
+            "reflexo IS NOT NULL AND fora_de_foco IS NOT NULL AND tampa_suja IS NOT NULL "
+            "AND enquadramento IS NOT NULL AND display_apagado IS NOT NULL "
+            "AND legivel IS NOT NULL)",
+            name="ck_rotulos_completo",
+        ),
+        # Rotulo de producao aponta para a decisao que o gerou: a da fila ou a da
+        # auditoria amostral, exatamente uma. As outras rodadas nao apontam.
+        CheckConstraint(
+            "CASE WHEN rodada = 'producao' THEN (revisao_id IS NULL) <> (auditoria_id IS NULL) "
+            "ELSE revisao_id IS NULL AND auditoria_id IS NULL END",
+            name="ck_rotulos_origem_producao",
+        ),
+        Index(
+            "uq_rotulos_revisao",
+            "revisao_id",
+            unique=True,
+            postgresql_where="revisao_id IS NOT NULL",
+        ),
+        Index(
+            "uq_rotulos_auditoria",
+            "auditoria_id",
+            unique=True,
+            postgresql_where="auditoria_id IS NOT NULL",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    foto_id: Mapped[int] = mapped_column(ForeignKey("fotos.id", ondelete="CASCADE"))
+    usuario_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    rotulador_externo: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    rodada: Mapped[str] = mapped_column(String(20))
+    # Nulos so nas rodadas `producao`, `inspecao_m5` e `inspecao_m7` (ck_rotulos_completo).
+    cena: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reflexo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fora_de_foco: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    tampa_suja: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    enquadramento: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    display_apagado: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    legivel: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    segundos_na_foto: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # So no lab02: foto de controle (vista pelos 3 integrantes), lida do controle.dat do
+    # app, que fica fora do git. Nulo = nao informado.
+    controle: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Quando o rotulador decidiu (no lab02, o `gravado_em` do CSV do app).
+    gravado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Origem do rotulo `producao` (M8): a decisao da fila ou a da auditoria amostral.
+    revisao_id: Mapped[int | None] = mapped_column(
+        ForeignKey("revisoes_humanas.id", ondelete="CASCADE", name="fk_rotulos_revisao"),
+        nullable=True,
+    )
+    auditoria_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auditorias_amostrais.id", ondelete="CASCADE", name="fk_rotulos_auditoria"),
+        nullable=True,
+    )
+
+    foto: Mapped["Foto"] = relationship()
+
+
+# ---------------------------------------------------------------------------
+# Auditoria amostral (marco M8)
+# ---------------------------------------------------------------------------
+
+
+class AuditoriaAmostral(Base):
+    """Decisao (de auditor ou da maquina) sorteada para um segundo revisor.
+
+    A unidade e a DECISAO, nao a leitura: `fila` aponta a revisao do auditor
+    (`revisao_id`, unico); `auto_aprovada`/`auto_rejeitada` apontam a linha do historico
+    em que a maquina decidiu (`historico_id`, unico). Leitura reaberta pela maquina tem
+    uma auditoria por decisao; a pendente da decisao antiga ganha `invalidada_em` e sai
+    das medidas, a ja decidida continua valendo para aquela decisao.
+
+    O segundo revisor nao ve a primeira decisao e nunca e o primeiro: a regra vale no
+    POST e no banco (`ck_auditorias_segundo_revisor`, `ck_auditorias_reserva_de_outro`).
+    A decisao do segundo revisor nao muda o status da leitura. Depois de gravada, e
+    imutavel no banco (gatilho `trg_auditorias_decisao_imutavel`, da migracao).
+    """
+
+    __tablename__ = "auditorias_amostrais"
+    __table_args__ = (
+        CheckConstraint(
+            "CASE WHEN origem = 'fila' THEN revisao_id IS NOT NULL AND revisor_original_id "
+            "IS NOT NULL AND historico_id IS NULL WHEN origem IN ('auto_aprovada', "
+            "'auto_rejeitada') THEN historico_id IS NOT NULL AND revisao_id IS NULL AND "
+            "revisor_original_id IS NULL ELSE false END",
+            name="ck_auditorias_origem",
+        ),
+        CheckConstraint(
+            "invalidada_em IS NULL OR decisao IS NULL", name="ck_auditorias_invalidada_pendente"
+        ),
+        CheckConstraint(
+            "revisor_id IS NULL OR revisor_id <> revisor_original_id",
+            name="ck_auditorias_segundo_revisor",
+        ),
+        CheckConstraint(
+            "reservado_por IS NULL OR reservado_por <> revisor_original_id",
+            name="ck_auditorias_reserva_de_outro",
+        ),
+        CheckConstraint(
+            "(revisor_id IS NULL) = (decisao IS NULL) "
+            "AND (decisao IS NULL) = (decidida_em IS NULL)",
+            name="ck_auditorias_decisao_completa",
+        ),
+        CheckConstraint(
+            f"decisao IS NULL OR decisao IN ({_lista_sql(DecisaoHumana)})",
+            name="ck_auditorias_decisao",
+        ),
+        CheckConstraint(
+            f"motivo IS NULL OR motivo IN ({_lista_sql(MotivoReprovacao)})",
+            name="ck_auditorias_motivo",
+        ),
+        CheckConstraint(
+            "decisao IS DISTINCT FROM 'reprovada' OR motivo IS NOT NULL",
+            name="ck_auditorias_reprovada_com_motivo",
+        ),
+        CheckConstraint(
+            "decisao IS DISTINCT FROM 'aprovada' OR motivo IS NULL",
+            name="ck_auditorias_aprovada_sem_motivo",
+        ),
+        UniqueConstraint("revisao_id", name="uq_auditorias_revisao"),
+        UniqueConstraint("historico_id", name="uq_auditorias_historico"),
+        UniqueConstraint("codigo", name="uq_auditorias_codigo"),
+        Index("ix_auditorias_leitura", "leitura_id"),
+        Index(
+            "ix_auditorias_pendentes",
+            "sorteada_em",
+            "id",
+            postgresql_where="decisao IS NULL AND invalidada_em IS NULL",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Identificador exposto ao revisor (item e rotas /auditoria/{codigo}): uuid aleatorio.
+    # O `id` e sequencial e as automaticas sao sorteadas em rajada na triagem: um id baixo
+    # num lote entregaria a origem.
+    codigo: Mapped[uuid.UUID] = mapped_column(
+        Uuid, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    leitura_id: Mapped[int] = mapped_column(ForeignKey("leituras.id", ondelete="CASCADE"))
+    # fila: decisao de auditor (revisao e revisor original preenchidos); auto_aprovada e
+    # auto_rejeitada: decisao da maquina, sem revisao nem revisor original
+    # (ck_auditorias_origem).
+    origem: Mapped[str] = mapped_column(String(20), default="fila", server_default="fila")
+    revisao_id: Mapped[int | None] = mapped_column(
+        ForeignKey("revisoes_humanas.id", ondelete="CASCADE"), nullable=True
+    )
+    historico_id: Mapped[int | None] = mapped_column(
+        ForeignKey("historico_status.id", ondelete="CASCADE"), nullable=True
+    )
+    revisor_original_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True
+    )
+    # Pendente que deixou de valer: a maquina reabriu a leitura e a decisao conferida nao
+    # existe mais. Fora do /proxima e das medidas (ck_auditorias_invalidada_pendente).
+    invalidada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sorteada_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    reservado_por: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    reservado_ate: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revisor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True
+    )
+    decisao: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    motivo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decidida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    leitura: Mapped["Leitura"] = relationship()
+    revisao: Mapped["RevisaoHumana | None"] = relationship()
+
+
+class AtivacaoPolitica(Base):
+    """Quando cada politica comecou a decidir, e os lotes que ja existiam nesse instante.
+
+    Gravada por `estados.transicionar` na PRIMEIRA decisao automatica da politica, na mesma
+    transacao que a grava (`ON CONFLICT DO NOTHING` entre workers). O falso positivo da
+    auto-rejeicao de uma politica (`auditoria._estratos`) so conta lotes ingeridos DEPOIS da
+    ativacao: lote cujo nome esta em `lotes_anteriores` nunca entra no estrato dela, nem se
+    for reingerido. Os lotes anteriores contem a calibracao e o treino da politica, que nem
+    sempre deixam rotulo em `rotulos` (as 2.500 fotos do estagio 1 do M7, por exemplo).
+    """
+
+    __tablename__ = "ativacoes_politica"
+
+    politica: Mapped[str] = mapped_column(String(40), primary_key=True)
+    ativada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # A decisao que ativou (nula se ela sumir numa reingestao com --reprocessar).
+    historico_id: Mapped[int | None] = mapped_column(
+        ForeignKey("historico_status.id", ondelete="SET NULL"), nullable=True
+    )
+    lotes_anteriores: Mapped[list[str]] = mapped_column(ARRAY(String(120)))

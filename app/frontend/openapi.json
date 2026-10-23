@@ -268,6 +268,7 @@
      "operacao"
     ],
     "summary": "Obter Leitura",
+    "description": "Leitura completa; decisao final alheia oculta (ver `ocultar_decisao`).",
     "operationId": "obter_leitura_leituras__leitura_id__get",
     "security": [
      {
@@ -618,7 +619,7 @@
      "fila-humana"
     ],
     "summary": "Liberar",
-    "description": "Devolve a reserva do proprio usuario (\"pular\"). Reserva alheia nao e tocada.",
+    "description": "Devolve a reserva do proprio usuario (\"pular\"). Reserva alheia nao e tocada.\n\nCom lock de linha: se a reserva venceu e outro auditor acabou de pegar o\nitem, a checagem de dono acontece ja com a linha travada e nada e apagado.",
     "operationId": "liberar_fila_humana__leitura_id__liberar_post",
     "security": [
      {
@@ -693,6 +694,134 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/RevisaoOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auditoria/proxima": {
+   "post": {
+    "tags": [
+     "auditoria"
+    ],
+    "summary": "Proxima",
+    "description": "Reserva por 10 min a proxima auditoria que este usuario pode fazer: nunca uma\ndecisao dele mesmo, nunca uma reservada por outro revisor.",
+    "operationId": "proxima_auditoria_proxima_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ItemAuditoriaOut"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ]
+   }
+  },
+  "/auditoria/{codigo}/liberar": {
+   "post": {
+    "tags": [
+     "auditoria"
+    ],
+    "summary": "Liberar",
+    "description": "Devolve a reserva propria. Qualquer outro caso: a resposta unica.",
+    "operationId": "liberar_auditoria__codigo__liberar_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "codigo",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Codigo"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auditoria/{codigo}/decisao": {
+   "post": {
+    "tags": [
+     "auditoria"
+    ],
+    "summary": "Decidir",
+    "description": "Grava a decisao do segundo revisor e o rotulo `producao` na mesma transacao.\n\nA regra vale aqui, e nao so no `/proxima`: a auditoria tem de estar pendente, nao ser\ndecisao do proprio usuario e nao estar reservada por outro (lock da linha ate o\ncommit). O banco repete a regra (`ck_auditorias_segundo_revisor`, gatilho de\nimutabilidade). Toda recusa e a resposta unica.",
+    "operationId": "decidir_auditoria__codigo__decisao_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "codigo",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Codigo"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DecisaoIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AuditoriaDecisaoOut"
         }
        }
       }
@@ -933,15 +1062,184 @@
     ],
     "summary": "Qualidade",
     "operationId": "qualidade_metricas_qualidade_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "politica",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "versao da politica (registro POLITICAS); padrao: a ativa",
+       "title": "Politica"
+      },
+      "description": "versao da politica (registro POLITICAS); padrao: a ativa"
+     }
+    ],
     "responses": {
      "200": {
       "description": "Successful Response",
       "content": {
        "application/json": {
         "schema": {
-         "additionalProperties": true,
-         "type": "object",
-         "title": "Response Qualidade Metricas Qualidade Get"
+         "$ref": "#/components/schemas/QualidadeOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/metricas/drift": {
+   "get": {
+    "tags": [
+     "metricas"
+    ],
+    "summary": "Drift",
+    "description": "Serie por lote com os 5 sinais contra a baseline (criterio em `monitoramento.drift`),\nmais as contagens operacionais de cada lote.",
+    "operationId": "drift_metricas_drift_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "politica",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "versao da politica (registro POLITICAS); padrao: a ativa",
+       "title": "Politica"
+      },
+      "description": "versao da politica (registro POLITICAS); padrao: a ativa"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DriftOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/metricas/auto-aprovacao": {
+   "get": {
+    "tags": [
+     "metricas"
+    ],
+    "summary": "Estado Auto Aprovacao",
+    "description": "Estado dos limiares da politica e o contador de evidencia para ligar a\nauto-aprovacao (600 rotuladas na zona de aprovacao, zero erro).",
+    "operationId": "estado_auto_aprovacao_metricas_auto_aprovacao_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "politica",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "versao da politica (registro POLITICAS); padrao: a ativa",
+       "title": "Politica"
+      },
+      "description": "versao da politica (registro POLITICAS); padrao: a ativa"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AutoAprovacaoOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/metricas/auditoria": {
+   "get": {
+    "tags": [
+     "metricas"
+    ],
+    "summary": "Concordancia Auditoria",
+    "description": "Concordancia primeiro x segundo revisor da auditoria amostral. Supervisor ve so os\ntotais com ao menos `min_pares` pares; contagens, por lote e serie so admin (que por\nisso nao audita).",
+    "operationId": "concordancia_auditoria_metricas_auditoria_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ConcordanciaAuditoriaOut"
         }
        }
       }
@@ -954,33 +1252,230 @@
     ]
    }
   },
-  "/metricas/drift": {
-   "get": {
+  "/rotulagem/proxima": {
+   "post": {
     "tags": [
-     "metricas"
+     "rotulagem"
     ],
-    "summary": "Drift",
-    "description": "Serie por lote. Sinais de modelo (confianca media, discordancia) so a partir do M5.",
-    "operationId": "drift_metricas_drift_get",
+    "summary": "Proxima",
+    "description": "Proxima foto que este usuario ainda pode rotular nesta rodada.\n\nA resposta so identifica a foto: nenhum rotulo alheio, decisao da maquina,\nscore, posicao lida nem nota do leiturista.",
+    "operationId": "proxima_rotulagem_proxima_post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "rodada",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "a",
+        "b",
+        "desempate"
+       ],
+       "type": "string",
+       "default": "a",
+       "title": "Rodada"
+      }
+     }
+    ],
     "responses": {
      "200": {
       "description": "Successful Response",
       "content": {
        "application/json": {
         "schema": {
-         "additionalProperties": true,
-         "type": "object",
-         "title": "Response Drift Metricas Drift Get"
+         "$ref": "#/components/schemas/FotoRotulagemOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
         }
        }
       }
      }
-    },
+    }
+   }
+  },
+  "/rotulagem/consolidacao": {
+   "get": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Consolidacao",
+    "description": "Kappa de Cohen por classe (media dos pares ponderada por n) e por par.\n\nPadrao: rodada `lab02`. Qualquer rodada cega na consulta: so admin. Juntar\nrodadas em que o mesmo rotulador votou duas vezes na mesma foto devolve 422,\nporque inflaria a concordancia.",
+    "operationId": "consolidacao_rotulagem_consolidacao_get",
     "security": [
      {
       "HTTPBearer": []
      }
-    ]
+    ],
+    "parameters": [
+     {
+      "name": "rodada",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/RodadaRotulagem"
+         },
+         "maxItems": 5
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Rodada"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ConsolidacaoOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/rotulagem/export": {
+   "get": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Exportar",
+    "description": "Uma linha por foto, rotulo por maioria; empate fica vazio. Mesmo arquivo do\n`make rotulos-exportar`, que grava em `ml/artifacts/rotulos.csv`.",
+    "operationId": "exportar_rotulagem_export_get",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "rodada",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/RodadaRotulagem"
+         },
+         "maxItems": 5
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Rodada"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "rotulos.csv consolidado",
+      "content": {
+       "text/csv": {}
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/rotulagem/{foto_id}": {
+   "post": {
+    "tags": [
+     "rotulagem"
+    ],
+    "summary": "Gravar",
+    "description": "Grava o rotulo do usuario atual. Cada rodada cega rotula cada foto uma vez,\nde uma pessoa so; nao ha edicao. Recusa: 409 com texto constante.",
+    "operationId": "gravar_rotulagem__foto_id__post",
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "foto_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Foto Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RotuloIn"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RotuloOut"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
    }
   },
   "/usuarios": {
@@ -1117,6 +1612,959 @@
  },
  "components": {
   "schemas": {
+   "AuditoriaDecisaoOut": {
+    "properties": {
+     "auditoria": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Auditoria"
+     },
+     "decisao": {
+      "$ref": "#/components/schemas/DecisaoHumana"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/MotivoReprovacao"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "observacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observacao"
+     },
+     "decidida_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Decidida Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "auditoria",
+     "decisao",
+     "motivo",
+     "observacao",
+     "decidida_em"
+    ],
+    "title": "AuditoriaDecisaoOut",
+    "description": "So a decisao do proprio segundo revisor."
+   },
+   "AutoAprovacaoOut": {
+    "properties": {
+     "politica": {
+      "type": "string",
+      "title": "Politica"
+     },
+     "detector": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detector"
+     },
+     "limiar_rejeita": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limiar Rejeita"
+     },
+     "limiar_aprova": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limiar Aprova"
+     },
+     "ativa": {
+      "type": "boolean",
+      "title": "Ativa"
+     },
+     "contador_aplicavel": {
+      "type": "boolean",
+      "title": "Contador Aplicavel"
+     },
+     "motivo": {
+      "type": "string",
+      "title": "Motivo"
+     },
+     "alvo_erro": {
+      "type": "number",
+      "title": "Alvo Erro"
+     },
+     "confianca": {
+      "type": "number",
+      "title": "Confianca"
+     },
+     "necessarias": {
+      "type": "integer",
+      "title": "Necessarias"
+     },
+     "fotos_na_zona": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fotos Na Zona"
+     },
+     "rotuladas_na_zona": {
+      "type": "integer",
+      "title": "Rotuladas Na Zona"
+     },
+     "erros": {
+      "type": "integer",
+      "title": "Erros"
+     },
+     "acumuladas_sem_erro": {
+      "type": "integer",
+      "title": "Acumuladas Sem Erro"
+     },
+     "limite_superior_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limite Superior Erro"
+     },
+     "meta_atingida": {
+      "type": "boolean",
+      "title": "Meta Atingida"
+     },
+     "diagnostico": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DiagnosticoZonaOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "required": [
+     "politica",
+     "detector",
+     "limiar_rejeita",
+     "limiar_aprova",
+     "ativa",
+     "contador_aplicavel",
+     "motivo",
+     "alvo_erro",
+     "confianca",
+     "necessarias",
+     "fotos_na_zona",
+     "rotuladas_na_zona",
+     "erros",
+     "acumuladas_sem_erro",
+     "limite_superior_erro",
+     "meta_atingida",
+     "diagnostico"
+    ],
+    "title": "AutoAprovacaoOut"
+   },
+   "AutoDecididasOut": {
+    "properties": {
+     "quantidade": {
+      "type": "integer",
+      "title": "Quantidade"
+     },
+     "percentual": {
+      "type": "number",
+      "title": "Percentual"
+     }
+    },
+    "type": "object",
+    "required": [
+     "quantidade",
+     "percentual"
+    ],
+    "title": "AutoDecididasOut"
+   },
+   "BaselineDriftOut": {
+    "properties": {
+     "lotes": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Lotes"
+     },
+     "n_fotos_com_score": {
+      "type": "integer",
+      "title": "N Fotos Com Score"
+     },
+     "n_pares_discordancia": {
+      "type": "integer",
+      "title": "N Pares Discordancia"
+     },
+     "valores": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ValoresBaselineOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "sobredispersao": {
+      "additionalProperties": {
+       "type": "number"
+      },
+      "type": "object",
+      "title": "Sobredispersao",
+      "description": "phi APLICADO na carta p (1 com menos de min_lotes_phi lotes na baseline)"
+     },
+     "sobredispersao_estimada": {
+      "additionalProperties": {
+       "type": "number"
+      },
+      "type": "object",
+      "title": "Sobredispersao Estimada",
+      "description": "phi estimado entre os lotes da baseline (qui-quadrado/(k-1)), informativo"
+     }
+    },
+    "type": "object",
+    "required": [
+     "lotes",
+     "n_fotos_com_score",
+     "n_pares_discordancia",
+     "valores",
+     "sobredispersao",
+     "sobredispersao_estimada"
+    ],
+    "title": "BaselineDriftOut"
+   },
+   "BaselineQualidadeOut": {
+    "properties": {
+     "com_foto": {
+      "type": "integer",
+      "title": "Com Foto"
+     },
+     "contagens": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "propertyNames": {
+       "enum": [
+        "decidida_conta_teste",
+        "auto_rejeitada",
+        "auto_aprovada",
+        "fila_humana",
+        "aprovada_humano",
+        "reprovada_humano",
+        "em_processamento"
+       ]
+      },
+      "type": "object",
+      "title": "Contagens"
+     },
+     "taxas": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "propertyNames": {
+       "enum": [
+        "decidida_conta_teste",
+        "auto_rejeitada",
+        "auto_aprovada",
+        "fila_humana",
+        "aprovada_humano",
+        "reprovada_humano",
+        "em_processamento"
+       ]
+      },
+      "type": "object",
+      "title": "Taxas"
+     },
+     "lotes": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Lotes"
+     }
+    },
+    "type": "object",
+    "required": [
+     "com_foto",
+     "contagens",
+     "taxas",
+     "lotes"
+    ],
+    "title": "BaselineQualidadeOut"
+   },
+   "Cena": {
+    "type": "string",
+    "enum": [
+     "digital",
+     "eletromecanico",
+     "ocorrencia",
+     "nao_medidor"
+    ],
+    "title": "Cena",
+    "description": "Exclusiva: uma cena por foto."
+   },
+   "ConcordanciaAuditoriaOut": {
+    "properties": {
+     "rotulos_de_calibracao": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Rotulos De Calibracao",
+      "description": "rotulos por rodada de calibracao/treino excluida da medida"
+     },
+     "exclusao_incompleta": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Exclusao Incompleta",
+      "description": "rodadas obrigatorias (lab02, inspecao_m5 e, com o detector qualidade@v1, inspecao_m7) sem nenhum rotulo importado"
+     },
+     "taxa_configurada": {
+      "type": "number",
+      "title": "Taxa Configurada"
+     },
+     "taxa_auto_rejeitada": {
+      "type": "number",
+      "title": "Taxa Auto Rejeitada"
+     },
+     "min_pares": {
+      "type": "integer",
+      "title": "Min Pares"
+     },
+     "detalhe": {
+      "type": "boolean",
+      "title": "Detalhe"
+     },
+     "decisoes_na_fila": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Decisoes Na Fila"
+     },
+     "sorteadas": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sorteadas"
+     },
+     "taxa_observada": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Observada"
+     },
+     "pendentes": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pendentes"
+     },
+     "invalidadas": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Invalidadas"
+     },
+     "decididas": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Decididas"
+     },
+     "total": {
+      "$ref": "#/components/schemas/TotalConcordanciaOut"
+     },
+     "auto_aprovadas": {
+      "$ref": "#/components/schemas/DecisaoAutomaticaAuditoriaOut",
+      "description": "estrato da politica ativa"
+     },
+     "auto_rejeitadas": {
+      "$ref": "#/components/schemas/DecisaoAutomaticaAuditoriaOut",
+      "description": "estrato da politica ativa"
+     },
+     "estratos_auto_aprovadas": {
+      "items": {
+       "$ref": "#/components/schemas/DecisaoAutomaticaAuditoriaOut"
+      },
+      "type": "array",
+      "title": "Estratos Auto Aprovadas",
+      "description": "todos os estratos (so admin)"
+     },
+     "estratos_auto_rejeitadas": {
+      "items": {
+       "$ref": "#/components/schemas/DecisaoAutomaticaAuditoriaOut"
+      },
+      "type": "array",
+      "title": "Estratos Auto Rejeitadas",
+      "description": "todos os estratos (so admin)"
+     },
+     "por_lote": {
+      "items": {
+       "$ref": "#/components/schemas/ConcordanciaLoteOut"
+      },
+      "type": "array",
+      "title": "Por Lote"
+     },
+     "serie": {
+      "items": {
+       "$ref": "#/components/schemas/ConcordanciaDiaOut"
+      },
+      "type": "array",
+      "title": "Serie"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rotulos_de_calibracao",
+     "exclusao_incompleta",
+     "taxa_configurada",
+     "taxa_auto_rejeitada",
+     "min_pares",
+     "detalhe",
+     "decisoes_na_fila",
+     "sorteadas",
+     "taxa_observada",
+     "pendentes",
+     "invalidadas",
+     "decididas",
+     "total",
+     "auto_aprovadas",
+     "auto_rejeitadas",
+     "estratos_auto_aprovadas",
+     "estratos_auto_rejeitadas",
+     "por_lote",
+     "serie"
+    ],
+    "title": "ConcordanciaAuditoriaOut",
+    "description": "`detalhe` = admin: contagens, por lote e serie. Supervisor: so totais >= min_pares."
+   },
+   "ConcordanciaDiaOut": {
+    "properties": {
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "concordancia_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Decisao"
+     },
+     "kappa_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Decisao"
+     },
+     "concordancia_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Motivo"
+     },
+     "kappa_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Motivo"
+     },
+     "dia": {
+      "type": "string",
+      "format": "date",
+      "title": "Dia"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "concordancia_decisao",
+     "kappa_decisao",
+     "concordancia_motivo",
+     "kappa_motivo",
+     "dia"
+    ],
+    "title": "ConcordanciaDiaOut"
+   },
+   "ConcordanciaLoteOut": {
+    "properties": {
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "concordancia_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Decisao"
+     },
+     "kappa_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Decisao"
+     },
+     "concordancia_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Motivo"
+     },
+     "kappa_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Motivo"
+     },
+     "lote": {
+      "type": "string",
+      "title": "Lote"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "concordancia_decisao",
+     "kappa_decisao",
+     "concordancia_motivo",
+     "kappa_motivo",
+     "lote"
+    ],
+    "title": "ConcordanciaLoteOut"
+   },
+   "ConcordanciaMaquinaOut": {
+    "properties": {
+     "fonte": {
+      "type": "string",
+      "enum": [
+       "producao",
+       "lab02"
+      ],
+      "title": "Fonte"
+     },
+     "escopo": {
+      "type": "string",
+      "title": "Escopo"
+     },
+     "politica": {
+      "type": "string",
+      "title": "Politica"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "matriz": {
+      "$ref": "#/components/schemas/MatrizConcordanciaOut"
+     },
+     "concordancia": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia"
+     },
+     "kappa": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa"
+     }
+    },
+    "type": "object",
+    "required": [
+     "fonte",
+     "escopo",
+     "politica",
+     "n",
+     "matriz",
+     "concordancia",
+     "kappa"
+    ],
+    "title": "ConcordanciaMaquinaOut"
+   },
+   "ConsolidacaoOut": {
+    "properties": {
+     "rodadas": {
+      "items": {
+       "$ref": "#/components/schemas/RodadaRotulagem"
+      },
+      "type": "array",
+      "title": "Rodadas"
+     },
+     "limiar": {
+      "type": "number",
+      "title": "Limiar"
+     },
+     "rotuladores": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Rotuladores"
+     },
+     "rotulos": {
+      "type": "integer",
+      "title": "Rotulos"
+     },
+     "fotos": {
+      "type": "integer",
+      "title": "Fotos"
+     },
+     "fotos_dupla_rotulagem": {
+      "type": "integer",
+      "title": "Fotos Dupla Rotulagem"
+     },
+     "fotos_com_empate": {
+      "type": "integer",
+      "title": "Fotos Com Empate"
+     },
+     "por_classe": {
+      "items": {
+       "$ref": "#/components/schemas/KappaClasseOut"
+      },
+      "type": "array",
+      "title": "Por Classe"
+     },
+     "pares": {
+      "items": {
+       "$ref": "#/components/schemas/KappaParOut"
+      },
+      "type": "array",
+      "title": "Pares"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rodadas",
+     "limiar",
+     "rotuladores",
+     "rotulos",
+     "fotos",
+     "fotos_dupla_rotulagem",
+     "fotos_com_empate",
+     "por_classe",
+     "pares"
+    ],
+    "title": "ConsolidacaoOut"
+   },
+   "CriterioDriftOut": {
+    "properties": {
+     "min_fotos": {
+      "type": "integer",
+      "title": "Min Fotos"
+     },
+     "min_pares_discordancia": {
+      "type": "integer",
+      "title": "Min Pares Discordancia"
+     },
+     "classe_ativa": {
+      "type": "number",
+      "title": "Classe Ativa"
+     },
+     "inicio_zona_cinzenta": {
+      "type": "number",
+      "title": "Inicio Zona Cinzenta"
+     },
+     "desvio_classe": {
+      "type": "number",
+      "title": "Desvio Classe"
+     },
+     "desvio_rejeicao": {
+      "type": "number",
+      "title": "Desvio Rejeicao"
+     },
+     "lotes_seguidos_rejeicao": {
+      "type": "integer",
+      "title": "Lotes Seguidos Rejeicao"
+     },
+     "queda_confianca": {
+      "type": "number",
+      "title": "Queda Confianca"
+     },
+     "lotes_seguidos_confianca": {
+      "type": "integer",
+      "title": "Lotes Seguidos Confianca"
+     },
+     "subida_discordancia": {
+      "type": "number",
+      "title": "Subida Discordancia"
+     },
+     "subida_zona_cinzenta": {
+      "type": "number",
+      "title": "Subida Zona Cinzenta"
+     },
+     "z_carta_p": {
+      "type": "number",
+      "title": "Z Carta P"
+     },
+     "min_lotes_phi": {
+      "type": "integer",
+      "title": "Min Lotes Phi"
+     }
+    },
+    "type": "object",
+    "required": [
+     "min_fotos",
+     "min_pares_discordancia",
+     "classe_ativa",
+     "inicio_zona_cinzenta",
+     "desvio_classe",
+     "desvio_rejeicao",
+     "lotes_seguidos_rejeicao",
+     "queda_confianca",
+     "lotes_seguidos_confianca",
+     "subida_discordancia",
+     "subida_zona_cinzenta",
+     "z_carta_p",
+     "min_lotes_phi"
+    ],
+    "title": "CriterioDriftOut"
+   },
+   "DecisaoAutomaticaAuditoriaOut": {
+    "properties": {
+     "detector": {
+      "type": "string",
+      "title": "Detector"
+     },
+     "politica": {
+      "type": "string",
+      "title": "Politica"
+     },
+     "etapa": {
+      "type": "string",
+      "title": "Etapa",
+      "description": "qualidade (triagem) ou validacao (divergencia, ponto B)"
+     },
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "erros": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Erros"
+     },
+     "taxa_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Erro"
+     },
+     "limite_superior_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limite Superior Erro",
+      "description": "limite superior unilateral de 95% (Clopper-Pearson) do erro"
+     },
+     "alvo_erro": {
+      "type": "number",
+      "title": "Alvo Erro"
+     },
+     "necessarias": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Necessarias",
+      "description": "auditorias que sustentariam erro <= alvo com 95%, com os erros de hoje"
+     },
+     "alvo_atingido": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alvo Atingido"
+     },
+     "suprimido": {
+      "type": "boolean",
+      "title": "Suprimido"
+     }
+    },
+    "type": "object",
+    "required": [
+     "detector",
+     "politica",
+     "etapa",
+     "n",
+     "erros",
+     "taxa_erro",
+     "limite_superior_erro",
+     "alvo_erro",
+     "necessarias",
+     "alvo_atingido",
+     "suprimido"
+    ],
+    "title": "DecisaoAutomaticaAuditoriaOut",
+    "description": "Erro da maquina num estrato (detector, politica), uma leitura auditada por estrato.\nErro de auto-rejeitada: qualquer veredito que nao seja \"reprovada por defeito de\nqualidade\" (falso positivo); de auto-aprovada: qualquer reprovada."
+   },
    "DecisaoHumana": {
     "type": "string",
     "enum": [
@@ -1158,6 +2606,287 @@
      "decisao"
     ],
     "title": "DecisaoIn"
+   },
+   "DecisoesDetectorOut": {
+    "properties": {
+     "com_foto": {
+      "type": "integer",
+      "title": "Com Foto"
+     },
+     "contagens": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "propertyNames": {
+       "enum": [
+        "decidida_conta_teste",
+        "auto_rejeitada",
+        "auto_aprovada",
+        "fila_humana",
+        "aprovada_humano",
+        "reprovada_humano",
+        "em_processamento"
+       ]
+      },
+      "type": "object",
+      "title": "Contagens"
+     },
+     "taxas": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "propertyNames": {
+       "enum": [
+        "decidida_conta_teste",
+        "auto_rejeitada",
+        "auto_aprovada",
+        "fila_humana",
+        "aprovada_humano",
+        "reprovada_humano",
+        "em_processamento"
+       ]
+      },
+      "type": "object",
+      "title": "Taxas"
+     },
+     "detector": {
+      "type": "string",
+      "title": "Detector"
+     },
+     "politica": {
+      "type": "string",
+      "title": "Politica"
+     }
+    },
+    "type": "object",
+    "required": [
+     "com_foto",
+     "contagens",
+     "taxas",
+     "detector",
+     "politica"
+    ],
+    "title": "DecisoesDetectorOut"
+   },
+   "DecisoesLoteOut": {
+    "properties": {
+     "com_foto": {
+      "type": "integer",
+      "title": "Com Foto"
+     },
+     "contagens": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "propertyNames": {
+       "enum": [
+        "decidida_conta_teste",
+        "auto_rejeitada",
+        "auto_aprovada",
+        "fila_humana",
+        "aprovada_humano",
+        "reprovada_humano",
+        "em_processamento"
+       ]
+      },
+      "type": "object",
+      "title": "Contagens"
+     },
+     "taxas": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "propertyNames": {
+       "enum": [
+        "decidida_conta_teste",
+        "auto_rejeitada",
+        "auto_aprovada",
+        "fila_humana",
+        "aprovada_humano",
+        "reprovada_humano",
+        "em_processamento"
+       ]
+      },
+      "type": "object",
+      "title": "Taxas"
+     },
+     "lote": {
+      "type": "string",
+      "title": "Lote"
+     },
+     "data_extracao": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Data Extracao"
+     }
+    },
+    "type": "object",
+    "required": [
+     "com_foto",
+     "contagens",
+     "taxas",
+     "lote",
+     "data_extracao"
+    ],
+    "title": "DecisoesLoteOut"
+   },
+   "Defeito": {
+    "type": "string",
+    "enum": [
+     "reflexo",
+     "fora_de_foco",
+     "tampa_suja",
+     "enquadramento",
+     "display_apagado"
+    ],
+    "title": "Defeito",
+    "description": "Multirrotulo: zero, um ou varios por foto. Cada um vira uma coluna booleana."
+   },
+   "DiagnosticoZonaOut": {
+    "properties": {
+     "limiar": {
+      "type": "number",
+      "title": "Limiar"
+     },
+     "fonte": {
+      "type": "string",
+      "const": "lab02",
+      "title": "Fonte"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "ilegiveis": {
+      "type": "integer",
+      "title": "Ilegiveis"
+     },
+     "taxa_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Erro"
+     },
+     "limite_inferior_erro": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limite Inferior Erro"
+     }
+    },
+    "type": "object",
+    "required": [
+     "limiar",
+     "fonte",
+     "n",
+     "ilegiveis",
+     "taxa_erro",
+     "limite_inferior_erro"
+    ],
+    "title": "DiagnosticoZonaOut",
+    "description": "Erro que a faixa p_ruim <= limiar teria no Lab 2 (dentro da amostra). Nao e limiar."
+   },
+   "DriftOut": {
+    "properties": {
+     "politica": {
+      "type": "string",
+      "title": "Politica"
+     },
+     "detector": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detector"
+     },
+     "limiar_rejeita": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limiar Rejeita"
+     },
+     "criterio": {
+      "$ref": "#/components/schemas/CriterioDriftOut"
+     },
+     "baseline": {
+      "$ref": "#/components/schemas/BaselineDriftOut"
+     },
+     "lotes": {
+      "items": {
+       "$ref": "#/components/schemas/LoteDriftOut"
+      },
+      "type": "array",
+      "title": "Lotes"
+     }
+    },
+    "type": "object",
+    "required": [
+     "politica",
+     "detector",
+     "limiar_rejeita",
+     "criterio",
+     "baseline",
+     "lotes"
+    ],
+    "title": "DriftOut"
+   },
+   "FilaResumoOut": {
+    "properties": {
+     "pendentes": {
+      "type": "integer",
+      "title": "Pendentes"
+     },
+     "decididas": {
+      "type": "integer",
+      "title": "Decididas"
+     }
+    },
+    "type": "object",
+    "required": [
+     "pendentes",
+     "decididas"
+    ],
+    "title": "FilaResumoOut"
    },
    "FotoOut": {
     "properties": {
@@ -1220,6 +2949,65 @@
      "url"
     ],
     "title": "FotoOut"
+   },
+   "FotoRotulagemOut": {
+    "properties": {
+     "foto_id": {
+      "type": "integer",
+      "title": "Foto Id"
+     },
+     "url": {
+      "type": "string",
+      "title": "Url"
+     },
+     "largura": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Largura"
+     },
+     "altura": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Altura"
+     },
+     "rodada": {
+      "type": "string",
+      "enum": [
+       "a",
+       "b",
+       "desempate"
+      ],
+      "title": "Rodada"
+     },
+     "restantes": {
+      "type": "integer",
+      "title": "Restantes"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "foto_id",
+     "url",
+     "largura",
+     "altura",
+     "rodada",
+     "restantes"
+    ],
+    "title": "FotoRotulagemOut",
+    "description": "O que o rotulador recebe. Lista fechada (extra=\"forbid\"): nada de leitura,\nnota, medidor, score, decisao da maquina nem rotulo de outra pessoa. Cegueira\ne regra de servidor; o teste de vazamento confere exatamente estes campos."
    },
    "HTTPValidationError": {
     "properties": {
@@ -1339,6 +3127,120 @@
     ],
     "title": "IngestBatchIn"
    },
+   "ItemAuditoriaOut": {
+    "properties": {
+     "auditoria": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Auditoria"
+     },
+     "lote": {
+      "type": "string",
+      "title": "Lote"
+     },
+     "linha_csv": {
+      "type": "integer",
+      "title": "Linha Csv"
+     },
+     "medidores": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Medidores"
+     },
+     "posicao_lida": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Posicao Lida"
+     },
+     "nota_codigo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota Codigo"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/NotaOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "foto_principal": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/FotoOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "fotos": {
+      "items": {
+       "$ref": "#/components/schemas/FotoOut"
+      },
+      "type": "array",
+      "title": "Fotos"
+     },
+     "quarentena": {
+      "items": {
+       "$ref": "#/components/schemas/QuarentenaCegaOut"
+      },
+      "type": "array",
+      "title": "Quarentena"
+     },
+     "reservado_ate": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reservado Ate"
+     },
+     "ha_mais": {
+      "type": "boolean",
+      "title": "Ha Mais"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "auditoria",
+     "lote",
+     "linha_csv",
+     "medidores",
+     "posicao_lida",
+     "nota_codigo",
+     "nota",
+     "foto_principal",
+     "fotos",
+     "quarentena",
+     "reservado_ate",
+     "ha_mais"
+    ],
+    "title": "ItemAuditoriaOut",
+    "description": "O que o segundo revisor recebe, igual para as origens fila, auto_aprovada e\nauto_rejeitada. Lista fechada (extra=\"forbid\"): nada de status, historico, revisao\nanterior, scores da maquina nem id da leitura. O teste de vazamento confere."
+   },
    "JobOut": {
     "properties": {
      "id": {
@@ -1384,6 +3286,80 @@
      "criado_em"
     ],
     "title": "JobOut"
+   },
+   "KappaClasseOut": {
+    "properties": {
+     "classe": {
+      "type": "string",
+      "title": "Classe"
+     },
+     "kappa": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N",
+      "description": "pares-foto na media ponderada"
+     },
+     "passa": {
+      "type": "boolean",
+      "title": "Passa"
+     }
+    },
+    "type": "object",
+    "required": [
+     "classe",
+     "kappa",
+     "n",
+     "passa"
+    ],
+    "title": "KappaClasseOut"
+   },
+   "KappaParOut": {
+    "properties": {
+     "a": {
+      "type": "string",
+      "title": "A"
+     },
+     "b": {
+      "type": "string",
+      "title": "B"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "kappa": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "object",
+      "title": "Kappa"
+     }
+    },
+    "type": "object",
+    "required": [
+     "a",
+     "b",
+     "n",
+     "kappa"
+    ],
+    "title": "KappaParOut"
    },
    "LeituraOut": {
     "properties": {
@@ -1661,6 +3637,122 @@
     ],
     "title": "LoginIn"
    },
+   "LoteDriftOut": {
+    "properties": {
+     "lote_id": {
+      "type": "integer",
+      "title": "Lote Id"
+     },
+     "lote": {
+      "type": "string",
+      "title": "Lote"
+     },
+     "data_extracao": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Data Extracao"
+     },
+     "na_baseline": {
+      "type": "boolean",
+      "title": "Na Baseline"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "com_foto": {
+      "type": "integer",
+      "title": "Com Foto"
+     },
+     "por_status": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Por Status"
+     },
+     "quarentena_por_tipo": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Quarentena Por Tipo"
+     },
+     "modelos": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Modelos"
+     },
+     "taxa_reprovacao_humana": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Reprovacao Humana"
+     },
+     "n_fotos_com_score": {
+      "type": "integer",
+      "title": "N Fotos Com Score"
+     },
+     "amostra_insuficiente": {
+      "type": "boolean",
+      "title": "Amostra Insuficiente"
+     },
+     "p_ruim_medio": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P Ruim Medio"
+     },
+     "sinais": {
+      "$ref": "#/components/schemas/SinaisLoteOut"
+     },
+     "alertas": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Alertas"
+     }
+    },
+    "type": "object",
+    "required": [
+     "lote_id",
+     "lote",
+     "data_extracao",
+     "na_baseline",
+     "total",
+     "com_foto",
+     "por_status",
+     "quarentena_por_tipo",
+     "modelos",
+     "taxa_reprovacao_humana",
+     "n_fotos_com_score",
+     "amostra_insuficiente",
+     "p_ruim_medio",
+     "sinais",
+     "alertas"
+    ],
+    "title": "LoteDriftOut"
+   },
    "LoteOut": {
     "properties": {
      "id": {
@@ -1719,6 +3811,35 @@
      "ingerido_em"
     ],
     "title": "LoteOut"
+   },
+   "MatrizConcordanciaOut": {
+    "properties": {
+     "rejeita_ilegivel": {
+      "type": "integer",
+      "title": "Rejeita Ilegivel"
+     },
+     "rejeita_legivel": {
+      "type": "integer",
+      "title": "Rejeita Legivel"
+     },
+     "passa_ilegivel": {
+      "type": "integer",
+      "title": "Passa Ilegivel"
+     },
+     "passa_legivel": {
+      "type": "integer",
+      "title": "Passa Legivel"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rejeita_ilegivel",
+     "rejeita_legivel",
+     "passa_ilegivel",
+     "passa_legivel"
+    ],
+    "title": "MatrizConcordanciaOut",
+    "description": "maquina_humano: `rejeita` = p_ruim >= limiar_rejeita; `ilegivel` = humano."
    },
    "MotivoReprovacao": {
     "type": "string",
@@ -1839,6 +3960,223 @@
     ],
     "title": "Papel",
     "description": "Hierarquico: ADMIN > SUPERVISOR > AUDITOR. Comparar por ORDEM_PAPEL."
+   },
+   "PeriodoOut": {
+    "properties": {
+     "de": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "De"
+     },
+     "ate": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ate"
+     }
+    },
+    "type": "object",
+    "required": [
+     "de",
+     "ate"
+    ],
+    "title": "PeriodoOut"
+   },
+   "ProdutividadeOut": {
+    "properties": {
+     "usuario_id": {
+      "type": "integer",
+      "title": "Usuario Id"
+     },
+     "decisoes": {
+      "type": "integer",
+      "title": "Decisoes"
+     }
+    },
+    "type": "object",
+    "required": [
+     "usuario_id",
+     "decisoes"
+    ],
+    "title": "ProdutividadeOut"
+   },
+   "QualidadeOut": {
+    "properties": {
+     "periodo": {
+      "$ref": "#/components/schemas/PeriodoOut"
+     },
+     "total_leituras": {
+      "type": "integer",
+      "title": "Total Leituras"
+     },
+     "com_foto": {
+      "type": "integer",
+      "title": "Com Foto"
+     },
+     "sem_foto": {
+      "type": "integer",
+      "title": "Sem Foto"
+     },
+     "auto_decididas": {
+      "$ref": "#/components/schemas/AutoDecididasOut"
+     },
+     "fila_humana": {
+      "$ref": "#/components/schemas/FilaResumoOut"
+     },
+     "por_status": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Por Status"
+     },
+     "quarentena_por_tipo": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Quarentena Por Tipo"
+     },
+     "defeitos_qualidade": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Defeitos Qualidade"
+     },
+     "revisoes_por_decisao": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Revisoes Por Decisao"
+     },
+     "produtividade_por_auditor": {
+      "items": {
+       "$ref": "#/components/schemas/ProdutividadeOut"
+      },
+      "type": "array",
+      "title": "Produtividade Por Auditor"
+     },
+     "tempo_medio_decisao_segundos": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tempo Medio Decisao Segundos"
+     },
+     "decididas_conta_teste": {
+      "type": "integer",
+      "title": "Decididas Conta Teste",
+      "description": "decisoes de E2E/demo, fora das medidas"
+     },
+     "jobs": {
+      "additionalProperties": {
+       "additionalProperties": {
+        "type": "integer"
+       },
+       "type": "object"
+      },
+      "type": "object",
+      "title": "Jobs"
+     },
+     "baseline": {
+      "$ref": "#/components/schemas/BaselineQualidadeOut"
+     },
+     "por_lote": {
+      "items": {
+       "$ref": "#/components/schemas/DecisoesLoteOut"
+      },
+      "type": "array",
+      "title": "Por Lote"
+     },
+     "por_detector": {
+      "items": {
+       "$ref": "#/components/schemas/DecisoesDetectorOut"
+      },
+      "type": "array",
+      "title": "Por Detector"
+     },
+     "concordancia_maquina_humano": {
+      "items": {
+       "$ref": "#/components/schemas/ConcordanciaMaquinaOut"
+      },
+      "type": "array",
+      "title": "Concordancia Maquina Humano"
+     }
+    },
+    "type": "object",
+    "required": [
+     "periodo",
+     "total_leituras",
+     "com_foto",
+     "sem_foto",
+     "auto_decididas",
+     "fila_humana",
+     "por_status",
+     "quarentena_por_tipo",
+     "defeitos_qualidade",
+     "revisoes_por_decisao",
+     "produtividade_por_auditor",
+     "tempo_medio_decisao_segundos",
+     "decididas_conta_teste",
+     "jobs",
+     "baseline",
+     "por_lote",
+     "por_detector",
+     "concordancia_maquina_humano"
+    ],
+    "title": "QualidadeOut"
+   },
+   "QuarentenaCegaOut": {
+    "properties": {
+     "tipo": {
+      "type": "string",
+      "title": "Tipo"
+     },
+     "severidade": {
+      "type": "string",
+      "title": "Severidade"
+     },
+     "detalhe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detalhe"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "tipo",
+     "severidade",
+     "detalhe"
+    ],
+    "title": "QuarentenaCegaOut",
+    "description": "Inconsistencia da leitura sem nenhum id (nem da leitura, nem da foto)."
    },
    "QuarentenaOut": {
     "properties": {
@@ -2010,6 +4348,115 @@
     ],
     "title": "RevisaoOut"
    },
+   "RodadaRotulagem": {
+    "type": "string",
+    "enum": [
+     "lab02",
+     "a",
+     "b",
+     "desempate",
+     "producao",
+     "inspecao_m5",
+     "inspecao_m7"
+    ],
+    "title": "RodadaRotulagem",
+    "description": "`lab02` e importada do app `rotulador/`; `a`, `b` e `desempate` sao feitas na\ntela de rotulagem; `producao` vem das decisoes de auditor (active learning, M8)."
+   },
+   "RotuloIn": {
+    "properties": {
+     "rodada": {
+      "type": "string",
+      "enum": [
+       "a",
+       "b",
+       "desempate"
+      ],
+      "title": "Rodada"
+     },
+     "cena": {
+      "$ref": "#/components/schemas/Cena"
+     },
+     "defeitos": {
+      "items": {
+       "$ref": "#/components/schemas/Defeito"
+      },
+      "type": "array",
+      "maxItems": 5,
+      "title": "Defeitos"
+     },
+     "legivel": {
+      "type": "boolean",
+      "title": "Legivel"
+     },
+     "segundos_na_foto": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 3600.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Segundos Na Foto"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rodada",
+     "cena",
+     "legivel"
+    ],
+    "title": "RotuloIn",
+    "description": "Esquema v2. As regras de consistencia sao recusadas (422), nao corrigidas."
+   },
+   "RotuloOut": {
+    "properties": {
+     "id": {
+      "type": "integer",
+      "title": "Id"
+     },
+     "foto_id": {
+      "type": "integer",
+      "title": "Foto Id"
+     },
+     "rodada": {
+      "$ref": "#/components/schemas/RodadaRotulagem"
+     },
+     "cena": {
+      "$ref": "#/components/schemas/Cena"
+     },
+     "defeitos": {
+      "items": {
+       "$ref": "#/components/schemas/Defeito"
+      },
+      "type": "array",
+      "title": "Defeitos"
+     },
+     "legivel": {
+      "type": "boolean",
+      "title": "Legivel"
+     },
+     "gravado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Gravado Em"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "foto_id",
+     "rodada",
+     "cena",
+     "defeitos",
+     "legivel",
+     "gravado_em"
+    ],
+    "title": "RotuloOut",
+    "description": "Devolve so o rotulo do proprio usuario, que ele acabou de gravar."
+   },
    "Severidade": {
     "type": "string",
     "enum": [
@@ -2017,6 +4464,105 @@
      "informativo"
     ],
     "title": "Severidade"
+   },
+   "SinaisLoteOut": {
+    "properties": {
+     "classes": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/SinalOut"
+      },
+      "type": "object",
+      "title": "Classes"
+     },
+     "taxa_auto_rejeicao": {
+      "$ref": "#/components/schemas/SinalOut"
+     },
+     "confianca_media": {
+      "$ref": "#/components/schemas/SinalOut"
+     },
+     "discordancia": {
+      "$ref": "#/components/schemas/SinalOut"
+     },
+     "zona_cinzenta": {
+      "$ref": "#/components/schemas/SinalOut"
+     }
+    },
+    "type": "object",
+    "required": [
+     "classes",
+     "taxa_auto_rejeicao",
+     "confianca_media",
+     "discordancia",
+     "zona_cinzenta"
+    ],
+    "title": "SinaisLoteOut"
+   },
+   "SinalOut": {
+    "properties": {
+     "valor": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Valor"
+     },
+     "baseline": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Baseline"
+     },
+     "desvio": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Desvio"
+     },
+     "alerta": {
+      "type": "boolean",
+      "title": "Alerta"
+     },
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "z": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Z"
+     }
+    },
+    "type": "object",
+    "required": [
+     "valor",
+     "baseline",
+     "desvio",
+     "alerta",
+     "n",
+     "z"
+    ],
+    "title": "SinalOut",
+    "description": "`desvio` = valor - baseline. `n` = denominador do valor no lote. `z`: carta p com\nsobredispersao (so nas fracoes: classes, auto-rejeicao e zona cinzenta)."
    },
    "TipoInconsistencia": {
     "type": "string",
@@ -2055,6 +4601,80 @@
      "expires_in"
     ],
     "title": "TokenOut"
+   },
+   "TotalConcordanciaOut": {
+    "properties": {
+     "n": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "N"
+     },
+     "concordancia_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Decisao"
+     },
+     "kappa_decisao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Decisao"
+     },
+     "concordancia_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concordancia Motivo"
+     },
+     "kappa_motivo": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kappa Motivo"
+     },
+     "suprimido": {
+      "type": "boolean",
+      "title": "Suprimido"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "concordancia_decisao",
+     "kappa_decisao",
+     "concordancia_motivo",
+     "kappa_motivo",
+     "suprimido"
+    ],
+    "title": "TotalConcordanciaOut",
+    "description": "`suprimido`: menos de `min_pares` pares; o supervisor nao ve a medida."
    },
    "TrocarSenhaIn": {
     "properties": {
@@ -2243,6 +4863,89 @@
      "type"
     ],
     "title": "ValidationError"
+   },
+   "ValoresBaselineOut": {
+    "properties": {
+     "classes": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "object",
+      "title": "Classes"
+     },
+     "taxa_auto_rejeicao": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Taxa Auto Rejeicao"
+     },
+     "zona_cinzenta": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Zona Cinzenta"
+     },
+     "p_ruim_medio": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P Ruim Medio"
+     },
+     "confianca_media": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Confianca Media"
+     },
+     "discordancia": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Discordancia"
+     }
+    },
+    "type": "object",
+    "required": [
+     "classes",
+     "taxa_auto_rejeicao",
+     "zona_cinzenta",
+     "p_ruim_medio",
+     "confianca_media",
+     "discordancia"
+    ],
+    "title": "ValoresBaselineOut"
    }
   },
   "securitySchemes": {

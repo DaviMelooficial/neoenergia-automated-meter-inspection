@@ -61,7 +61,10 @@ def test_reserva_expirada_libera_o_item_para_outro_auditor(
     )
 
     # Reserva vence: volta para a fila de todos e o outro auditor consegue decidir.
-    leitura.reservado_ate = datetime.now(UTC) - timedelta(seconds=1)
+    # Uma hora atras, nao um segundo: a fila compara com now() do banco, que dentro da
+    # transacao do teste e o instante em que ela abriu. Com a maquina carregada o teste
+    # passava de 1 s ate aqui e a reserva "vencida" ainda parecia valer.
+    leitura.reservado_ate = datetime.now(UTC) - timedelta(hours=1)
     db_session.flush()
     assert item["id"] in {i["id"] for i in client.get("/fila-humana", headers=a2).json()["itens"]}
     assert (
@@ -354,4 +357,9 @@ def test_ambiente_producao_recusa_placeholders():
         Settings(ambiente="producao", jwt_secret="trocar_em_producao", admin_senha_inicial="x" * 20)
     with pytest.raises(ValueError, match="JWT_ALG"):
         Settings(jwt_alg="none")
-    Settings(ambiente="producao", jwt_secret="s" * 40, admin_senha_inicial="p" * 20)  # ok
+    Settings(
+        ambiente="producao",
+        jwt_secret="s" * 40,
+        admin_senha_inicial="p" * 20,
+        rotulagem_salt="r" * 32,
+    )  # ok

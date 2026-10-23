@@ -17,6 +17,14 @@ export type MotivoReprovacao = S["MotivoReprovacao"];
 export type Papel = S["Papel"];
 export type UsuarioIn = S["UsuarioIn"];
 export type UsuarioPatch = S["UsuarioPatch"];
+export type FotoRotulagemOut = S["FotoRotulagemOut"];
+export type RotuloIn = S["RotuloIn"];
+export type RotuloOut = S["RotuloOut"];
+export type ConsolidacaoOut = S["ConsolidacaoOut"];
+export type Cena = S["Cena"];
+export type Defeito = S["Defeito"];
+export type RodadaTela = RotuloIn["rodada"];
+export type RodadaRotulagem = S["RodadaRotulagem"];
 
 export const ORDEM_PAPEL: Record<Papel, number> = { auditor: 1, supervisor: 2, admin: 3 };
 
@@ -84,36 +92,45 @@ export const quarentena = {
 };
 
 // ------------------------------------------------------------------ metricas
-export interface MetricasQualidade {
-  periodo: { de: string | null; ate: string | null };
-  total_leituras: number;
-  com_foto: number;
-  sem_foto: number;
-  auto_decididas: { quantidade: number; percentual: number };
-  fila_humana: { pendentes: number; decididas: number };
-  por_status: Record<string, number>;
-  quarentena_por_tipo: Record<string, number>;
-  defeitos_qualidade: Record<string, number>;
-  revisoes_por_decisao: Record<string, number>;
-  produtividade_por_auditor: { usuario_id: number; decisoes: number }[];
-  tempo_medio_decisao_segundos: number | null;
-  jobs: Record<string, Record<string, number>>;
-}
-export interface LoteDrift {
-  lote: string;
-  data_extracao: string | null;
-  total: number;
-  com_foto: number;
-  por_status: Record<string, number>;
-  quarentena_por_tipo: Record<string, number>;
-  taxa_auto_rejeicao: number | null;
-  confianca_media: number | null;
-  taxa_reprovacao_humana: number | null;
-  modelos: string[];
-}
+export type MetricasQualidade = S["QualidadeOut"];
+export type MetricasDrift = S["DriftOut"];
+export type LoteDrift = S["LoteDriftOut"];
+export type SinalDrift = S["SinalOut"];
+export type AutoAprovacao = S["AutoAprovacaoOut"];
+export type ConcordanciaAuditoria = S["ConcordanciaAuditoriaOut"];
+export type ItemAuditoria = S["ItemAuditoriaOut"];
+export type AuditoriaDecisao = S["AuditoriaDecisaoOut"];
+
 export const metricas = {
   qualidade: () => api.get<MetricasQualidade>("/metricas/qualidade").then((r) => r.data),
-  drift: () => api.get<{ lotes: LoteDrift[] }>("/metricas/drift").then((r) => r.data.lotes),
+  drift: () => api.get<MetricasDrift>("/metricas/drift").then((r) => r.data),
+  autoAprovacao: () => api.get<AutoAprovacao>("/metricas/auto-aprovacao").then((r) => r.data),
+  auditoria: () => api.get<ConcordanciaAuditoria>("/metricas/auditoria").then((r) => r.data),
+};
+
+// ------------------------------------------------------------------ auditoria amostral
+export const auditoria = {
+  proxima: () => api.post<ItemAuditoria>("/auditoria/proxima").then((r) => r.data),
+  liberar: (codigo: string) => api.post(`/auditoria/${codigo}/liberar`),
+  decidir: (codigo: string, dados: DecisaoIn) =>
+    api.post<AuditoriaDecisao>(`/auditoria/${codigo}/decisao`, dados).then((r) => r.data),
+};
+
+// ------------------------------------------------------------------ rotulagem
+export const rotulagem = {
+  proxima: (rodada: RodadaTela) =>
+    api
+      .post<FotoRotulagemOut>("/rotulagem/proxima", null, { params: { rodada } })
+      .then((r) => r.data),
+  gravar: (fotoId: number, dados: RotuloIn) =>
+    api.post<RotuloOut>(`/rotulagem/${fotoId}`, dados).then((r) => r.data),
+  consolidacao: (rodadas: RodadaRotulagem[]) =>
+    api
+      .get<ConsolidacaoOut>("/rotulagem/consolidacao", {
+        params: { rodada: rodadas },
+        paramsSerializer: { indexes: null }, // rodada=a&rodada=b
+      })
+      .then((r) => r.data),
 };
 
 // ------------------------------------------------------------------ usuarios

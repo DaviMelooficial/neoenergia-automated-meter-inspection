@@ -1,0 +1,47 @@
+{
+ "rodada": "20261016-213656",
+ "semente_escolhida": 0,
+ "criterio_escolha": "maior macro-F1 de legivel na validacao",
+ "limiar_aprova": null,
+ "por_semente": {
+  "0": {
+   "val_macro_f1": 0.8291666666666666,
+   "temperatura_legivel": 1.0226845378116836,
+   "temperatura_cena": 1.091070053874651,
+   "temperatura_no_limite": false,
+   "ece_legivel_antes": 0.03596896005839841,
+   "ece_legivel_depois": 0.03547311483359914,
+   "limiar": 0.976,
+   "rejeitadas_val": 3,
+   "cobertura_val": 0.036585365853658534,
+   "maior_p_de_lida": 0.9612690210342407
+  },
+  "1": {
+   "val_macro_f1": 0.8044126416219439,
+   "temperatura_legivel": 1.2257010579625924,
+   "temperatura_cena": 1.0987910861038253,
+   "temperatura_no_limite": false,
+   "ece_legivel_antes": 0.0795712616385483,
+   "ece_legivel_depois": 0.07276287384149506,
+   "limiar": null,
+   "rejeitadas_val": 0,
+   "cobertura_val": 0.0,
+   "maior_p_de_lida": 0.9874141812324524
+  },
+  "2": {
+   "val_macro_f1": 0.8006079027355624,
+   "temperatura_legivel": 1.3298969915084875,
+   "temperatura_cena": 1.50838798811675,
+   "temperatura_no_limite": false,
+   "ece_legivel_antes": 0.10955254842595359,
+   "ece_legivel_depois": 0.1454735732660061,
+   "limiar": 0.889,
+   "rejeitadas_val": 8,
+   "cobertura_val": 0.0975609756097561,
+   "maior_p_de_lida": 0.8666276335716248
+  }
+ },
+ "temperatura_legivel": 1.0226845378116836,
+ "temperatura_cena": 1.091070053874651,
+ "limiar": 0.976
+}

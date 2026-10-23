@@ -18,5 +18,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/setupTests.ts"],
+    // O teste das 20 decisoes da fila leva ~0,5 s sozinho e passava dos 5 s padrao sob
+    // carga; com os findBy a 15 s (setupTests), o teto por teste precisa ser maior.
+    testTimeout: 30000,
   },
 });

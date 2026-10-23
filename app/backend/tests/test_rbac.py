@@ -20,6 +20,25 @@ ROTAS = [
     ("POST", "/quarentena/1/resolver", Papel.SUPERVISOR, {}),
     ("GET", "/metricas/qualidade", Papel.SUPERVISOR, None),
     ("GET", "/metricas/drift", Papel.SUPERVISOR, None),
+    ("GET", "/metricas/auto-aprovacao", Papel.SUPERVISOR, None),
+    ("GET", "/metricas/auditoria", Papel.SUPERVISOR, None),
+    ("POST", "/auditoria/proxima", Papel.AUDITOR, None),
+    (
+        "POST",
+        "/auditoria/00000000-0000-4000-8000-000000000000/decisao",
+        Papel.AUDITOR,
+        {"decisao": "aprovada"},
+    ),
+    ("POST", "/auditoria/00000000-0000-4000-8000-000000000000/liberar", Papel.AUDITOR, None),
+    ("POST", "/rotulagem/proxima", Papel.SUPERVISOR, None),
+    (
+        "POST",
+        "/rotulagem/1",
+        Papel.SUPERVISOR,
+        {"rodada": "a", "cena": "digital", "legivel": True, "defeitos": []},
+    ),
+    ("GET", "/rotulagem/consolidacao", Papel.SUPERVISOR, None),
+    ("GET", "/rotulagem/export", Papel.ADMIN, None),
     ("GET", "/usuarios", Papel.ADMIN, None),
     (
         "POST",
@@ -32,6 +51,14 @@ ROTAS = [
     ("POST", "/ingest/webhook", Papel.ADMIN, None),
 ]
 ORDEM = {Papel.AUDITOR: 1, Papel.SUPERVISOR: 2, Papel.ADMIN: 3}
+# Excecao a hierarquia: admin ve o kappa das rodadas cegas, entao nao rotula nelas.
+ADMIN_BARRADO = {("POST", "/rotulagem/proxima"), ("POST", "/rotulagem/1")}
+# Auditoria amostral (M8): so o papel auditor audita; supervisor e admin leem as metricas.
+SO_AUDITOR = {
+    ("POST", "/auditoria/proxima"),
+    ("POST", "/auditoria/00000000-0000-4000-8000-000000000000/decisao"),
+    ("POST", "/auditoria/00000000-0000-4000-8000-000000000000/liberar"),
+}
 
 
 def chamar(client, metodo, rota, corpo, headers):
@@ -48,7 +75,10 @@ def test_sem_token_da_401(client, contas, metodo, rota, minimo, corpo):
 def test_papel_contra_rota(client, contas, papel, metodo, rota, minimo, corpo):
     cab = login(client, contas[papel.value])
     status = chamar(client, metodo, rota, corpo, cab).status_code
-    if ORDEM[papel] < ORDEM[minimo]:
+    barrado = (papel is Papel.ADMIN and (metodo, rota) in ADMIN_BARRADO) or (
+        papel is not Papel.AUDITOR and (metodo, rota) in SO_AUDITOR
+    )
+    if ORDEM[papel] < ORDEM[minimo] or barrado:
         assert status == 403, (papel, metodo, rota, status)
     else:
         # Autorizado: a rota pode devolver 404/409/422/501 pelo estado vazio do banco,

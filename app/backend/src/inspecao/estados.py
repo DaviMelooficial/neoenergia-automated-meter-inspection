@@ -8,11 +8,11 @@ ou `transicionar_em_lote`; nenhum deles toca a coluna diretamente. Um teste
 
 from collections.abc import Iterable, Sequence
 
-from sqlalchemy import update
+from sqlalchemy import func, or_, update
 from sqlalchemy.orm import Session
 
 from inspecao.enums import StatusLeitura
-from inspecao.models import HistoricoStatus, Leitura
+from inspecao.models import AuditoriaAmostral, HistoricoStatus, Leitura
 
 ESTADO_INICIAL = StatusLeitura.RECEBIDA
 
@@ -32,11 +32,17 @@ TRANSICOES: dict[StatusLeitura, frozenset[StatusLeitura]] = {
             StatusLeitura.FILA_HUMANA,
         }
     ),
+    # -> TRIAGEM_QUALIDADE: re-decisao automatica (recalcular_decisao, troca de
+    # detector). So a partir dos estados em ESTADOS_REDECIDIVEIS.
     StatusLeitura.FILA_HUMANA: frozenset(
-        {StatusLeitura.APROVADA_HUMANO, StatusLeitura.REPROVADA_HUMANO}
+        {
+            StatusLeitura.APROVADA_HUMANO,
+            StatusLeitura.REPROVADA_HUMANO,
+            StatusLeitura.TRIAGEM_QUALIDADE,
+        }
     ),
+    StatusLeitura.REJEITADA_QUALIDADE: frozenset({StatusLeitura.TRIAGEM_QUALIDADE}),
     # Estados finais: nenhuma saida.
-    StatusLeitura.REJEITADA_QUALIDADE: frozenset(),
     StatusLeitura.AUTO_APROVADA: frozenset(),
     StatusLeitura.AUTO_REJEITADA: frozenset(),
     StatusLeitura.APROVADA_HUMANO: frozenset(),
@@ -46,6 +52,25 @@ TRANSICOES: dict[StatusLeitura, frozenset[StatusLeitura]] = {
 
 ESTADOS_FINAIS: frozenset[StatusLeitura] = frozenset(
     estado for estado, saidas in TRANSICOES.items() if not saidas
+)
+
+# Estados em que a ultima palavra foi da maquina e nenhum humano decidiu ainda:
+# mudar a politica ou o detector pode reabrir a leitura (volta para triagem e
+# sai de novo pela politica). Decisao humana nunca e reaberta.
+ESTADOS_REDECIDIVEIS: frozenset[StatusLeitura] = frozenset(
+    {StatusLeitura.FILA_HUMANA, StatusLeitura.REJEITADA_QUALIDADE}
+)
+
+
+# Decisoes da maquina que a auditoria amostral confere (M8): `transicionar` sorteia a
+# auditoria delas na mesma transacao. `transicionar_em_lote` (ingestao) recusa esses
+# destinos, para nenhuma decisao automatica escapar do sorteio.
+DECISOES_AUTOMATICAS_AUDITADAS: frozenset[str] = frozenset(
+    {
+        StatusLeitura.REJEITADA_QUALIDADE.value,
+        StatusLeitura.AUTO_REJEITADA.value,
+        StatusLeitura.AUTO_APROVADA.value,
+    }
 )
 
 
@@ -78,6 +103,25 @@ def transicionar(
     sessao.refresh(leitura, with_for_update=True)
     validar_transicao(leitura.status_atual, destino)
 
+    if destino is StatusLeitura.TRIAGEM_QUALIDADE and leitura.status_atual != ESTADO_INICIAL:
+        # Reabertura pela maquina: a decisao automatica conferida deixa de existir, e a
+        # auditoria PENDENTE dela deixa de valer (M8). A decidida fica como medida. Quem
+        # reabre ja travou essas auditorias (`handlers._travar_auditorias_pendentes`);
+        # o predicado da reserva se repete aqui para nunca apagar uma reserva ativa.
+        sessao.execute(
+            update(AuditoriaAmostral)
+            .where(
+                AuditoriaAmostral.leitura_id == leitura.id,
+                AuditoriaAmostral.origem != "fila",
+                AuditoriaAmostral.decisao.is_(None),
+                AuditoriaAmostral.invalidada_em.is_(None),
+                or_(
+                    AuditoriaAmostral.reservado_ate.is_(None),
+                    AuditoriaAmostral.reservado_ate < func.now(),
+                ),
+            )
+            .values(invalidada_em=func.now(), reservado_por=None, reservado_ate=None)
+        )
     leitura.status_atual = destino.value
     registro = HistoricoStatus(
         leitura_id=leitura.id,
@@ -88,6 +132,15 @@ def transicionar(
     )
     sessao.add(registro)
     sessao.flush()
+    if destino.value in DECISOES_AUTOMATICAS_AUDITADAS:
+        # Auditoria amostral (M8): toda decisao automatica que pode ser conferida passa pelo
+        # sorteio aqui, onde ela e gravada, venha da triagem, do recalculo ou da validacao.
+        # A primeira decisao automatica de cada politica grava a ativacao dela: o falso
+        # positivo da politica so mede lotes ingeridos depois disso.
+        from inspecao import auditoria
+
+        auditoria.registrar_ativacao(sessao, registro)
+        auditoria.sortear_decisao_automatica(sessao, leitura.id, registro)
     return registro
 
 
@@ -111,6 +164,10 @@ def transicionar_em_lote(
     origem = StatusLeitura(de)
     destino = StatusLeitura(para)
     validar_transicao(origem, destino)
+    if destino.value in DECISOES_AUTOMATICAS_AUDITADAS:
+        raise TransicaoInvalida(
+            f"{destino.value} e decisao automatica auditada: use transicionar, que sorteia"
+        )
     if not leitura_ids:
         return 0
 

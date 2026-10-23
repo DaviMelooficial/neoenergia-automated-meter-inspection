@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from inspecao.auth.deps import Admin, Auditor
 from inspecao.db import get_db
-from inspecao.enums import TipoJob
+from inspecao.enums import StatusLeitura, TipoJob
 from inspecao.jobs import fila
-from inspecao.models import Foto, Leitura, Lote, NotaOcorrencia, Quarentena
+from inspecao.models import Foto, Leitura, Lote, NotaOcorrencia, Quarentena, Usuario
+from inspecao.rotulagem.servico import eh_admin
 from inspecao.schemas import (
     FotoOut,
     IngestBatchIn,
@@ -91,7 +92,7 @@ def leitura_completa(db: Session, leitura: Leitura) -> LeituraOut:
 
 
 @router.get("/lotes", response_model=list[LoteOut])
-def listar_lotes(db: DB, _: Auditor) -> list[LoteOut]:
+def listar_lotes(db: DB, usuario: Auditor) -> list[LoteOut]:
     lotes = db.scalars(select(Lote).order_by(Lote.data_extracao, Lote.nome)).all()
     contagens = db.execute(
         select(Leitura.lote_id, Leitura.status_atual, func.count()).group_by(
@@ -105,13 +106,57 @@ def listar_lotes(db: DB, _: Auditor) -> list[LoteOut]:
     for lote in lotes:
         item = LoteOut.model_validate(lote)
         item.por_status = por_lote.get(lote.id, {})
+        if not eh_admin(usuario):
+            item.por_status = juntar_decididas(item.por_status)
         saida.append(item)
     return saida
 
 
+def juntar_decididas(por_status: dict[str, int]) -> dict[str, int]:
+    """Para quem nao e admin, os status finais conferiveis viram uma chave `decidida`: a
+    contagem por lote, junto com o lote do item de auditoria, entregaria a decisao
+    anterior (lote de uma leitura so, ou diferenca antes e depois de liberar)."""
+    saida: dict[str, int] = {}
+    for status_, n in por_status.items():
+        chave = STATUS_OCULTO if status_ in DECISOES_OCULTAS else status_
+        saida[chave] = saida.get(chave, 0) + n
+    return saida
+
+
+# Decisoes que um segundo revisor pode conferir (auditoria amostral, M8): as humanas e as
+# da maquina (auto-aprovada, auto-rejeitada / rejeitada na qualidade).
+DECISOES_OCULTAS = {
+    StatusLeitura.APROVADA_HUMANO.value,
+    StatusLeitura.REPROVADA_HUMANO.value,
+    StatusLeitura.AUTO_APROVADA.value,
+    StatusLeitura.AUTO_REJEITADA.value,
+    StatusLeitura.REJEITADA_QUALIDADE.value,
+}
+STATUS_OCULTO = "decidida"
+
+
+def ocultar_decisao(saida: LeituraOut, leitura: Leitura, usuario: Usuario) -> LeituraOut:
+    """Leitura decidida vista por quem nao a decidiu nem e admin: status vira `decidida`,
+    e saem revisoes, historico e inferencias (os scores entregariam a decisao e a origem
+    da maquina).
+
+    Vale para TODA leitura decidida, em auditoria ou nao: bloquear so as que estao em
+    auditoria faria do proprio bloqueio um oraculo de "esta leitura foi sorteada". O custo
+    e pequeno: quem nao decidiu nao precisa da decisao para trabalhar; admin ve tudo e por
+    isso nao audita.
+    """
+    autores = {r.usuario_id for r in leitura.revisoes}
+    if leitura.status_atual not in DECISOES_OCULTAS or usuario.id in autores or eh_admin(usuario):
+        return saida
+    oculto = {"status_atual": STATUS_OCULTO}
+    return saida.model_copy(update=oculto | {"revisoes": [], "historico": [], "inferencias": []})
+
+
 @router.get("/leituras/{leitura_id}", response_model=LeituraOut)
-def obter_leitura(leitura_id: int, db: DB, _: Auditor) -> LeituraOut:
-    return leitura_completa(db, carregar_leitura(db, leitura_id))
+def obter_leitura(leitura_id: int, db: DB, usuario: Auditor) -> LeituraOut:
+    """Leitura completa; decisao final alheia oculta (ver `ocultar_decisao`)."""
+    leitura = carregar_leitura(db, leitura_id)
+    return ocultar_decisao(leitura_completa(db, leitura), leitura, usuario)
 
 
 @router.get("/fotos/{foto_id}/arquivo")

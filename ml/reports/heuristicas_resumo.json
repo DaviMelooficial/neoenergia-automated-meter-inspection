@@ -1,0 +1,327 @@
+{
+ "fotos_base": 12340,
+ "paridade_backend_mlinsp": {
+  "fotos": 11419,
+  "fotos_sem_sinais": 0,
+  "max_dif_abs": 0.0,
+  "max_dif_rel": 0.0,
+  "fotos_com_diferenca": 0,
+  "identicas": true
+ },
+ "leituras_com_heuristica": 11419,
+ "limiar_rejeita": 0.85,
+ "auto_rejeitadas": 87,
+ "cobertura": 0.0076,
+ "por_lote": {
+  "PSP_EXTRATLEITIMPL_030726_0121": {
+   "leituras": 2795,
+   "auto_rejeitadas": 21
+  },
+  "PSP_EXTRATLEITIMPL_200526_0352": {
+   "leituras": 2922,
+   "auto_rejeitadas": 12
+  },
+  "PSP_EXTRATLEITIMPL_210526_0335": {
+   "leituras": 2881,
+   "auto_rejeitadas": 22
+  },
+  "PSP_EXTRATLEITIMPL_220526_0408": {
+   "leituras": 2821,
+   "auto_rejeitadas": 32
+  }
+ },
+ "evidencia": {
+  "fotos": 328,
+  "por_fonte": {
+   "rotulo_lab02": 328
+  },
+  "legiveis": 188,
+  "auto_rejeitadas_com_evidencia": 3,
+  "falsos_positivos": 0,
+  "maior_p_ruim_de_legivel": 0.5515285272984057,
+  "legiveis_mais_altas": [
+   {
+    "arquivo": "PSP_EXTRATLEITIMPL_220526_0408_20000000015002969289_000.jpg",
+    "p_ruim": 0.5515,
+    "classe": "fora_de_foco",
+    "fonte": "rotulo_lab02"
+   },
+   {
+    "arquivo": "PSP_EXTRATLEITIMPL_200526_0352_20000000019202963911_000.jpg",
+    "p_ruim": 0.5422,
+    "classe": "fora_de_foco",
+    "fonte": "rotulo_lab02"
+   },
+   {
+    "arquivo": "PSP_EXTRATLEITIMPL_200526_0352_20000000019852987016_000.jpg",
+    "p_ruim": 0.5047,
+    "classe": "fora_de_foco",
+    "fonte": "rotulo_lab02"
+   },
+   {
+    "arquivo": "PSP_EXTRATLEITIMPL_200526_0352_20000000009252979031_000.jpg",
+    "p_ruim": 0.4467,
+    "classe": "fora_de_foco",
+    "fonte": "rotulo_lab02"
+   },
+   {
+    "arquivo": "PSP_EXTRATLEITIMPL_210526_0335_20000000008302977533_000.jpg",
+    "p_ruim": 0.4264,
+    "classe": "fora_de_foco",
+    "fonte": "rotulo_lab02"
+   }
+  ]
+ },
+ "scores_quantis": {
+  "fora_de_foco": {
+   "p50": 0.0053,
+   "p90": 0.3517,
+   "p95": 0.4805,
+   "p99": 0.7873,
+   "p99.9": 1.0
+  },
+  "glare": {
+   "p50": 0.0,
+   "p90": 0.0149,
+   "p95": 0.0307,
+   "p99": 0.0827,
+   "p99.9": 0.2292
+  },
+  "tampa_suja": {
+   "p50": 0.0,
+   "p90": 0.2398,
+   "p95": 0.3589,
+   "p99": 0.6594,
+   "p99.9": 1.0
+  },
+  "enquadramento_incorreto": {
+   "p50": 0.0,
+   "p90": 0.3517,
+   "p95": 0.4805,
+   "p99": 0.7873,
+   "p99.9": 1.0
+  },
+  "display_apagado": {
+   "p50": 0.0,
+   "p90": 0.0,
+   "p95": 0.0,
+   "p99": 0.5385,
+   "p99.9": 1.0
+  },
+  "p_ruim": {
+   "p50": 0.0053,
+   "p90": 0.3517,
+   "p95": 0.4805,
+   "p99": 0.7873,
+   "p99.9": 1.0
+  }
+ },
+ "sinais_quantis": {
+  "lap_var": {
+   "p0.1": 0.0,
+   "p1": 4.2208,
+   "p5": 11.6761,
+   "p50": 282.7002,
+   "p95": 2424.7136,
+   "p99": 5768.6477
+  },
+  "tenengrad": {
+   "p0.1": 0.0,
+   "p1": 124.5326,
+   "p5": 475.8757,
+   "p50": 3668.1294,
+   "p95": 12856.3752,
+   "p99": 22353.4416
+  },
+  "frac_estourados": {
+   "p0.1": 0.0,
+   "p1": 0.0,
+   "p5": 0.0,
+   "p50": 0.0017,
+   "p95": 0.0356,
+   "p99": 0.0868
+  },
+  "frac_escuros": {
+   "p0.1": 0.0,
+   "p1": 0.0,
+   "p5": 0.0,
+   "p50": 0.0442,
+   "p95": 0.364,
+   "p99": 0.8885
+  },
+  "contraste": {
+   "p0.1": 0.0,
+   "p1": 13.8223,
+   "p5": 27.1878,
+   "p50": 53.2612,
+   "p95": 73.2668,
+   "p99": 81.3903
+  },
+  "bordas_centro": {
+   "p0.1": 0.0,
+   "p1": 0.0,
+   "p5": 0.0,
+   "p50": 0.0567,
+   "p95": 0.1608,
+   "p99": 0.2199
+  }
+ },
+ "latencia_ms": {
+  "media": 3.62,
+  "p50": 4.0,
+  "p95": 5.0
+ },
+ "tabela_limiar": [
+  {
+   "limiar": 0.5,
+   "auto_rejeitadas": 516,
+   "cobertura": 0.0452,
+   "com_evidencia": 16,
+   "falsos_positivos": 3
+  },
+  {
+   "limiar": 0.525,
+   "auto_rejeitadas": 444,
+   "cobertura": 0.0389,
+   "com_evidencia": 14,
+   "falsos_positivos": 2
+  },
+  {
+   "limiar": 0.55,
+   "auto_rejeitadas": 381,
+   "cobertura": 0.0334,
+   "com_evidencia": 13,
+   "falsos_positivos": 1
+  },
+  {
+   "limiar": 0.575,
+   "auto_rejeitadas": 319,
+   "cobertura": 0.0279,
+   "com_evidencia": 10,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.6,
+   "auto_rejeitadas": 284,
+   "cobertura": 0.0249,
+   "com_evidencia": 10,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.625,
+   "auto_rejeitadas": 251,
+   "cobertura": 0.022,
+   "com_evidencia": 8,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.65,
+   "auto_rejeitadas": 220,
+   "cobertura": 0.0193,
+   "com_evidencia": 6,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.675,
+   "auto_rejeitadas": 193,
+   "cobertura": 0.0169,
+   "com_evidencia": 5,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.7,
+   "auto_rejeitadas": 172,
+   "cobertura": 0.0151,
+   "com_evidencia": 5,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.725,
+   "auto_rejeitadas": 155,
+   "cobertura": 0.0136,
+   "com_evidencia": 5,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.75,
+   "auto_rejeitadas": 139,
+   "cobertura": 0.0122,
+   "com_evidencia": 5,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.775,
+   "auto_rejeitadas": 120,
+   "cobertura": 0.0105,
+   "com_evidencia": 4,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.8,
+   "auto_rejeitadas": 107,
+   "cobertura": 0.0094,
+   "com_evidencia": 3,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.825,
+   "auto_rejeitadas": 96,
+   "cobertura": 0.0084,
+   "com_evidencia": 3,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.85,
+   "auto_rejeitadas": 87,
+   "cobertura": 0.0076,
+   "com_evidencia": 3,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.875,
+   "auto_rejeitadas": 84,
+   "cobertura": 0.0074,
+   "com_evidencia": 3,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.9,
+   "auto_rejeitadas": 74,
+   "cobertura": 0.0065,
+   "com_evidencia": 2,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.925,
+   "auto_rejeitadas": 68,
+   "cobertura": 0.006,
+   "com_evidencia": 2,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.95,
+   "auto_rejeitadas": 62,
+   "cobertura": 0.0054,
+   "com_evidencia": 2,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 0.975,
+   "auto_rejeitadas": 56,
+   "cobertura": 0.0049,
+   "com_evidencia": 1,
+   "falsos_positivos": 0
+  },
+  {
+   "limiar": 1.0,
+   "auto_rejeitadas": 55,
+   "cobertura": 0.0048,
+   "com_evidencia": 1,
+   "falsos_positivos": 0
+  }
+ ],
+ "amostra": {
+  "pior": 100,
+  "limitrofe": 100
+ }
+}

@@ -1,4 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
+
+// findBy/waitFor esperam ate 15 s (padrao 1 s): sob carga (suite do backend em paralelo,
+// gate rodando junto) o primeiro render das telas de Fila e Auditoria passava de 5 s e
+// falhava sem defeito real. O teto por teste (vite.config, testTimeout) e 30 s.
+configure({ asyncUtilTimeout: 15000 });
 
 // jsdom nao implementa matchMedia, e o MantineProvider depende dele para
 // resolver o esquema de cores. Sem este mock, todo teste que renderiza a

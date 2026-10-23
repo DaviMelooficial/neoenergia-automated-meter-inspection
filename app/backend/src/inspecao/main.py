@@ -13,7 +13,17 @@ from sqlalchemy import text
 from inspecao.auth.service import garantir_admin
 from inspecao.config import get_settings
 from inspecao.db import SessionLocal, engine
-from inspecao.routers import auth, fila_humana, metricas, operacao, quarentena, usuarios
+from inspecao.inference.detector import DetectorMalConfigurado
+from inspecao.routers import (
+    auditoria,
+    auth,
+    fila_humana,
+    metricas,
+    operacao,
+    quarentena,
+    rotulagem,
+    usuarios,
+)
 from inspecao.storage.local import LocalFileStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -42,6 +52,13 @@ app = FastAPI(
     root_path="/api",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(DetectorMalConfigurado)
+async def detector_mal_configurado(_: Request, erro: DetectorMalConfigurado) -> JSONResponse:
+    # Metricas e auditoria dependem da politica do detector configurado: sem ela, o servico
+    # esta indisponivel (o worker tambem nao sobe), e o motivo vai no detail.
+    return JSONResponse(status_code=503, content={"detail": str(erro)})
 
 
 @app.middleware("http")
@@ -120,5 +137,14 @@ def health() -> dict:
     }
 
 
-for roteador in (auth, operacao, fila_humana, quarentena, metricas, usuarios):
+for roteador in (
+    auth,
+    operacao,
+    fila_humana,
+    auditoria,
+    quarentena,
+    metricas,
+    rotulagem,
+    usuarios,
+):
     app.include_router(roteador.router)

@@ -5,13 +5,16 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from inspecao import auditoria
 from inspecao.auth.deps import Auditor
 from inspecao.db import get_db
 from inspecao.enums import DecisaoHumana, StatusLeitura
 from inspecao.estados import transicionar
 from inspecao.models import Leitura, Lote, RevisaoHumana
+from inspecao.rotulagem import producao
 from inspecao.routers.operacao import carregar_leitura, leitura_completa, leitura_resumo
 from inspecao.schemas import DecisaoIn, LeituraOut, LeituraResumoOut, Pagina, RevisaoOut
 
@@ -19,6 +22,7 @@ router = APIRouter(prefix="/fila-humana", tags=["fila-humana"])
 DB = Annotated[Session, Depends(get_db)]
 
 RESERVA = timedelta(minutes=10)
+ITEM_INDISPONIVEL = "item indisponivel para decisao"
 
 
 def _agora() -> datetime:
@@ -156,18 +160,15 @@ def decidir(leitura_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Revi
     leitura = db.scalar(select(Leitura).where(Leitura.id == leitura_id).with_for_update())
     if leitura is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "leitura nao encontrada")
-    if leitura.status_atual != StatusLeitura.FILA_HUMANA:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"leitura nao esta na fila humana (status {leitura.status_atual})",
-        )
     reservada_por_outro = (
         leitura.reservado_por not in (None, usuario.id)
         and leitura.reservado_ate is not None
         and leitura.reservado_ate > _agora()
     )
-    if reservada_por_outro:
-        raise HTTPException(status.HTTP_409_CONFLICT, "item reservado por outro auditor")
+    if leitura.status_atual != StatusLeitura.FILA_HUMANA or reservada_por_outro:
+        # Texto constante para "ja decidida", "reabriu na maquina" e "reservada por
+        # outro": ecoar o status entregaria a decisao a um segundo revisor (M8).
+        raise HTTPException(status.HTTP_409_CONFLICT, ITEM_INDISPONIVEL)
 
     revisao = RevisaoHumana(
         leitura_id=leitura.id,
@@ -192,6 +193,16 @@ def decidir(leitura_id: int, dados: DecisaoIn, db: DB, usuario: Auditor) -> Revi
     )
     leitura.reservado_por = None
     leitura.reservado_ate = None
-    db.commit()
+    # Active learning e auditoria amostral (M8), na transacao da decisao: se o rotulo
+    # de producao ou a auditoria nao entram, a decisao tambem nao.
+    try:
+        producao.registrar(
+            db, leitura.id, usuario.id, dados.decisao, dados.motivo, revisao_id=revisao.id
+        )
+        auditoria.sortear(db, revisao)
+        db.commit()
+    except IntegrityError as erro:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, ITEM_INDISPONIVEL) from erro
     db.refresh(revisao)
     return RevisaoOut.model_validate(revisao)

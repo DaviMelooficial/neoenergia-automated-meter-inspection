@@ -1,9 +1,11 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos fila-resumo tipos-front \
-        api-dev worker-dev front-dev test lint up down logs reset health lab02
+.PHONY: help setup env db-up db-down migrate revision seed-staging ingest ingest-todos triagem-todos recalcular-todos relatorio-heuristicas fila-resumo auditoria-sortear tipos-front \
+        rotulos-importar rotulos-importar-inspecao rotulos-importar-inspecao-m7 rotulos-kappa rotulos-exportar \
+        api-dev worker-dev front-dev test lint up down logs reset health lab02 \
+        m7-treinar m7-calibrar m7-avaliar m7-exportar m7-paridade m7-amostra-inspecao
 
 help:  ## lista os alvos disponiveis
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	 | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 # ---------------------------------------------------------------------------
@@ -66,11 +68,40 @@ api-dev:  ## sobe a api no host com reload
 worker-dev:  ## sobe o worker no host
 	cd app/backend && uv run python -m inspecao.jobs.worker
 
-triagem-todos:  ## enfileira a triagem de qualidade para todas as leituras em "recebida"
+triagem-todos:  ## enfileira triagem: "recebida" e as sem resultado do detector atual (volta a detector ja usado: recalcular-todos)
 	cd app/backend && uv run python -m inspecao.jobs.cli reprocessar --todos
+
+recalcular-todos:  ## reaplica a politica aos resultados gravados, sem reabrir imagem (POLITICA=; padrao: a politica do worker que pegar o job)
+	cd app/backend && uv run python -m inspecao.jobs.cli recalcular --todos $(if $(POLITICA),--politica $(POLITICA),)
+
+relatorio-heuristicas:  ## exporta os scores do banco e gera ml/reports/heuristicas_* (LIMIAR=limiar_rejeita da v1)
+	@test -n "$(LIMIAR)" || (echo 'uso: make relatorio-heuristicas LIMIAR=0.85'; exit 1)
+	@mkdir -p ml/artifacts
+	docker compose exec -T postgres psql -U $${POSTGRES_USER:-inspecao} -d $${POSTGRES_DB:-inspecao} \
+	  -v ON_ERROR_STOP=1 -q < ml/reports/heuristicas_exportacao.sql > ml/artifacts/heuristicas_exportacao.csv
+	cd ml && uv run python -m mlinsp.relatorio_heuristicas --exportacao artifacts/heuristicas_exportacao.csv \
+	  --base "../Base cliente" --limiar $(LIMIAR)
+
+rotulos-importar:  ## importa os 500 rotulos do Lab 2 na rodada lab02 (+ rotulador/controle.dat, fora do git); idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-lab02
+
+rotulos-importar-inspecao:  ## importa a inspecao das 200 fotos do M5 (rodada inspecao_m5, calibracao fora da medida); idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-inspecao-m5
+
+rotulos-importar-inspecao-m7:  ## importa a inspecao das 355 que so a politica@v2 rejeita (rodada inspecao_m7, calibracao); idempotente
+	cd app/backend && uv run python -m inspecao.rotulagem.cli importar-inspecao-m7
+
+rotulos-kappa:  ## kappa por classe e por par, grava ml/reports/kappa.md (RODADAS="a b"; padrao lab02)
+	cd app/backend && uv run python -m inspecao.rotulagem.cli kappa $(foreach r,$(RODADAS),--rodada $(r))
+
+rotulos-exportar:  ## grava ml/artifacts/rotulos.csv consolidado por maioria (RODADAS="..." opcional)
+	cd app/backend && uv run python -m inspecao.rotulagem.cli exportar $(foreach r,$(RODADAS),--rodada $(r))
 
 fila-resumo:  ## contagem de jobs por tipo e status
 	cd app/backend && uv run python -m inspecao.jobs.cli resumo
+
+auditoria-sortear:  ## sorteia para segundo revisor (5-10%) decisoes da fila sem sorteio, auto-aprovadas e auto-rejeitadas; idempotente
+	cd app/backend && uv run python -m inspecao.jobs.cli auditoria-sortear
 
 front-dev:  ## sobe o vite dev server
 	cd app/frontend && npm run dev
@@ -98,6 +129,40 @@ lint:  ## roda os linters
 
 lab02:  ## consolida os rotulos e executa lab-02/lab02.ipynb do zero (saidas no .ipynb)
 	bash lab-02/executar.sh
+
+# ---------------------------------------------------------------------------
+# M7 (modelo de qualidade). Exige ml/artifacts/heuristicas_exportacao.csv
+# (make relatorio-heuristicas). RODADA = pasta criada em ml/reports/ pelo m7-treinar.
+# ---------------------------------------------------------------------------
+
+M7_ENTRADAS = --base "../Base cliente" --exportacao artifacts/heuristicas_exportacao.csv
+
+m7-treinar:  ## treina o modelo de qualidade (2 estagios, 3 sementes + repeticao); cria a RODADA
+	cd ml && uv run python -m mlinsp.train_quality $(M7_ENTRADAS)
+
+m7-calibrar:  ## temperatura e limiar de rejeicao na validacao (uso: make m7-calibrar RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-calibrar RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.calibrate --rodada $(RODADA)
+
+m7-avaliar:  ## metricas no teste contra a heuristica e criterio de entrada (RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-avaliar RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.evaluate --rodada $(RODADA) $(M7_ENTRADAS)
+
+m7-exportar:  ## gera ml/artifacts/<versao>.onnx + .json com paridade < 1e-4 (RODADA=..., VERSAO=qualidade@v1)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-exportar RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.export_onnx --rodada $(RODADA) --base "../Base cliente" \
+	  $(if $(VERSAO),--versao $(VERSAO),)
+
+m7-paridade:  ## DetectorOnnx do backend contra o torch na base inteira, sem banco (RODADA=..., VERSAO=)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-paridade RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd app/backend && MODELO_QUALIDADE_PATH=./ml/artifacts/$(or $(VERSAO),qualidade@v1).onnx \
+	  uv run python -m inspecao.inference.paridade_onnx \
+	  --referencia ../../ml/artifacts/m7/$(RODADA)/p_ilegivel_base.csv \
+	  --base "../../Base cliente" --saida ../../ml/reports/$(RODADA)/paridade_backend.json
+
+m7-amostra-inspecao:  ## grava ml/reports/<RODADA>/inspecao_355.csv: fotos que so o modelo rejeita (RODADA=...)
+	@test -n "$(RODADA)" || (echo 'uso: make m7-amostra-inspecao RODADA=AAAAMMDD-HHMMSS'; exit 1)
+	cd ml && uv run python -m mlinsp.amostra_inspecao_m7 --rodada $(RODADA)
 
 # ---------------------------------------------------------------------------
 # Stack completa
